@@ -1,1 +1,8 @@
 /target
+
+# sutra — track config, ignore state
+.sutra/*/
+.sutra/acks/
+!.sutra/rules.toml
+!.sutra/aliases.toml
+!.sutra/owners.toml

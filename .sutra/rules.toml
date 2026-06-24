@@ -1,0 +1,224 @@
+# swisseph-rs architectural constraints
+# Seeded from PRD (yojana:swisseph-rs) — 2026-06-24
+
+# =============================================================================
+# Backend isolation — moshier, jpl, sweph_file are independent backends.
+# None may import from another. The calc dispatcher is the integration point.
+# =============================================================================
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "backend-isolation:moshier→jpl"
+from = "src/moshier/**"
+to = "src/jpl.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "backend-isolation:moshier→sweph"
+from = "src/moshier/**"
+to = "src/sweph_file.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "backend-isolation:jpl→moshier"
+from = "src/jpl.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "backend-isolation:jpl→sweph"
+from = "src/jpl.rs"
+to = "src/sweph_file.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "backend-isolation:sweph→moshier"
+from = "src/sweph_file.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "backend-isolation:sweph→jpl"
+from = "src/sweph_file.rs"
+to = "src/jpl.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+# =============================================================================
+# DEFERRED — uncomment when trigger condition is met
+# =============================================================================
+
+# TRIGGER: at first phase with real cross-module imports (Phase 1: date.rs)
+# [[constraint]]
+# kind = "no_cycles"
+# name = "no-module-cycles"
+# scope = "src/"
+# severity = "blocking"
+# provenance = "skill default"
+
+# TRIGGER: at Phase 5 (calc dispatcher exists) — app modules go through calc, not backends
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:houses→moshier"
+# from = "src/houses.rs"
+# to = "src/moshier/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:houses→jpl"
+# from = "src/houses.rs"
+# to = "src/jpl.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:houses→sweph"
+# from = "src/houses.rs"
+# to = "src/sweph_file.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:eclipse→moshier"
+# from = "src/eclipse.rs"
+# to = "src/moshier/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:eclipse→jpl"
+# from = "src/eclipse.rs"
+# to = "src/jpl.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:eclipse→sweph"
+# from = "src/eclipse.rs"
+# to = "src/sweph_file.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:phenomena→moshier"
+# from = "src/phenomena.rs"
+# to = "src/moshier/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:phenomena→jpl"
+# from = "src/phenomena.rs"
+# to = "src/jpl.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:phenomena→sweph"
+# from = "src/phenomena.rs"
+# to = "src/sweph_file.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:heliacal→moshier"
+# from = "src/heliacal.rs"
+# to = "src/moshier/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:heliacal→jpl"
+# from = "src/heliacal.rs"
+# to = "src/jpl.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:heliacal→sweph"
+# from = "src/heliacal.rs"
+# to = "src/sweph_file.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:stars→moshier"
+# from = "src/stars.rs"
+# to = "src/moshier/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:stars→jpl"
+# from = "src/stars.rs"
+# to = "src/jpl.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:stars→sweph"
+# from = "src/stars.rs"
+# to = "src/sweph_file.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:ayanamsa→moshier"
+# from = "src/ayanamsa.rs"
+# to = "src/moshier/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:ayanamsa→jpl"
+# from = "src/ayanamsa.rs"
+# to = "src/jpl.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:ayanamsa→sweph"
+# from = "src/ayanamsa.rs"
+# to = "src/sweph_file.rs"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# TRIGGER: at Phase 8+ (first application module implementation)
+# Application modules are independent of each other
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-modules-independent:houses↔eclipse"
+# from = "src/houses.rs"
+# to = "src/eclipse.rs"
+# severity = "blocking"
+# provenance = "skill default"
+
+# ... expand bidirectionally for all app module pairs at trigger time

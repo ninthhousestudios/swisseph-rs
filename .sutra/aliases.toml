@@ -1,0 +1,10 @@
+[component]
+moshier-backend = "src/moshier/"
+jpl-backend = "src/jpl.rs"
+sweph-file-reader = "src/sweph_file.rs"
+core-types = "src/types.rs"
+calc-flags = "src/flags.rs"
+ephemeris-context = "src/context.rs"
+calc-pipeline = "src/calc.rs"
+date-time = "src/date.rs"
+precession-nutation = "src/precession.rs"
