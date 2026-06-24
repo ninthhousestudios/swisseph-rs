@@ -11,7 +11,11 @@ $(GOLDEN_DIR)/date.json: golden_gen
 	mkdir -p $(GOLDEN_DIR)
 	./golden_gen date > $@
 
-generate: $(GOLDEN_DIR)/date.json
+$(GOLDEN_DIR)/math.json: golden_gen
+	mkdir -p $(GOLDEN_DIR)
+	./golden_gen math > $@
+
+generate: $(GOLDEN_DIR)/date.json $(GOLDEN_DIR)/math.json
 
 clean:
 	rm -f golden_gen
