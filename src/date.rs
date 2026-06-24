@@ -216,20 +216,20 @@ pub fn utc_to_jd(
     // Phase 5: Count accumulated leap seconds
     let ndat = pack_date(gy, gm, gd);
     let nleap = count_leap_seconds(ndat, leap_secs);
-    // Phase 6: Stale-table fallback
-    let d = dt.delta_t(JdUt1(tjd_ut1)) * 86400.0;
-    if d - nleap as f64 - 32.184 >= 1.0 {
-        let ut1 = JdUt1(tjd_ut1 + dhour / 24.0);
-        let tt = JdTt(ut1.0 + dt.delta_t(ut1));
-        return Ok(UtcToJd { tt, ut1 });
-    }
-    // Phase 7: Validate leap second 60 against table
+    // Phase 6: Validate leap second 60 against table
     if utc.second >= 60.0 && !leap_secs.contains(&ndat) {
         return Err(Error::InvalidLeapSecond {
             year: gy,
             month: gm,
             day: gd,
         });
+    }
+    // Phase 7: Stale-table fallback
+    let d = dt.delta_t(JdUt1(tjd_ut1)) * 86400.0;
+    if d - nleap as f64 - 32.184 >= 1.0 {
+        let ut1 = JdUt1(tjd_ut1 + dhour / 24.0);
+        let tt = JdTt(ut1.0 + dt.delta_t(ut1));
+        return Ok(UtcToJd { tt, ut1 });
     }
     // Phase 8: Compute TT and UT1
     let d = tjd_ut1 - J1972
@@ -551,6 +551,24 @@ mod tests {
     #[test]
     fn utc_to_jd_invalid_leap_second() {
         let dt = ConstDeltaT(69.184 / 86400.0);
+        let utc = UtcComponents {
+            year: 2020,
+            month: 6,
+            day: 30,
+            hour: 23,
+            minute: 59,
+            second: 60.0,
+        };
+        assert!(matches!(
+            utc_to_jd(&utc, CalendarType::Gregorian, &LEAP_SECONDS, &dt),
+            Err(Error::InvalidLeapSecond { .. })
+        ));
+    }
+
+    #[test]
+    fn utc_to_jd_invalid_leap_second_high_delta_t() {
+        // Regression: a large delta-T must not bypass leap-second validation
+        let dt = ConstDeltaT(75.184 / 86400.0);
         let utc = UtcComponents {
             year: 2020,
             month: 6,
