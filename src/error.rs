@@ -15,6 +15,8 @@ pub enum Error {
     FileNotFound(PathBuf),
     FileFormat(String),
     CircumpolarBody,
+    InvalidTime { hour: i32, minute: i32, second: f64 },
+    InvalidLeapSecond { year: i32, month: i32, day: i32 },
     CError(String),
 }
 
@@ -37,6 +39,16 @@ impl fmt::Display for Error {
             Self::FileNotFound(path) => write!(f, "file not found: {}", path.display()),
             Self::FileFormat(msg) => write!(f, "file format error: {msg}"),
             Self::CircumpolarBody => write!(f, "body is circumpolar (no rise/set)"),
+            Self::InvalidTime {
+                hour,
+                minute,
+                second,
+            } => {
+                write!(f, "invalid time: {hour}:{minute}:{second}")
+            }
+            Self::InvalidLeapSecond { year, month, day } => {
+                write!(f, "no leap second on {year}-{month:02}-{day:02}")
+            }
             Self::CError(msg) => write!(f, "{msg}"),
         }
     }

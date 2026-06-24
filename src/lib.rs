@@ -21,6 +21,9 @@ pub mod sweph_file;
 pub use context::{CalcResult, Ephemeris, EphemerisConfig};
 pub use error::Error;
 pub use flags::CalcFlags;
-pub use types::{Body, CalendarType, EphemerisSource, HouseSystem, SiderealMode};
+pub use types::{
+    Body, CalendarType, DeltaT, EphemerisSource, HouseSystem, JdTt, JdUt1, SiderealMode,
+    UtcComponents, UtcToJd,
+};
 
 pub type Result<T> = std::result::Result<T, Error>;

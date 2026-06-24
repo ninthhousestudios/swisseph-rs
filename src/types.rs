@@ -1,3 +1,5 @@
+use std::ops::{Add, Sub};
+
 use crate::constants;
 
 // ---------------------------------------------------------------------------
@@ -503,6 +505,74 @@ pub struct AstroModels {
     pub jplhora_mode: JplHoraMode,
     pub sidereal_time: SiderealTimeModel,
 }
+
+// ---------------------------------------------------------------------------
+// Julian Day newtypes
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct JdTt(pub f64);
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct JdUt1(pub f64);
+
+macro_rules! impl_jd_ops {
+    ($T:ty) => {
+        impl Add<f64> for $T {
+            type Output = Self;
+            fn add(self, rhs: f64) -> Self {
+                Self(self.0 + rhs)
+            }
+        }
+        impl Sub<f64> for $T {
+            type Output = Self;
+            fn sub(self, rhs: f64) -> Self {
+                Self(self.0 - rhs)
+            }
+        }
+        impl Sub for $T {
+            type Output = f64;
+            fn sub(self, rhs: Self) -> f64 {
+                self.0 - rhs.0
+            }
+        }
+    };
+}
+
+impl_jd_ops!(JdTt);
+impl_jd_ops!(JdUt1);
+
+// ---------------------------------------------------------------------------
+// UTC components
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+pub struct UtcComponents {
+    pub year: i32,
+    pub month: i32,
+    pub day: i32,
+    pub hour: i32,
+    pub minute: i32,
+    pub second: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UtcToJd {
+    pub tt: JdTt,
+    pub ut1: JdUt1,
+}
+
+// ---------------------------------------------------------------------------
+// DeltaT trait
+// ---------------------------------------------------------------------------
+
+pub trait DeltaT {
+    fn delta_t(&self, jd_ut: JdUt1) -> f64;
+}
+
+// ---------------------------------------------------------------------------
+// Astronomical model enums — defaults
+// ---------------------------------------------------------------------------
 
 impl Default for AstroModels {
     fn default() -> Self {
