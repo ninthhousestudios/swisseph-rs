@@ -21,6 +21,10 @@
 - Each arc phase: study the C source -> implement in Rust -> verify against C `swetest` golden data.
 - Numerical fidelity is non-negotiable. Every phase includes golden-data comparison tests.
 
+### Testing
+- Golden data harness: `docs/golden-testing.md` — how to add tests for new modules, regenerate data, assertion patterns.
+- Every module must have golden-data differential tests against the C library. Bitwise-exact for pure math, epsilon for iterative functions.
+
 ### C Source Reference
 - Original C repo: `../swisseph/`
 - C catalogues: `../swisseph/claude/catalogue-{public,internal}.md`
