@@ -30,7 +30,7 @@ pub fn normalize_radians(x: f64) -> f64 {
     y
 }
 
-pub(crate) fn mod_2pi(x: f64) -> f64 {
+pub fn mod_2pi(x: f64) -> f64 {
     let mut y = x % TWOPI;
     if y < 0.0 {
         y += TWOPI;
@@ -117,7 +117,7 @@ pub fn d2l(x: f64) -> i32 {
 // Chebyshev evaluation (Broucke/Clenshaw, ACM algorithm 446)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn chebyshev_eval(x: f64, coeffs: &[f64]) -> f64 {
+pub fn chebyshev_eval(x: f64, coeffs: &[f64]) -> f64 {
     let x2 = x * 2.0;
     let mut br = 0.0;
     let mut brp2 = 0.0;
@@ -130,7 +130,7 @@ pub(crate) fn chebyshev_eval(x: f64, coeffs: &[f64]) -> f64 {
     (br - brp2) * 0.5
 }
 
-pub(crate) fn chebyshev_deriv(x: f64, coeffs: &[f64]) -> f64 {
+pub fn chebyshev_deriv(x: f64, coeffs: &[f64]) -> f64 {
     let ncf = coeffs.len();
     if ncf <= 1 {
         return 0.0;
@@ -159,13 +159,13 @@ pub(crate) fn chebyshev_deriv(x: f64, coeffs: &[f64]) -> f64 {
 // Coordinate transforms — basic
 // ---------------------------------------------------------------------------
 
-pub(crate) fn rotate_x(pos: [f64; 3], eps: f64) -> [f64; 3] {
+pub fn rotate_x(pos: [f64; 3], eps: f64) -> [f64; 3] {
     let sineps = eps.sin();
     let coseps = eps.cos();
     rotate_x_sincos(pos, sineps, coseps)
 }
 
-pub(crate) fn rotate_x_sincos(pos: [f64; 3], sineps: f64, coseps: f64) -> [f64; 3] {
+pub fn rotate_x_sincos(pos: [f64; 3], sineps: f64, coseps: f64) -> [f64; 3] {
     [
         pos[0],
         pos[1] * coseps + pos[2] * sineps,
@@ -173,7 +173,7 @@ pub(crate) fn rotate_x_sincos(pos: [f64; 3], sineps: f64, coseps: f64) -> [f64; 
     ]
 }
 
-pub(crate) fn cartesian_to_polar(x: [f64; 3]) -> [f64; 3] {
+pub fn cartesian_to_polar(x: [f64; 3]) -> [f64; 3] {
     if x[0] == 0.0 && x[1] == 0.0 && x[2] == 0.0 {
         return [0.0; 3];
     }
@@ -192,7 +192,7 @@ pub(crate) fn cartesian_to_polar(x: [f64; 3]) -> [f64; 3] {
     [lon, lat, dist]
 }
 
-pub(crate) fn polar_to_cartesian(l: [f64; 3]) -> [f64; 3] {
+pub fn polar_to_cartesian(l: [f64; 3]) -> [f64; 3] {
     let cosl1 = l[1].cos();
     [
         l[2] * cosl1 * l[0].cos(),
@@ -205,7 +205,7 @@ pub(crate) fn polar_to_cartesian(l: [f64; 3]) -> [f64; 3] {
 // Coordinate transforms — with speed (Jacobian velocity transform)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn cartesian_to_polar_with_speed(x: [f64; 6]) -> [f64; 6] {
+pub fn cartesian_to_polar_with_speed(x: [f64; 6]) -> [f64; 6] {
     if x[0] == 0.0 && x[1] == 0.0 && x[2] == 0.0 {
         let speed = (x[3] * x[3] + x[4] * x[4] + x[5] * x[5]).sqrt();
         let vel_dir = cartesian_to_polar([x[3], x[4], x[5]]);
@@ -236,7 +236,7 @@ pub(crate) fn cartesian_to_polar_with_speed(x: [f64; 6]) -> [f64; 6] {
     [lon, lat, rxyz, speed_lon, speed_lat, xx5]
 }
 
-pub(crate) fn polar_to_cartesian_with_speed(l: [f64; 6]) -> [f64; 6] {
+pub fn polar_to_cartesian_with_speed(l: [f64; 6]) -> [f64; 6] {
     if l[3] == 0.0 && l[4] == 0.0 && l[5] == 0.0 {
         let pos = polar_to_cartesian([l[0], l[1], l[2]]);
         return [pos[0], pos[1], pos[2], 0.0, 0.0, 0.0];
