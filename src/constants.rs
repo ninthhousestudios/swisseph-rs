@@ -31,6 +31,7 @@ pub const RADTODEG: f64 = 180.0 / PI;
 pub const CSTORAD: f64 = DEGTORAD / 360000.0;
 pub const RADTOCS: f64 = RADTODEG * 360000.0;
 pub const CS2DEG: f64 = 1.0 / 360000.0;
+pub const TWOPI: f64 = 2.0 * PI;
 pub const AUNIT_TO_KM: f64 = 149597870.700;
 pub const AUNIT_TO_LIGHTYEAR: f64 = 1.0 / 63241.07708427;
 pub const AUNIT_TO_PARSEC: f64 = 1.0 / 206264.8062471;

@@ -571,6 +571,19 @@ pub trait DeltaT {
 }
 
 // ---------------------------------------------------------------------------
+// DegreeParts — result of swe_split_deg
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DegreeParts {
+    pub degrees: i32,
+    pub minutes: i32,
+    pub seconds: i32,
+    pub second_fraction: f64,
+    pub sign: i32,
+}
+
+// ---------------------------------------------------------------------------
 // Astronomical model enums — defaults
 // ---------------------------------------------------------------------------
 
