@@ -1,4 +1,5 @@
 /target
+/tools/golden_gen
 
 # sutra — track config, ignore state
 .sutra/*/
