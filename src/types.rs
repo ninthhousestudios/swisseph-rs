@@ -3,6 +3,78 @@ use std::ops::{Add, Sub};
 use crate::constants;
 
 // ---------------------------------------------------------------------------
+// Body ID newtypes — private inner fields enforce range invariants
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FictitiousId(i32);
+
+impl FictitiousId {
+    pub fn new(raw_id: i32) -> crate::Result<Self> {
+        if (constants::FICT_OFFSET..=constants::FICT_MAX).contains(&raw_id) {
+            Ok(Self(raw_id))
+        } else {
+            Err(crate::Error::InvalidBody(raw_id))
+        }
+    }
+
+    pub fn raw_id(self) -> i32 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AsteroidId(i32);
+
+impl AsteroidId {
+    pub fn new(mpc_number: i32) -> crate::Result<Self> {
+        if mpc_number >= 0 {
+            Ok(Self(mpc_number))
+        } else {
+            Err(crate::Error::InvalidBody(mpc_number))
+        }
+    }
+
+    pub fn mpc_number(self) -> i32 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PlanetMoonId(i32);
+
+impl PlanetMoonId {
+    pub fn new(encoded: i32) -> crate::Result<Self> {
+        if (0..=999).contains(&encoded) {
+            Ok(Self(encoded))
+        } else {
+            Err(crate::Error::InvalidBody(encoded))
+        }
+    }
+
+    pub fn encoded(self) -> i32 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CometId(i32);
+
+impl CometId {
+    pub fn new(number: i32) -> crate::Result<Self> {
+        if (0..=7999).contains(&number) {
+            Ok(Self(number))
+        } else {
+            Err(crate::Error::InvalidBody(number))
+        }
+    }
+
+    pub fn number(self) -> i32 {
+        self.0
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Body
 // ---------------------------------------------------------------------------
 
@@ -31,14 +103,30 @@ pub enum Body {
     Vesta,
     IntpApogee,
     IntpPerigee,
-    Fictitious(i32),
-    Asteroid(i32),
-    PlanetMoon(i32),
-    Comet(i32),
+    Fictitious(FictitiousId),
+    Asteroid(AsteroidId),
+    PlanetMoon(PlanetMoonId),
+    Comet(CometId),
     EclipticNutation,
 }
 
 impl Body {
+    pub fn fictitious(raw_id: i32) -> crate::Result<Self> {
+        Ok(Self::Fictitious(FictitiousId::new(raw_id)?))
+    }
+
+    pub fn asteroid(mpc_number: i32) -> crate::Result<Self> {
+        Ok(Self::Asteroid(AsteroidId::new(mpc_number)?))
+    }
+
+    pub fn planet_moon(encoded: i32) -> crate::Result<Self> {
+        Ok(Self::PlanetMoon(PlanetMoonId::new(encoded)?))
+    }
+
+    pub fn comet(number: i32) -> crate::Result<Self> {
+        Ok(Self::Comet(CometId::new(number)?))
+    }
+
     pub fn to_raw_id(self) -> i32 {
         match self {
             Self::Sun => 0,
@@ -64,10 +152,10 @@ impl Body {
             Self::Vesta => 20,
             Self::IntpApogee => 21,
             Self::IntpPerigee => 22,
-            Self::Fictitious(id) => id,
-            Self::Asteroid(n) => constants::AST_OFFSET + n,
-            Self::PlanetMoon(n) => constants::PLMOON_OFFSET + n,
-            Self::Comet(n) => constants::COMET_OFFSET + n,
+            Self::Fictitious(id) => id.raw_id(),
+            Self::Asteroid(id) => constants::AST_OFFSET + id.mpc_number(),
+            Self::PlanetMoon(id) => constants::PLMOON_OFFSET + id.encoded(),
+            Self::Comet(id) => constants::COMET_OFFSET + id.number(),
             Self::EclipticNutation => -1,
         }
     }
@@ -102,10 +190,12 @@ impl TryFrom<i32> for Body {
             20 => Ok(Self::Vesta),
             21 => Ok(Self::IntpApogee),
             22 => Ok(Self::IntpPerigee),
-            40..=999 => Ok(Self::Fictitious(v)),
-            1000..=8999 => Ok(Self::Comet(v - constants::COMET_OFFSET)),
-            9000..=9999 => Ok(Self::PlanetMoon(v - constants::PLMOON_OFFSET)),
-            n if n >= constants::AST_OFFSET => Ok(Self::Asteroid(n - constants::AST_OFFSET)),
+            40..=999 => Ok(Self::Fictitious(FictitiousId(v))),
+            1000..=8999 => Ok(Self::Comet(CometId(v - constants::COMET_OFFSET))),
+            9000..=9999 => Ok(Self::PlanetMoon(PlanetMoonId(v - constants::PLMOON_OFFSET))),
+            n if n >= constants::AST_OFFSET => {
+                Ok(Self::Asteroid(AsteroidId(n - constants::AST_OFFSET)))
+            }
             _ => Err(crate::Error::InvalidBody(v)),
         }
     }
@@ -141,7 +231,7 @@ pub enum FictitiousBody {
 
 impl From<FictitiousBody> for Body {
     fn from(f: FictitiousBody) -> Self {
-        Body::Fictitious(f as i32)
+        Body::Fictitious(FictitiousId(f as i32))
     }
 }
 
@@ -598,6 +688,91 @@ impl Default for AstroModels {
             jplhor_mode: JplHorMode::LongAgreement,
             jplhora_mode: JplHoraMode::V3,
             sidereal_time: SiderealTimeModel::Longterm,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fictitious_id_valid_range() {
+        assert!(FictitiousId::new(40).is_ok());
+        assert!(FictitiousId::new(999).is_ok());
+        assert!(FictitiousId::new(500).is_ok());
+    }
+
+    #[test]
+    fn fictitious_id_rejects_out_of_range() {
+        assert!(FictitiousId::new(39).is_err());
+        assert!(FictitiousId::new(1000).is_err());
+        assert!(FictitiousId::new(0).is_err());
+        assert!(FictitiousId::new(-1).is_err());
+        assert!(FictitiousId::new(23).is_err());
+    }
+
+    #[test]
+    fn asteroid_id_rejects_negative() {
+        assert!(AsteroidId::new(-1).is_err());
+        assert!(AsteroidId::new(-10000).is_err());
+        assert!(AsteroidId::new(0).is_ok());
+        assert!(AsteroidId::new(1).is_ok());
+    }
+
+    #[test]
+    fn planet_moon_id_valid_range() {
+        assert!(PlanetMoonId::new(0).is_ok());
+        assert!(PlanetMoonId::new(999).is_ok());
+        assert!(PlanetMoonId::new(1000).is_err());
+        assert!(PlanetMoonId::new(-1).is_err());
+    }
+
+    #[test]
+    fn comet_id_valid_range() {
+        assert!(CometId::new(0).is_ok());
+        assert!(CometId::new(7999).is_ok());
+        assert!(CometId::new(8000).is_err());
+        assert!(CometId::new(-1).is_err());
+    }
+
+    #[test]
+    fn body_constructors_validate() {
+        assert!(Body::fictitious(40).is_ok());
+        assert!(Body::fictitious(23).is_err());
+        assert!(Body::asteroid(0).is_ok());
+        assert!(Body::asteroid(-10000).is_err());
+        assert!(Body::planet_moon(0).is_ok());
+        assert!(Body::planet_moon(1000).is_err());
+        assert!(Body::comet(0).is_ok());
+        assert!(Body::comet(8000).is_err());
+    }
+
+    #[test]
+    fn body_no_aliasing_via_constructors() {
+        let sun_raw = Body::Sun.to_raw_id();
+        for n in [-10000, -1, -100] {
+            assert!(Body::asteroid(n).is_err());
+        }
+        let asteroid_0 = Body::asteroid(0).unwrap();
+        assert_ne!(asteroid_0.to_raw_id(), sun_raw);
+        assert_eq!(asteroid_0.to_raw_id(), constants::AST_OFFSET);
+    }
+
+    #[test]
+    fn body_try_from_roundtrip() {
+        for raw in [
+            40, 58, 500, 999, 1000, 5000, 8999, 9000, 9500, 9999, 10000, 20000,
+        ] {
+            let body = Body::try_from(raw).unwrap();
+            assert_eq!(body.to_raw_id(), raw);
+        }
+    }
+
+    #[test]
+    fn body_try_from_gap_rejected() {
+        for raw in [23, 24, 30, 39] {
+            assert!(Body::try_from(raw).is_err());
         }
     }
 }

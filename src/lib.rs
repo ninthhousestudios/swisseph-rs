@@ -22,8 +22,8 @@ pub use context::{CalcResult, Ephemeris, EphemerisConfig};
 pub use error::Error;
 pub use flags::CalcFlags;
 pub use types::{
-    Body, CalendarType, DegreeParts, DeltaT, EphemerisSource, HouseSystem, JdTt, JdUt1,
-    SiderealMode, UtcComponents, UtcToJd,
+    AsteroidId, Body, CalendarType, CometId, DegreeParts, DeltaT, EphemerisSource, FictitiousId,
+    HouseSystem, JdTt, JdUt1, PlanetMoonId, SiderealMode, UtcComponents, UtcToJd,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
