@@ -625,6 +625,12 @@ impl Epsilon {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Nutation {
+    pub dpsi: f64,
+    pub deps: f64,
+}
+
 // ---------------------------------------------------------------------------
 // Julian Day newtypes
 // ---------------------------------------------------------------------------
