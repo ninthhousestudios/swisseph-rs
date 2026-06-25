@@ -602,6 +602,12 @@ pub enum FrameTransform {
     GcrsToJ2000,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrecessionDirection {
+    J2000ToDate,
+    DateToJ2000,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Epsilon {
     pub eps: f64,

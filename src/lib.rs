@@ -25,8 +25,8 @@ pub use error::Error;
 pub use flags::CalcFlags;
 pub use types::{
     AsteroidId, Body, CalendarType, CometId, DegreeParts, DeltaT, EphemerisSource, Epsilon,
-    FictitiousId, FrameTransform, HouseSystem, JdTt, JdUt1, PlanetMoonId, SiderealMode,
-    UtcComponents, UtcToJd,
+    FictitiousId, FrameTransform, HouseSystem, JdTt, JdUt1, PlanetMoonId, PrecessionDirection,
+    SiderealMode, UtcComponents, UtcToJd,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;

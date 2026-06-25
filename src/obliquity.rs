@@ -2,7 +2,7 @@ use std::f64::consts::TAU;
 
 use crate::constants::*;
 use crate::flags::CalcFlags;
-use crate::math::poly_eval;
+use crate::math::{owen_chebyshev_basis, poly_eval};
 use crate::types::*;
 
 const DCOR_EPS_JPL_TJD0: f64 = 2437846.5;
@@ -143,8 +143,6 @@ fn obliquity_newcomb(jd: f64) -> f64 {
 // Owen 1990 — Chebyshev polynomial evaluation
 // ---------------------------------------------------------------------------
 
-const OWEN_T0S: [f64; 5] = [-3392455.5, -470455.5, 2451544.5, 5373544.5, 8295544.5];
-
 #[rustfmt::skip]
 const OWEN_EPS0_COEF: [[f64; 10]; 5] = [
     [23.699391439256386, 5.2330816033981775e-1, -5.6259493384864815e-2, -8.2033318431602032e-3, 6.6774163554156385e-4, 2.4931584012812606e-5, -3.1313623302407878e-6, 2.0343814827951515e-7, 2.9182026615852936e-8, -4.1118760893281951e-9],
@@ -154,41 +152,8 @@ const OWEN_EPS0_COEF: [[f64; 10]; 5] = [
     [22.914636050333696, 3.2123508304962416e-1, 3.6633220173792710e-2, -5.9228324767696043e-3, -1.882379107379328e-4, 3.2274552870236244e-5, 4.9052463646336507e-7, -5.9064298731578425e-8, -2.0485712675098837e-8, -6.2163304813908160e-10],
 ];
 
-fn owen_t0_icof(jd: f64) -> (f64, usize) {
-    let mut t0 = OWEN_T0S[0];
-    let mut icof = 0;
-    for i in 1..5 {
-        if jd >= (OWEN_T0S[i - 1] + OWEN_T0S[i]) / 2.0 {
-            t0 = OWEN_T0S[i];
-            icof = i;
-        }
-    }
-    (t0, icof)
-}
-
 fn obliquity_owen1990(jd: f64) -> f64 {
-    let (t0, icof) = owen_t0_icof(jd);
-    let x = (jd - t0) / 36525.0 / 40.0;
-
-    let mut tau = [0.0; 10];
-    tau[1] = x;
-    for i in 2..=9 {
-        tau[i] = x * tau[i - 1];
-    }
-
-    let k = [
-        1.0,
-        tau[1],
-        2.0 * tau[2] - 1.0,
-        4.0 * tau[3] - 3.0 * tau[1],
-        8.0 * tau[4] - 8.0 * tau[2] + 1.0,
-        16.0 * tau[5] - 20.0 * tau[3] + 5.0 * tau[1],
-        32.0 * tau[6] - 48.0 * tau[4] + 18.0 * tau[2] - 1.0,
-        64.0 * tau[7] - 112.0 * tau[5] + 56.0 * tau[3] - 7.0 * tau[1],
-        128.0 * tau[8] - 256.0 * tau[6] + 160.0 * tau[4] - 32.0 * tau[2] + 1.0,
-        256.0 * tau[9] - 576.0 * tau[7] + 432.0 * tau[5] - 120.0 * tau[3] + 9.0 * tau[1],
-    ];
-
+    let (icof, k) = owen_chebyshev_basis(jd);
     let coef = &OWEN_EPS0_COEF[icof];
     let mut eps = 0.0;
     for i in 0..10 {
