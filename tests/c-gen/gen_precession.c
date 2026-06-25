@@ -149,6 +149,52 @@ int main(void) {
         }
     }
 
+    /* Mixed short-term/long-term routing tests */
+    {
+        struct {
+            const char *name;
+            int longterm;
+            int shortterm;
+        } mixed[] = {
+            /* IAU2006 short (±75 cty) with Vondrak long */
+            {"mixed_IAU2006short_Vondrak", 9, 8},
+            /* IAU1976 short (±2 cty) with Laskar long */
+            {"mixed_IAU1976short_Laskar", 2, 1},
+            /* IAU2000 short (±2 cty) with Owen long */
+            {"mixed_IAU2000short_Owen", 10, 6},
+        };
+        /* Epochs chosen to cross short-term boundaries */
+        double mixed_epochs[] = {
+            2488070.0,     /* +1 cty — inside all short windows */
+            2524595.0,     /* +2 cty — at IAU1976/2000 boundary */
+            2817045.0,     /* +10 cty — outside IAU1976/2000, inside IAU2006 */
+            4278045.0,     /* +50 cty — inside IAU2006 (±75 cty) */
+            625045.0,      /* -50 cty — inside IAU2006 (±75 cty) */
+            5000000.0,     /* far future — outside all short windows */
+            -1000000.0,    /* far past — outside all short windows */
+        };
+        int n_mixed = sizeof(mixed) / sizeof(mixed[0]);
+        int n_mixed_epochs = sizeof(mixed_epochs) / sizeof(mixed_epochs[0]);
+        int mi, me;
+        for (mi = 0; mi < n_mixed; mi++) {
+            set_prec_model(mixed[mi].longterm, mixed[mi].shortterm);
+            for (d = 0; d < 2; d++) {
+                for (me = 0; me < n_mixed_epochs; me++) {
+                    double jd = mixed_epochs[me];
+                    double x[3] = {input[0], input[1], input[2]};
+                    swi_precess(x, jd, 0, directions[d]);
+                    printf(",\n    {\"model\": \"%s\", \"direction\": \"%s\", "
+                           "\"jd\": %.1f, \"flags\": 0, "
+                           "\"input\": [%.20e, %.20e, %.20e], "
+                           "\"output\": [%.20e, %.20e, %.20e]}",
+                           mixed[mi].name, dir_names[d], jd,
+                           input[0], input[1], input[2],
+                           x[0], x[1], x[2]);
+                }
+            }
+        }
+    }
+
     /* Roundtrip tests: precess J2000->Date then Date->J2000 should recover original */
     {
         double rt_epochs[] = {2415020.0, 2488070.0, 2817045.0, 990544.5};

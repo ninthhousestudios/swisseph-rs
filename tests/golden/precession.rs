@@ -64,6 +64,30 @@ fn golden_precession() {
         let (flags, models) = match c.model.as_str() {
             "JPLHOR" => (CalcFlags::DPSIDEPS_1980, AstroModels::default()),
             "JPLHOR_APPROX" => (CalcFlags::JPLHOR_APPROX, AstroModels::default()),
+            "mixed_IAU2006short_Vondrak" => (
+                CalcFlags::empty(),
+                AstroModels {
+                    prec_longterm: PrecessionModel::Vondrak2011,
+                    prec_shortterm: PrecessionModel::IAU2006,
+                    ..AstroModels::default()
+                },
+            ),
+            "mixed_IAU1976short_Laskar" => (
+                CalcFlags::empty(),
+                AstroModels {
+                    prec_longterm: PrecessionModel::Laskar1986,
+                    prec_shortterm: PrecessionModel::IAU1976,
+                    ..AstroModels::default()
+                },
+            ),
+            "mixed_IAU2000short_Owen" => (
+                CalcFlags::empty(),
+                AstroModels {
+                    prec_longterm: PrecessionModel::Owen1990,
+                    prec_shortterm: PrecessionModel::IAU2000,
+                    ..AstroModels::default()
+                },
+            ),
             _ => (CalcFlags::empty(), models_for_prec(base_model)),
         };
 
@@ -90,7 +114,14 @@ fn golden_precession() {
                 | "Simon1994"
                 | "Williams1994"
                 | "WillEpsLask"
-        ) || matches!(c.model.as_str(), "JPLHOR" | "JPLHOR_APPROX");
+        ) || matches!(
+            c.model.as_str(),
+            "JPLHOR"
+                | "JPLHOR_APPROX"
+                | "mixed_IAU2006short_Vondrak"
+                | "mixed_IAU1976short_Laskar"
+                | "mixed_IAU2000short_Owen"
+        );
 
         for j in 0..3 {
             if uses_trig {
