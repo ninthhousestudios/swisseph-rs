@@ -30,3 +30,6 @@
 - C catalogues: `../swisseph/claude/catalogue-{public,internal}.md`
 - Ephemeris data: `../swisseph/ephe/`
 - C test suite: `../swisseph/setest/`
+
+### Codebase Map
+- `docs/codebase-map.md` — module layout, key types with line numbers, golden test patterns, insertion points. Consult before exploring; update after landing new modules.
