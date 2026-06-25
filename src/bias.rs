@@ -3,7 +3,6 @@ use crate::flags::CalcFlags;
 use crate::math::{cartesian_to_polar_with_speed, polar_to_cartesian_with_speed};
 use crate::types::*;
 
-const OFFSET_JPLHORIZONS: f64 = -52.3;
 const DCOR_RA_JPL_TJD0: f64 = 2437846.5;
 
 #[rustfmt::skip]

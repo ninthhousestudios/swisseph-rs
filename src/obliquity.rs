@@ -5,7 +5,6 @@ use crate::flags::CalcFlags;
 use crate::math::poly_eval;
 use crate::types::*;
 
-const OFFSET_EPS_JPLHORIZONS: f64 = 35.95;
 const DCOR_EPS_JPL_TJD0: f64 = 2437846.5;
 
 #[rustfmt::skip]
