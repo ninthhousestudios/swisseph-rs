@@ -79,11 +79,11 @@ pub fn obliquity(jd: f64, flags: CalcFlags, models: &AstroModels) -> Epsilon {
 // ---------------------------------------------------------------------------
 
 fn obliquity_iau1976(t: f64) -> f64 {
-    poly_eval(&[84381.448, -46.8150, -5.9e-4, 1.813e-3], t) * STR
+    poly_eval(&[84381.448, -46.8150, -5.9e-4, 1.813e-3], t) * DEGTORAD / 3600.0
 }
 
 fn obliquity_iau2000(t: f64) -> f64 {
-    poly_eval(&[84381.406, -46.84024, -5.9e-4, 1.813e-3], t) * STR
+    poly_eval(&[84381.406, -46.84024, -5.9e-4, 1.813e-3], t) * DEGTORAD / 3600.0
 }
 
 fn obliquity_iau2006(t: f64) -> f64 {
@@ -92,7 +92,8 @@ fn obliquity_iau2006(t: f64) -> f64 {
             84381.406, -46.836769, -1.831e-4, 2.0034e-3, -5.76e-7, -4.34e-8,
         ],
         t,
-    ) * STR
+    ) * DEGTORAD
+        / 3600.0
 }
 
 fn obliquity_bretagnon2003(t: f64) -> f64 {
@@ -107,18 +108,20 @@ fn obliquity_bretagnon2003(t: f64) -> f64 {
             -3e-11,
         ],
         t,
-    ) * STR
+    ) * DEGTORAD
+        / 3600.0
 }
 
 fn obliquity_simon1994(t: f64) -> f64 {
     poly_eval(
         &[84381.412, -46.80927, -1.52e-4, 1.9989e-3, -5.1e-7, 2.5e-8],
         t,
-    ) * STR
+    ) * DEGTORAD
+        / 3600.0
 }
 
 fn obliquity_williams1994(t: f64) -> f64 {
-    poly_eval(&[84381.409, -46.833960, -1.74e-4, 2.0e-3, -1.0e-6], t) * STR
+    poly_eval(&[84381.409, -46.833960, -1.74e-4, 2.0e-3, -1.0e-6], t) * DEGTORAD / 3600.0
 }
 
 fn obliquity_laskar1986(t: f64) -> f64 {
@@ -129,12 +132,12 @@ fn obliquity_laskar1986(t: f64) -> f64 {
             2.787e-7, 5.79e-9, 2.45e-10,
         ],
         u,
-    ) * STR
+    ) * (DEGTORAD / 3600.0)
 }
 
 fn obliquity_newcomb(jd: f64) -> f64 {
     let tn = (jd - 2396758.0) / 36525.0;
-    poly_eval(&[84451.68, -46.837, -0.0085, 0.0017], tn) * STR
+    poly_eval(&[84451.68, -46.837, -0.0085, 0.0017], tn) * DEGTORAD / 3600.0
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +237,7 @@ fn obliquity_vondrak2011(jd: f64) -> f64 {
         pw *= t;
     }
 
-    q * STR
+    q * (DEGTORAD / 3600.0)
 }
 
 // ---------------------------------------------------------------------------
