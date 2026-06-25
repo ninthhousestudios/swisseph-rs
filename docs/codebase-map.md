@@ -23,6 +23,7 @@ src/
 ├── nutation/
 │   ├── mod.rs          — router + 5 algorithms: IAU 1980, Herring 1987, IAU 2000A/B, Woolard
 │   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
+├── sidereal_time.rs    — swe_sidtime0/swe_sidtime port: 4 GMST models, 33-term EoE, long-term model
 ├── calc.rs             — EMPTY stub
 ├── moshier/mod.rs      — EMPTY stub
 ├── jpl.rs              — EMPTY stub
@@ -42,19 +43,22 @@ tests/
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
-│   └── deltat.rs      — golden tests for delta-T (217 cases: 5 models × 43 epochs)
+│   ├── deltat.rs      — golden tests for delta-T (217 cases: 5 models × 43 epochs)
+│   └── sidereal_time.rs — golden tests for sidereal time (128 cases: 4 models × 32 epochs)
 ├── golden-data/
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
-│   └── deltat.json     — C-generated reference data for delta-T
+│   ├── deltat.json     — C-generated reference data for delta-T
+│   └── sidereal_time.json — C-generated reference data for sidereal time
 └── c-gen/
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
     ├── gen_precession.c — C harness to regenerate precession.json
     ├── gen_nutation.c  — C harness to regenerate nutation.json
-    └── gen_deltat.c    — C harness to regenerate deltat.json
+    ├── gen_deltat.c    — C harness to regenerate deltat.json
+    └── gen_sidereal_time.c — C harness to regenerate sidereal_time.json
 ```
 
 ## Key Types in types.rs
