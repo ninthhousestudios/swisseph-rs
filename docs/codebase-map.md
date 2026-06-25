@@ -16,7 +16,7 @@ src/
 ├── date.rs             — Julian Day ↔ calendar conversion, delta-T, UTC
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
 ├── bias.rs             — swi_bias port: GCRS↔J2000 frame rotation
-├── precession.rs       — EMPTY stub
+├── precession.rs       — swi_precess port: 3 algorithm families, 11 models, JPLHOR paths
 ├── calc.rs             — EMPTY stub
 ├── moshier/mod.rs      — EMPTY stub
 ├── jpl.rs              — EMPTY stub
@@ -33,13 +33,16 @@ tests/
 │   ├── main.rs         — test harness: golden_data_path(), assert_f64_exact(), assert_f64_eps()
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
-│   └── obliquity_bias.rs — golden tests for obliquity + bias
+│   ├── obliquity_bias.rs — golden tests for obliquity + bias
+│   └── precession.rs  — golden tests for precession (374 cases)
 ├── golden-data/
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
-│   └── obliquity_bias.json — C-generated reference data for obliquity/bias
+│   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
+│   └── precession.json — C-generated reference data for precession
 └── c-gen/
-    └── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
+    ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
+    └── gen_precession.c — C harness to regenerate precession.json
 ```
 
 ## Key Types in types.rs
@@ -63,7 +66,8 @@ tests/
 | Type | Lines | Notes |
 |---|---|---|
 | `FrameTransform` | ~599 | J2000ToGcrs, GcrsToJ2000 |
-| `Epsilon` | ~605 | eps, sin_eps, cos_eps + `Epsilon::new(eps_rad)` |
+| `PrecessionDirection` | ~603 | J2000ToDate, DateToJ2000 |
+| `Epsilon` | ~607 | eps, sin_eps, cos_eps + `Epsilon::new(eps_rad)` |
 
 ### Julian Day newtypes
 
@@ -146,7 +150,10 @@ All `pub fn`. Key functions and their line ranges:
 | cotrans_with_speed | 276–290 | ([f64;6], f64) → [f64;6] |
 | split_degrees | 304–364 | (f64, SplitDegFlags) → DegreeParts |
 | poly_eval | 366–368 | (&[f64], f64) → f64 — Horner's method |
-| **unit tests** | 374+ | |
+| OWEN_T0S | 374 | [f64; 5] — Owen interval boundaries |
+| owen_t0_icof | 376 | (f64) → (f64, usize) — Owen interval + index |
+| owen_chebyshev_basis | 390 | (f64) → (usize, [f64; 10]) — shared by obliquity + precession |
+| **unit tests** | 410+ | |
 
 ## Golden Test Pattern
 
