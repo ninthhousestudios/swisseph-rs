@@ -4,6 +4,7 @@ mod math;
 mod nutation;
 mod obliquity_bias;
 mod precession;
+mod sidereal_time;
 
 use std::path::PathBuf;
 
