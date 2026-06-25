@@ -1,6 +1,6 @@
 use crate::constants::*;
 use crate::flags::CalcFlags;
-use crate::math::{cartesian_to_polar_with_speed, polar_to_cartesian_with_speed};
+use crate::math::{cartesian_to_polar, polar_to_cartesian};
 use crate::types::*;
 
 const DCOR_RA_JPL_TJD0: f64 = 2437846.5;
@@ -109,10 +109,11 @@ fn approx_jplhor(
     };
     let dofs_rad = dofs / (1000.0 * 3600.0) * DEGTORAD;
 
-    let mut polar = cartesian_to_polar_with_speed(*x);
+    let mut polar = cartesian_to_polar([x[0], x[1], x[2]]);
     match direction {
         FrameTransform::J2000ToGcrs => polar[0] -= dofs_rad,
         FrameTransform::GcrsToJ2000 => polar[0] += dofs_rad,
     }
-    *x = polar_to_cartesian_with_speed(polar);
+    let cart = polar_to_cartesian(polar);
+    x[..3].copy_from_slice(&cart);
 }

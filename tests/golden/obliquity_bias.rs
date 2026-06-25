@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use swisseph::constants::J2000;
 use swisseph::flags::CalcFlags;
 use swisseph::types::*;
 use swisseph::{bias, obliquity};
@@ -19,6 +18,8 @@ struct ObliquityCase {
 struct BiasCase {
     bias_model: String,
     direction: String,
+    jd: f64,
+    flags: u32,
     input: [f64; 6],
     output: [f64; 6],
 }
@@ -122,15 +123,19 @@ fn golden_bias() {
             other => panic!("Unknown direction: {other}"),
         };
 
+        let flags = CalcFlags::from_bits_truncate(c.flags);
         let models = AstroModels {
             bias: bias_model,
             ..AstroModels::default()
         };
 
         let mut pos = c.input;
-        bias::frame_bias(&mut pos, J2000, CalcFlags::SPEED, &models, direction);
+        bias::frame_bias(&mut pos, c.jd, flags, &models, direction);
 
-        let label = format!("bias[{}][{},{}]", i, c.bias_model, c.direction);
+        let label = format!(
+            "bias[{}][{},{},jd={},flags={}]",
+            i, c.bias_model, c.direction, c.jd, c.flags
+        );
         for j in 0..6 {
             super::assert_f64_exact(&format!("{label}[{j}]"), c.output[j], pos[j]);
         }

@@ -160,9 +160,10 @@ int main(void) {
                 if (!first) printf(",\n");
                 first = 0;
                 printf("    {\"bias_model\": \"%s\", \"direction\": \"%s\", "
+                       "\"jd\": %.1f, \"flags\": %d, "
                        "\"input\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e], "
                        "\"output\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e]}",
-                       bias_names[bm], dir_names[d],
+                       bias_names[bm], dir_names[d], J2000, 256,
                        test_vecs[v][0], test_vecs[v][1], test_vecs[v][2],
                        test_vecs[v][3], test_vecs[v][4], test_vecs[v][5],
                        x[0], x[1], x[2], x[3], x[4], x[5]);
@@ -176,9 +177,49 @@ int main(void) {
         double x[6] = {1.0, 2.0, 3.0, 0.1, 0.2, 0.3};
         swi_bias(x, J2000, 256, 0);
         printf(",\n    {\"bias_model\": \"None\", \"direction\": \"GcrsToJ2000\", "
+               "\"jd\": %.1f, \"flags\": %d, "
                "\"input\": [1.0, 2.0, 3.0, 0.1, 0.2, 0.3], "
                "\"output\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e]}",
+               J2000, 256,
                x[0], x[1], x[2], x[3], x[4], x[5]);
+    }
+
+    /* === JPLHOR_APPROX BIAS TESTS === */
+    /* SEFLG_JPLHOR_APPROX = 524288, SEFLG_SPEED = 256 */
+    /* jplhora_mode defaults to V3 (SEMOD_JPLHORA_3) */
+    {
+        double jplhor_dates[] = {
+            2451545.0,   /* J2000 - mid table */
+            2437846.5,   /* Correction table start */
+            2447000.0,   /* Mid table */
+            2430000.0,   /* Before table (clamps to first entry) */
+            2460000.0,   /* After table (clamps to last entry) */
+        };
+        int n_dates = sizeof(jplhor_dates) / sizeof(jplhor_dates[0]);
+        double jplhor_vec[6] = {1.0, 2.0, 3.0, 0.1, 0.2, 0.3};
+        int flags_combos[] = {524288 | 256, 524288};  /* with SPEED, without SPEED */
+        int n_flags = 2;
+        int fi, di, ji;
+
+        set_bias_model(3);  /* IAU2006 */
+        /* jplhora_mode = 0 means default (V3) */
+        for (fi = 0; fi < n_flags; fi++) {
+            for (di = 0; di < 2; di++) {
+                for (ji = 0; ji < n_dates; ji++) {
+                    double x[6];
+                    for (i = 0; i < 6; i++) x[i] = jplhor_vec[i];
+                    swi_bias(x, jplhor_dates[ji], flags_combos[fi], directions[di]);
+                    printf(",\n    {\"bias_model\": \"IAU2006\", \"direction\": \"%s\", "
+                           "\"jd\": %.1f, \"flags\": %d, "
+                           "\"input\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e], "
+                           "\"output\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e]}",
+                           dir_names[di], jplhor_dates[ji], flags_combos[fi],
+                           jplhor_vec[0], jplhor_vec[1], jplhor_vec[2],
+                           jplhor_vec[3], jplhor_vec[4], jplhor_vec[5],
+                           x[0], x[1], x[2], x[3], x[4], x[5]);
+                }
+            }
+        }
     }
 
     printf("\n  ]\n");
