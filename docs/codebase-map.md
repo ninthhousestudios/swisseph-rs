@@ -17,6 +17,9 @@ src/
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
 ├── bias.rs             — swi_bias port: GCRS↔J2000 frame rotation
 ├── precession.rs       — swi_precess port: 3 algorithm families, 11 models, JPLHOR paths
+├── nutation/
+│   ├── mod.rs          — module root (pub mod data)
+│   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
 ├── calc.rs             — EMPTY stub
 ├── moshier/mod.rs      — EMPTY stub
 ├── jpl.rs              — EMPTY stub

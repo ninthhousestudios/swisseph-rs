@@ -14,6 +14,7 @@ pub mod houses;
 pub mod jpl;
 pub mod math;
 pub mod moshier;
+pub mod nutation;
 pub mod obliquity;
 pub mod phenomena;
 pub mod precession;
