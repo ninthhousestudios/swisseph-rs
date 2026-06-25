@@ -363,6 +363,10 @@ pub fn split_degrees(mut ddeg: f64, flags: SplitDegFlags) -> DegreeParts {
     }
 }
 
+pub fn poly_eval(coeffs: &[f64], x: f64) -> f64 {
+    coeffs.iter().rev().fold(0.0, |acc, &c| acc * x + c)
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------

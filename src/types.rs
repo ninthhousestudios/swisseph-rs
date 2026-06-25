@@ -596,6 +596,29 @@ pub struct AstroModels {
     pub sidereal_time: SiderealTimeModel,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrameTransform {
+    J2000ToGcrs,
+    GcrsToJ2000,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Epsilon {
+    pub eps: f64,
+    pub sin_eps: f64,
+    pub cos_eps: f64,
+}
+
+impl Epsilon {
+    pub fn new(eps_rad: f64) -> Self {
+        Self {
+            eps: eps_rad,
+            sin_eps: eps_rad.sin(),
+            cos_eps: eps_rad.cos(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Julian Day newtypes
 // ---------------------------------------------------------------------------
