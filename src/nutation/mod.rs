@@ -192,7 +192,7 @@ fn delaunay_iau2000(t: f64) -> [f64; 5] {
 // IAU 2000 planetary arguments (linear in radians)
 // ---------------------------------------------------------------------------
 
-fn planetary_args_iau2000(t: f64) -> [f64; 14] {
+pub(crate) fn planetary_args_iau2000(t: f64) -> [f64; 14] {
     [
         normalize_radians(2.35555598 + 8328.6914269554 * t),
         normalize_radians(6.24006013 + 628.301955 * t),

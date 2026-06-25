@@ -19,6 +19,7 @@ pub mod nutation;
 pub mod obliquity;
 pub mod phenomena;
 pub mod precession;
+pub mod sidereal_time;
 pub mod stars;
 pub mod sweph_file;
 
