@@ -17,6 +17,9 @@ src/
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
 ├── bias.rs             — swi_bias port: GCRS↔J2000 frame rotation
 ├── precession.rs       — swi_precess port: 3 algorithm families, 11 models, JPLHOR paths
+├── deltat/
+│   ├── mod.rs          — calc_deltat dispatcher, 5 historical models, Bessel interpolation, future extrapolation, tidal correction
+│   └── data.rs         — static tables: DT (409 entries 1620–2028), DT97 (43), DT2 (27), DTCF16 (54×6 spline)
 ├── nutation/
 │   ├── mod.rs          — router + 5 algorithms: IAU 1980, Herring 1987, IAU 2000A/B, Woolard
 │   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
@@ -38,17 +41,20 @@ tests/
 │   ├── date.rs         — golden tests for date module
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
-│   └── nutation.rs    — golden tests for nutation (80 cases + router tests)
+│   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
+│   └── deltat.rs      — golden tests for delta-T (217 cases: 5 models × 43 epochs)
 ├── golden-data/
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
-│   └── nutation.json   — C-generated reference data for nutation
+│   ├── nutation.json   — C-generated reference data for nutation
+│   └── deltat.json     — C-generated reference data for delta-T
 └── c-gen/
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
     ├── gen_precession.c — C harness to regenerate precession.json
-    └── gen_nutation.c  — C harness to regenerate nutation.json
+    ├── gen_nutation.c  — C harness to regenerate nutation.json
+    └── gen_deltat.c    — C harness to regenerate deltat.json
 ```
 
 ## Key Types in types.rs
