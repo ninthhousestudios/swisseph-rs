@@ -1,6 +1,7 @@
 mod date;
 mod math;
 mod obliquity_bias;
+mod precession;
 
 use std::path::PathBuf;
 
