@@ -8,6 +8,7 @@ pub mod ayanamsa;
 pub mod bias;
 pub mod calc;
 pub mod date;
+pub mod deltat;
 pub mod eclipse;
 pub mod heliacal;
 pub mod houses;
