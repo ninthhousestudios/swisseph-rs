@@ -47,6 +47,11 @@ fn config_for_model(model: DeltaTModel) -> EphemerisConfig {
 #[test]
 fn golden_deltat() {
     let data = load();
+    assert_eq!(
+        data.deltat.len(),
+        215,
+        "expected 215 golden cases (5 models × 43 epochs)"
+    );
     for (i, c) in data.deltat.iter().enumerate() {
         let model = parse_model(&c.model);
         let config = config_for_model(model);

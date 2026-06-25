@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::date::LEAP_SECONDS;
 use crate::error::Error;
 use crate::flags::CalcFlags;
-use crate::types::{AstroModels, SiderealMode};
+use crate::types::{AstroModels, DeltaT, EphemerisSource, JdUt1, SiderealMode};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TopoPosition {
@@ -15,6 +15,7 @@ pub struct TopoPosition {
 
 #[derive(Debug, Clone)]
 pub struct EphemerisConfig {
+    pub ephemeris_source: EphemerisSource,
     pub ephe_path: Option<PathBuf>,
     pub jpl_filename: Option<String>,
     pub sidereal_mode: Option<SiderealMode>,
@@ -30,6 +31,7 @@ pub struct EphemerisConfig {
 impl Default for EphemerisConfig {
     fn default() -> Self {
         Self {
+            ephemeris_source: EphemerisSource::Moshier,
             ephe_path: None,
             jpl_filename: None,
             sidereal_mode: None,
@@ -97,6 +99,12 @@ impl Ephemeris {
         }
         table.sort_unstable();
         Ok(table)
+    }
+}
+
+impl DeltaT for Ephemeris {
+    fn delta_t(&self, jd_ut: JdUt1) -> f64 {
+        crate::deltat::calc_deltat(jd_ut.0, &self.config)
     }
 }
 

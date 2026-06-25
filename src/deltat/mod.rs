@@ -34,10 +34,11 @@ fn resolve_tidal_acceleration(config: &EphemerisConfig) -> f64 {
             return ta;
         }
     }
-    if config.jpl_filename.is_some() || config.ephe_path.is_some() {
-        TIDAL_DEFAULT
-    } else {
-        TIDAL_DE404
+    match config.ephemeris_source {
+        EphemerisSource::Moshier => TIDAL_DE404,
+        // JPL/Swiss: when file backends land, read denum from file header.
+        // Until then, fall back to DE431.
+        EphemerisSource::Jpl | EphemerisSource::Swiss => TIDAL_DEFAULT,
     }
 }
 
