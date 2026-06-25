@@ -1,6 +1,7 @@
 /target
 /tools/golden_gen
 /tests/c-gen/gen_obliquity_bias
+docs/phase-planning-prompt.md
 
 # sutra — track config, ignore state
 .sutra/*/
