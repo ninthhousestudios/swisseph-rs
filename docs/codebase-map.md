@@ -18,7 +18,7 @@ src/
 ├── bias.rs             — swi_bias port: GCRS↔J2000 frame rotation
 ├── precession.rs       — swi_precess port: 3 algorithm families, 11 models, JPLHOR paths
 ├── nutation/
-│   ├── mod.rs          — module root (pub mod data)
+│   ├── mod.rs          — router + 5 algorithms: IAU 1980, Herring 1987, IAU 2000A/B, Woolard
 │   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
 ├── calc.rs             — EMPTY stub
 ├── moshier/mod.rs      — EMPTY stub
@@ -37,15 +37,18 @@ tests/
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
-│   └── precession.rs  — golden tests for precession (374 cases)
+│   ├── precession.rs  — golden tests for precession (374 cases)
+│   └── nutation.rs    — golden tests for nutation (80 cases + router tests)
 ├── golden-data/
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
-│   └── precession.json — C-generated reference data for precession
+│   ├── precession.json — C-generated reference data for precession
+│   └── nutation.json   — C-generated reference data for nutation
 └── c-gen/
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
-    └── gen_precession.c — C harness to regenerate precession.json
+    ├── gen_precession.c — C harness to regenerate precession.json
+    └── gen_nutation.c  — C harness to regenerate nutation.json
 ```
 
 ## Key Types in types.rs
@@ -71,6 +74,7 @@ tests/
 | `FrameTransform` | ~599 | J2000ToGcrs, GcrsToJ2000 |
 | `PrecessionDirection` | ~603 | J2000ToDate, DateToJ2000 |
 | `Epsilon` | ~607 | eps, sin_eps, cos_eps + `Epsilon::new(eps_rad)` |
+| `Nutation` | ~628 | dpsi, deps (radians) |
 
 ### Julian Day newtypes
 
