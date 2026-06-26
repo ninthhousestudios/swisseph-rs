@@ -27,6 +27,7 @@ src/
 ├── calc.rs             — EMPTY stub
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
+│   ├── planets.rs      — moshplan2() series evaluator, sscc() harmonic recurrence, fundamental argument constants
 │   └── tables.rs       — generated const arrays: 9 planet tables (do not hand-edit, see scripts/gen_moshier_tables.py)
 ├── jpl.rs              — EMPTY stub
 ├── sweph_file.rs       — EMPTY stub
@@ -46,7 +47,8 @@ tests/
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
 │   ├── deltat.rs      — golden tests for delta-T (217 cases: 5 models × 43 epochs)
-│   └── sidereal_time.rs — golden tests for sidereal time (128 cases: 4 models × 32 epochs)
+│   ├── sidereal_time.rs — golden tests for sidereal time (128 cases: 4 models × 32 epochs)
+│   └── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
 ├── golden-data/
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
@@ -54,13 +56,15 @@ tests/
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
 │   ├── deltat.json     — C-generated reference data for delta-T
-│   └── sidereal_time.json — C-generated reference data for sidereal time
+│   ├── sidereal_time.json — C-generated reference data for sidereal time
+│   └── moshier_planet.json — C-generated reference data for moshplan2
 └── c-gen/
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
     ├── gen_precession.c — C harness to regenerate precession.json
     ├── gen_nutation.c  — C harness to regenerate nutation.json
     ├── gen_deltat.c    — C harness to regenerate deltat.json
-    └── gen_sidereal_time.c — C harness to regenerate sidereal_time.json
+    ├── gen_sidereal_time.c — C harness to regenerate sidereal_time.json
+    └── gen_moshier_planet.c — C harness to regenerate moshier_planet.json
 ```
 
 ## Key Types in types.rs
@@ -148,7 +152,8 @@ All `pub fn`. Key functions and their line ranges:
 | normalize_degrees | 11–20 | (f64) → f64 |
 | normalize_radians | 22–31 | (f64) → f64 |
 | mod_2pi | 33–39 | (f64) → f64 |
-| diff_degrees_norm | 45–47 | (f64, f64) → f64 |
+| mods3600 | 41–43 | (f64) → f64 — arcsec modulo 1296000 |
+| diff_degrees_norm | 49–51 | (f64, f64) → f64 |
 | diff_degrees | 49–52 | (f64, f64) → f64 |
 | diff_radians | 54–57 | (f64, f64) → f64 |
 | midpoint_degrees | 63–66 | (f64, f64) → f64 |
