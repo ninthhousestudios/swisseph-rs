@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::date::LEAP_SECONDS;
 use crate::error::Error;
 use crate::flags::CalcFlags;
-use crate::types::{AstroModels, DeltaT, EphemerisSource, JdUt1, SiderealMode};
+use crate::types::{AstroModels, Body, DeltaT, EphemerisSource, JdUt1, SiderealMode};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TopoPosition {
@@ -66,6 +66,31 @@ impl Ephemeris {
 
     pub fn leap_seconds(&self) -> &[i32] {
         &self.leap_seconds
+    }
+
+    pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
+        let flags = crate::calc::plaus_iflag(flags);
+        let models = &self.config.astro_models;
+        let eps_j2000 =
+            crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
+
+        if body == Body::Earth {
+            return Ok(CalcResult {
+                data: [0.0; 6],
+                flags_used: flags,
+            });
+        }
+
+        let xreturn = match body {
+            Body::Sun => crate::calc::calc_sun(jd_tt, &eps_j2000, flags, models)?,
+            Body::Moon => crate::calc::calc_moon(jd_tt, &eps_j2000, flags, models)?,
+            _ => crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models)?,
+        };
+
+        Ok(CalcResult {
+            data: crate::calc::extract_output(&xreturn, flags),
+            flags_used: flags,
+        })
     }
 
     fn build_leap_seconds(config: &EphemerisConfig) -> crate::Result<Vec<i32>> {

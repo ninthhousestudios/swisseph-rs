@@ -153,6 +153,7 @@ pub const MOSHNDEPH_END: f64 = 8000016.5;
 pub const PLAN_SPEED_INTV: f64 = 0.0001;
 pub const MOON_SPEED_INTV: f64 = 0.00005;
 pub const DEFL_SPEED_INTV: f64 = 0.0000005;
+pub const NUT_SPEED_INTV: f64 = 0.0001;
 pub const JPL_DE431_START: f64 = -3027215.5;
 pub const JPL_DE431_END: f64 = 7930192.5;
 pub const CHIRON_START: f64 = 1967601.5;

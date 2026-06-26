@@ -2,6 +2,11 @@ use crate::constants::{
     DEGTORAD, EARTH_MOON_MRAT, J1900, MOON_SPEED_INTV, MOSHLUEPH_END, MOSHLUEPH_START,
     MOSHPLEPH_END, MOSHPLEPH_START, PLAN_SPEED_INTV,
 };
+
+pub struct PipelinePositions {
+    pub planet_helio: [f64; 6],
+    pub earth_helio: [f64; 6],
+}
 use crate::error::Error;
 use crate::flags::CalcFlags;
 use crate::math::{normalize_degrees, polar_to_cartesian, rotate_x_sincos};
@@ -148,6 +153,80 @@ fn compute_moon(jd: f64, eps_date: &Epsilon) -> [f64; 6] {
         result[i + 3] = (2.0 * a + b) / MOON_SPEED_INTV;
     }
     result
+}
+
+pub fn compute_pipeline(
+    jd: f64,
+    body: Body,
+    eps_j2000: &Epsilon,
+) -> Result<PipelinePositions, Error> {
+    let eps_date = obliquity(jd, CalcFlags::empty(), &AstroModels::default());
+    let eps_date_prev = obliquity(
+        jd - PLAN_SPEED_INTV,
+        CalcFlags::empty(),
+        &AstroModels::default(),
+    );
+
+    let earth = earth_position(jd, eps_j2000, &eps_date);
+    let earth_prev = earth_position(jd - PLAN_SPEED_INTV, eps_j2000, &eps_date_prev);
+    let earth_helio = [
+        earth[0],
+        earth[1],
+        earth[2],
+        (earth[0] - earth_prev[0]) / PLAN_SPEED_INTV,
+        (earth[1] - earth_prev[1]) / PLAN_SPEED_INTV,
+        (earth[2] - earth_prev[2]) / PLAN_SPEED_INTV,
+    ];
+
+    let planet_helio = match body {
+        Body::Sun => [0.0; 6],
+        Body::Moon => {
+            let moon = moon_equatorial_j2000(jd, &eps_date);
+            let moon_plus = moon_equatorial_j2000(jd + MOON_SPEED_INTV, &eps_date);
+            let moon_minus = moon_equatorial_j2000(jd - MOON_SPEED_INTV, &eps_date);
+            let mut result = [0.0; 6];
+            for i in 0..3 {
+                result[i] = moon[i];
+                let b = (moon_plus[i] - moon_minus[i]) / 2.0;
+                let a = (moon_plus[i] + moon_minus[i]) / 2.0 - moon[i];
+                result[i + 3] = (2.0 * a + b) / MOON_SPEED_INTV;
+            }
+            result
+        }
+        _ => {
+            let table = match body {
+                Body::Mercury => &tables::MER404,
+                Body::Venus => &tables::VEN404,
+                Body::Mars => &tables::MAR404,
+                Body::Jupiter => &tables::JUP404,
+                Body::Saturn => &tables::SAT404,
+                Body::Uranus => &tables::URA404,
+                Body::Neptune => &tables::NEP404,
+                Body::Pluto => &tables::PLU404,
+                _ => {
+                    return Err(Error::EphemerisNotAvailable {
+                        body,
+                        source: EphemerisSource::Moshier,
+                    });
+                }
+            };
+            let pos = helio_to_equatorial_j2000(jd, table, eps_j2000);
+            let pos_prev = helio_to_equatorial_j2000(jd - PLAN_SPEED_INTV, table, eps_j2000);
+            [
+                pos[0],
+                pos[1],
+                pos[2],
+                (pos[0] - pos_prev[0]) / PLAN_SPEED_INTV,
+                (pos[1] - pos_prev[1]) / PLAN_SPEED_INTV,
+                (pos[2] - pos_prev[2]) / PLAN_SPEED_INTV,
+            ]
+        }
+    };
+
+    Ok(PipelinePositions {
+        planet_helio,
+        earth_helio,
+    })
 }
 
 pub fn compute(jd: f64, body: Body, eps_j2000: &Epsilon) -> Result<[f64; 6], Error> {
