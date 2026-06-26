@@ -70,6 +70,11 @@ impl Ephemeris {
 
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let flags = crate::calc::plaus_iflag(flags);
+        let unsupported = flags
+            & (CalcFlags::HELCTR | CalcFlags::BARYCTR | CalcFlags::TOPOCTR | CalcFlags::SIDEREAL);
+        if !unsupported.is_empty() {
+            return Err(Error::UnsupportedFlags(unsupported));
+        }
         let models = &self.config.astro_models;
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);

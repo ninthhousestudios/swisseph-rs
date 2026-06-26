@@ -1,11 +1,13 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use crate::flags::CalcFlags;
 use crate::types::{Body, EphemerisSource};
 
 #[derive(Debug)]
 pub enum Error {
     InvalidBody(i32),
+    UnsupportedFlags(CalcFlags),
     InvalidHouseSystem(u8),
     InvalidSiderealMode(i32),
     InvalidCalendarType(i32),
@@ -24,6 +26,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBody(id) => write!(f, "invalid body ID: {id}"),
+            Self::UnsupportedFlags(flags) => write!(f, "unsupported flags: {flags:?}"),
             Self::InvalidHouseSystem(c) => write!(f, "invalid house system: '{}'", *c as char),
             Self::InvalidSiderealMode(id) => write!(f, "invalid sidereal mode: {id}"),
             Self::InvalidCalendarType(id) => write!(f, "invalid calendar type: {id}"),
