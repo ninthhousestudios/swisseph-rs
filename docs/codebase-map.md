@@ -25,10 +25,10 @@ src/
 │   ├── mod.rs          — router + 5 algorithms: IAU 1980, Herring 1987, IAU 2000A/B, Woolard
 │   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
 ├── sidereal_time.rs    — swe_sidtime0/swe_sidtime port: 4 GMST models, 33-term EoE, long-term model
-├── calc.rs             — EMPTY stub
+├── calc.rs             — calc_planet, calc_sun, calc_moon: light-time, retarded velocity, aberration, deflection pipeline
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
-│   ├── backend.rs      — compute() public API: embofs_mosh, compute_planet (backward-diff speed), compute_moon (central-diff speed), Body dispatch
+│   ├── backend.rs      — compute() public API, compute_pipeline() for calc.rs, embofs_mosh, planet/earth velocity helpers, Body dispatch
 │   ├── moon.rs         — moshmoon2() lunar series evaluator: MeanElements, mean_elements(), chewm(), moon1–4
 │   ├── moon_tables.rs  — generated const arrays: LR/MB/LRT/BT/LRT2/BT2 + z[25] (do not hand-edit, see scripts/gen_moshier_moon_tables.py)
 │   ├── planets.rs      — moshplan2() series evaluator, sscc() harmonic recurrence, fundamental argument constants
@@ -45,6 +45,7 @@ src/
 tests/
 ├── golden/
 │   ├── main.rs         — test harness: golden_data_path(), assert_f64_exact(), assert_f64_eps()
+│   ├── calc.rs        — golden tests for calc pipeline (350 cases: 10 bodies × 7 epochs × 5 flag combos)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
@@ -57,6 +58,7 @@ tests/
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   └── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
 ├── golden-data/
+│   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
@@ -218,6 +220,8 @@ All `pub fn`. Key functions and their line ranges:
 - C `eps *= DEGTORAD/3600.0` (Laskar, Vondrák) folds to single multiply. Rust: `* (DEGTORAD / 3600.0)` with parens.
 - Owen 1990 returns degrees (not arcsec): multiply by `DEGTORAD`, no `/3600`.
 - Vondrák `swi_ldp_peps` returns radians directly via `* AS2R` = `* (DEGTORAD / 3600.0)`.
+- **`+=` vs `= x +`**: C's `L = L + a + b + c` accumulates left-to-right with L in each step. Rust's `l += a + b + c` evaluates `a + b + c` first, then adds to l. When L is large (~481k) and corrections are small (~6), the different accumulation order produces ULP-level rounding differences that propagate through backward-difference velocity (÷1e-4) and deflection speed (÷5e-7). Always use `l = l + ...` to match C's evaluation order.
+- **Multiplication order matters**: `2.0 * x * DEGTORAD` ≠ `2.0 * DEGTORAD * x` due to FP non-associativity. Match C's grouping exactly.
 
 ## Insertion Points for New Modules
 
