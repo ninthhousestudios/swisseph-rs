@@ -1,3 +1,5 @@
+pub mod moon;
+pub mod moon_tables;
 pub mod planets;
 pub mod tables;
 
