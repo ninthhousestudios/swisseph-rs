@@ -59,6 +59,49 @@ static double meff(double r) {
     return m;
 }
 
+/* ---------- deflect_light: position-only formula from sweph.c:3743 ---------- */
+
+#define HELGRAVCONST_C 1.32712440017987e+20
+#define CLIGHT_C       2.99792458e+8
+#define AUNIT_C        1.49597870700e+11
+#define SUN_RADIUS_C   (959.63 / 3600.0 * M_PI / 180.0)
+
+static void deflect_light_direct(double *xx, const double *earth_helio,
+                                 const double *planet_helio) {
+    double u[3], e[3], q[3];
+    double ru, re, rq, uq, ue, qe;
+    double sina, sin_sunr, meff_fact, g1, g2;
+
+    ru = sqrt(xx[0]*xx[0] + xx[1]*xx[1] + xx[2]*xx[2]);
+    re = sqrt(earth_helio[0]*earth_helio[0] + earth_helio[1]*earth_helio[1]
+              + earth_helio[2]*earth_helio[2]);
+    rq = sqrt(planet_helio[0]*planet_helio[0] + planet_helio[1]*planet_helio[1]
+              + planet_helio[2]*planet_helio[2]);
+
+    for (int i = 0; i < 3; i++) {
+        u[i] = xx[i] / ru;
+        e[i] = earth_helio[i] / re;
+        q[i] = planet_helio[i] / rq;
+    }
+
+    uq = u[0]*q[0] + u[1]*q[1] + u[2]*q[2];
+    ue = u[0]*e[0] + u[1]*e[1] + u[2]*e[2];
+    qe = q[0]*e[0] + q[1]*e[1] + q[2]*e[2];
+
+    sina = sqrt(1.0 - ue * ue);
+    sin_sunr = SUN_RADIUS_C / re;
+    if (sina < sin_sunr)
+        meff_fact = meff(sina / sin_sunr);
+    else
+        meff_fact = 1.0;
+
+    g1 = 2.0 * HELGRAVCONST_C * meff_fact / CLIGHT_C / CLIGHT_C / AUNIT_C / re;
+    g2 = 1.0 + qe;
+
+    for (int i = 0; i < 3; i++)
+        xx[i] = ru * (u[i] + g1 / g2 * (uq * e[i] - ue * q[i]));
+}
+
 /* ---------- extern declaration for swi_aberr_light ---------- */
 
 extern void swi_aberr_light(double *xx, double *xe, int32 iflag);
@@ -137,7 +180,104 @@ int main(void) {
     }
     printf("  ],\n");
 
-    /* ======== Section 3: Pipeline tests via swe_calc ======== */
+    /* ======== Section 3: deflect_light (direct, position only) ======== */
+    printf("  \"deflect_light\": [\n");
+
+    struct defl_case {
+        double xx[6];
+        double earth_helio[3];
+        double planet_helio[3];
+        const char *label;
+    };
+
+    struct defl_case defl_cases[] = {
+        /* Normal: planet well away from sun direction */
+        {{1.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+         {0.0, 1.0, 0.0},
+         {1.0, 1.0, 0.0},
+         "orthogonal"},
+        /* Realistic Jupiter-ish */
+        {{4.5, 1.2, -0.3, 0.0, 0.0, 0.0},
+         {-0.5, 0.87, 0.0},
+         {4.0, 2.07, -0.3},
+         "jupiter-like"},
+        /* Mercury at various elongations */
+        {{0.3, 0.1, 0.0, 0.0, 0.0, 0.0},
+         {0.0, 1.0, 0.0},
+         {0.3, 1.1, 0.0},
+         "mercury-moderate"},
+        /* Near-opposition (planet opposite sun from earth) */
+        {{-2.0, 0.5, 0.1, 0.0, 0.0, 0.0},
+         {0.5, 0.87, 0.0},
+         {-1.5, 1.37, 0.1},
+         "near-opposition"},
+        /* Large distance (Saturn-like) */
+        {{8.0, 3.0, 1.0, 0.0, 0.0, 0.0},
+         {-0.3, 0.95, 0.02},
+         {7.7, 3.95, 1.02},
+         "saturn-like"},
+        /* Near-sun: planet direction close to sun direction
+           earth_helio points toward -x, planet_geo also ~-x → ue ≈ -1 → near sun */
+        {{-0.8, 0.01, 0.0, 0.0, 0.0, 0.0},
+         {0.8, 0.01, 0.0},
+         {0.0, 0.02, 0.0},
+         "near-sun"},
+        /* Very close to solar limb: construct ue near ±1 */
+        {{-0.9999, 0.005, 0.0, 0.0, 0.0, 0.0},
+         {1.0, 0.0, 0.0},
+         {0.0001, 0.005, 0.0},
+         "solar-limb"},
+        /* Inside solar disc: planet behind sun (ue very close to -1) */
+        {{-1.0, 0.0001, 0.0, 0.0, 0.0, 0.0},
+         {1.0, 0.0, 0.0},
+         {0.0, 0.0001, 0.0},
+         "inside-disc"},
+        /* 3D case with all components nonzero */
+        {{2.0, -1.5, 0.8, 0.0, 0.0, 0.0},
+         {-0.4, 0.7, 0.3},
+         {1.6, -0.8, 1.1},
+         "3d-general"},
+        /* Planet at 1 AU, earth at 1 AU, different directions */
+        {{0.0, 0.0, 1.0, 0.0, 0.0, 0.0},
+         {1.0, 0.0, 0.0},
+         {1.0, 0.0, 1.0},
+         "z-axis"},
+        /* Near-zero geocentric distance (close planet) */
+        {{0.01, 0.02, 0.0, 0.0, 0.0, 0.0},
+         {0.5, 0.87, 0.0},
+         {0.51, 0.89, 0.0},
+         "close-planet"},
+        /* Large earth distance */
+        {{3.0, 2.0, 0.0, 0.0, 0.0, 0.0},
+         {0.0, 5.0, 0.0},
+         {3.0, 7.0, 0.0},
+         "far-earth"},
+    };
+    int ndefl = sizeof(defl_cases) / sizeof(defl_cases[0]);
+
+    for (int i = 0; i < ndefl; i++) {
+        double xx[6];
+        for (int k = 0; k < 6; k++) xx[k] = defl_cases[i].xx[k];
+        deflect_light_direct(xx, defl_cases[i].earth_helio,
+                             defl_cases[i].planet_helio);
+        printf("    {\"label\": \"%s\",\n", defl_cases[i].label);
+        printf("     \"input\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e],\n",
+               defl_cases[i].xx[0], defl_cases[i].xx[1], defl_cases[i].xx[2],
+               defl_cases[i].xx[3], defl_cases[i].xx[4], defl_cases[i].xx[5]);
+        printf("     \"earth_helio\": [%.20e, %.20e, %.20e],\n",
+               defl_cases[i].earth_helio[0], defl_cases[i].earth_helio[1],
+               defl_cases[i].earth_helio[2]);
+        printf("     \"planet_helio\": [%.20e, %.20e, %.20e],\n",
+               defl_cases[i].planet_helio[0], defl_cases[i].planet_helio[1],
+               defl_cases[i].planet_helio[2]);
+        printf("     \"output\": [%.20e, %.20e, %.20e]}",
+               xx[0], xx[1], xx[2]);
+        if (i < ndefl - 1) printf(",");
+        printf("\n");
+    }
+    printf("  ],\n");
+
+    /* ======== Section 4: Pipeline tests via swe_calc ======== */
     printf("  \"pipeline\": [\n");
 
     int pipe_bodies[] = { SE_MERCURY, SE_VENUS, SE_MARS, SE_JUPITER, SE_SATURN };

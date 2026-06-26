@@ -14,6 +14,15 @@ struct AberrCase {
 }
 
 #[derive(Deserialize)]
+struct DeflCase {
+    label: String,
+    input: [f64; 6],
+    earth_helio: [f64; 3],
+    planet_helio: [f64; 3],
+    output: [f64; 3],
+}
+
+#[derive(Deserialize)]
 struct PipelineCase {
     tjd: f64,
     body: i32,
@@ -28,6 +37,7 @@ struct PipelineCase {
 struct GoldenData {
     meff: Vec<MeffCase>,
     aberr_light: Vec<AberrCase>,
+    deflect_light: Vec<DeflCase>,
     pipeline: Vec<PipelineCase>,
 }
 
@@ -67,6 +77,22 @@ fn golden_aberr_light() {
         }
     }
     assert_eq!(data.aberr_light.len(), 40);
+}
+
+#[test]
+fn golden_deflect_light() {
+    use swisseph::corrections::deflect_light;
+
+    let data = load();
+    for (i, c) in data.deflect_light.iter().enumerate() {
+        let mut xx = c.input;
+        deflect_light(&mut xx, &c.earth_helio, &c.planet_helio);
+        let label = format!("defl case {i} {}", c.label);
+        for k in 0..3 {
+            super::assert_f64_exact(&format!("{label} [{k}]"), c.output[k], xx[k]);
+        }
+    }
+    assert_eq!(data.deflect_light.len(), 12);
 }
 
 #[test]
