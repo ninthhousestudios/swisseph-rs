@@ -8,7 +8,8 @@ Quick reference for implementation agents. Prevents 60k-token exploration sweeps
 src/
 ├── lib.rs              — pub mod declarations (lines 1–21), re-exports (lines 23–30)
 ├── types.rs            — all domain types, enums, newtypes (778 lines)
-├── constants.rs        — physical constants, epochs, unit conversions (198 lines)
+├── constants.rs        — physical constants, epochs, unit conversions (199 lines)
+├── corrections.rs      — relativistic corrections: meff (lookup), aberr_light (Lorentz), deflect_light (GR bending)
 ├── flags.rs            — bitflags! structs: CalcFlags, SiderealBits, etc. (146 lines)
 ├── error.rs            — Error enum
 ├── context.rs          — Ephemeris, EphemerisConfig, CalcResult
@@ -44,6 +45,7 @@ src/
 tests/
 ├── golden/
 │   ├── main.rs         — test harness: golden_data_path(), assert_f64_exact(), assert_f64_eps()
+│   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
@@ -55,6 +57,7 @@ tests/
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   └── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
 ├── golden-data/
+│   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
@@ -66,6 +69,7 @@ tests/
 │   ├── moshier_moon.json — C-generated reference data for moshmoon2
 │   └── moshier_planet.json — C-generated reference data for moshplan2
 └── c-gen/
+    ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
     ├── gen_precession.c — C harness to regenerate precession.json
     ├── gen_nutation.c  — C harness to regenerate nutation.json
