@@ -53,6 +53,22 @@ Golden data files are checked into git so CI doesn't need the C toolchain. Regen
 |--------|-----------|-------|------------|
 | date   | julday, revjul, date_conversion, day_of_week | 292 | bitwise-exact |
 
+## Debugging FP fidelity failures
+
+When golden tests fail for a multi-step pipeline, **measure before reasoning**:
+
+1. **Instrument, don't theorize.** Write a C program (or add fprintf to the C source) that dumps intermediate values at each pipeline stage. Add matching Rust prints. Diff the output. The divergence point tells you exactly where to look. Reasoning about FP behavior from a ref doc or pseudocode is unreliable — evaluation order, `+=` semantics, and multiplication grouping are invisible at that level.
+
+2. **Binary-search the pipeline.** For a chain like backend → light-time → velocity → aberration → deflection, compare intermediate values stage-by-stage rather than staring at final output. If positions match but velocities don't, the bug is in the velocity computation, not the position path.
+
+3. **Known FP pitfalls when porting C to Rust:**
+   - `l += a + b + c` ≠ C's `L = L + a + b + c` — different accumulation order (see codebase-map.md FP notes)
+   - `2.0 * x * K` ≠ `2.0 * K * x` — multiplication is commutative but not associative with surrounding operations
+   - Missing intermediate normalizations (C's `swe_degnorm` before radians conversion)
+   - C global state reuse (e.g., `swed.oec` cached from a prior call, used for both main and backward-difference computations)
+
+4. **Read the actual C source for FP work.** The C ref docs capture algorithm structure, not character-level evaluation order. For fidelity debugging, the ref doc is the wrong tool — read the `.c` file directly (or have an agent read it and report the exact expression structure).
+
 ## Deferred
 
 - `utc_to_jd` / `jdet_to_utc` — these depend on a `DeltaT` provider. Golden testing deferred until our delta-T implementation matches the C library's `swe_deltat`. The JSON structure and Rust test stubs will be added at that point.

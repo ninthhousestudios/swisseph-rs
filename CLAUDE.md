@@ -17,6 +17,12 @@ isolates the 50-80k tokens of C reading into a disposable context. Brief the age
 The C catalogues (`../swisseph/claude/catalogue-{public,internal}.md`) are still fine for
 high-level function discovery. The prohibition is on reading the actual `.c` / `.h` implementation
 files during plan or implement phases.
+
+**Exception — FP fidelity debugging**: When golden tests fail and the cause is floating-point
+evaluation order (not algorithm bugs), read the C source directly. Ref docs capture algorithm
+structure but not character-level expression order (`+=` vs `= x +`, multiplication grouping),
+which is exactly what matters for FP fidelity. See `docs/golden-testing.md` § "Debugging FP
+fidelity failures" for the instrument-first protocol.
 </c_source_budget>
 
 <codebase_map>
