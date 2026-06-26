@@ -1,4 +1,5 @@
-mod tables;
+pub mod planets;
+pub mod tables;
 
 pub use tables::PLANETS;
 
