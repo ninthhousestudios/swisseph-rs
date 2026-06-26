@@ -164,7 +164,13 @@ pub fn aberr_light(xx: &mut [f64; 6], earth_vel: &[f64; 3], has_speed: bool) {
     }
 }
 
-fn deflect_position(u_in: &[f64; 3], earth_pos: &[f64; 3], planet_pos: &[f64; 3]) -> [f64; 3] {
+struct DeflectOutput {
+    result: [f64; 3],
+    ru: f64,
+    u_normalized: [f64; 3],
+}
+
+fn deflect_position(u_in: &[f64; 3], earth_pos: &[f64; 3], planet_pos: &[f64; 3]) -> DeflectOutput {
     let ru = (u_in[0] * u_in[0] + u_in[1] * u_in[1] + u_in[2] * u_in[2]).sqrt();
     let re =
         (earth_pos[0] * earth_pos[0] + earth_pos[1] * earth_pos[1] + earth_pos[2] * earth_pos[2])
@@ -193,11 +199,16 @@ fn deflect_position(u_in: &[f64; 3], earth_pos: &[f64; 3], planet_pos: &[f64; 3]
     let g1 = 2.0 * HELGRAVCONST * meff_fact / CLIGHT / CLIGHT / AUNIT / re;
     let g2 = 1.0 + qe;
 
-    [
-        ru * (u[0] + g1 / g2 * (uq * e[0] - ue * q[0])),
-        ru * (u[1] + g1 / g2 * (uq * e[1] - ue * q[1])),
-        ru * (u[2] + g1 / g2 * (uq * e[2] - ue * q[2])),
-    ]
+    let corr = g1 / g2;
+    DeflectOutput {
+        result: [
+            ru * (u[0] + corr * (uq * e[0] - ue * q[0])),
+            ru * (u[1] + corr * (uq * e[1] - ue * q[1])),
+            ru * (u[2] + corr * (uq * e[2] - ue * q[2])),
+        ],
+        ru,
+        u_normalized: u,
+    }
 }
 
 pub fn deflect_light(
@@ -210,10 +221,7 @@ pub fn deflect_light(
     let e_pos = [earth_helio[0], earth_helio[1], earth_helio[2]];
     let q_pos = [planet_helio[0], planet_helio[1], planet_helio[2]];
 
-    let result = deflect_position(&u_in, &e_pos, &q_pos);
-    xx[0] = result[0];
-    xx[1] = result[1];
-    xx[2] = result[2];
+    let out1 = deflect_position(&u_in, &e_pos, &q_pos);
 
     if has_speed {
         let dtsp = -DEFL_SPEED_INTV;
@@ -221,18 +229,19 @@ pub fn deflect_light(
         let mut e_pert = [0.0; 3];
         let mut q_pert = [0.0; 3];
         for i in 0..3 {
-            u_pert[i] = u_in[i] - dtsp * xx[i + 3];
+            u_pert[i] = xx[i] - dtsp * xx[i + 3];
             e_pert[i] = earth_helio[i] - dtsp * earth_helio[i + 3];
-            q_pert[i] = planet_helio[i] - dtsp * planet_helio[i + 3];
+            q_pert[i] = u_pert[i] + earth_helio[i] - dtsp * earth_helio[i + 3];
         }
-        let result_pert = deflect_position(&u_pert, &e_pert, &q_pert);
-        let ru_pert =
-            (u_pert[0] * u_pert[0] + u_pert[1] * u_pert[1] + u_pert[2] * u_pert[2]).sqrt();
-        let ru = (u_in[0] * u_in[0] + u_in[1] * u_in[1] + u_in[2] * u_in[2]).sqrt();
+        let out2 = deflect_position(&u_pert, &e_pert, &q_pert);
         for i in 0..3 {
-            let dx1 = result[i] - ru * u_in[i] / ru;
-            let dx2 = result_pert[i] - ru_pert * u_pert[i] / ru_pert;
+            let dx1 = out1.result[i] - xx[i];
+            let dx2 = out2.result[i] - out2.u_normalized[i] * out2.ru;
             xx[i + 3] += (dx1 - dx2) / dtsp;
         }
     }
+
+    xx[0] = out1.result[0];
+    xx[1] = out1.result[1];
+    xx[2] = out1.result[2];
 }

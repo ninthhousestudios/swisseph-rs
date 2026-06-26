@@ -4,7 +4,9 @@ use crate::corrections::{aberr_light, deflect_light};
 use crate::error::Error;
 use crate::flags::CalcFlags;
 use crate::math::{cartesian_to_polar_with_speed, polar_to_cartesian_with_speed, rotate_x_sincos};
-use crate::moshier::backend::{PipelinePositions, compute_pipeline};
+use crate::moshier::backend::{
+    PipelinePositions, compute_pipeline, earth_helio_velocity_at, planet_helio_velocity_at,
+};
 use crate::nutation::nutation;
 use crate::obliquity::obliquity;
 use crate::precession::{ldp_peps, precess};
@@ -299,15 +301,38 @@ pub fn calc_planet(
         xx[i] = planet_helio[i] - earth_helio[i];
     }
 
-    // Light-time (Moshier niter=0, linear approximation)
-    let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
-    let dt = dist * AUNIT / CLIGHT / 86400.0;
-    for i in 0..3 {
-        xx[i] = planet_helio[i] - dt * planet_helio[i + 3] - earth_helio[i];
-    }
-    // Speed: planet velocity minus earth velocity (Earth stays at t)
-    for i in 0..3 {
-        xx[i + 3] = planet_helio[i + 3] - earth_helio[i + 3];
+    // Light-time (C gates entire block on !TRUEPOS)
+    let mut dt = 0.0;
+    if !flags.contains(CalcFlags::TRUEPOS) {
+        let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+        dt = dist * AUNIT / CLIGHT / 86400.0;
+        // Moshier niter=0: linear approximation only
+        for i in 0..3 {
+            xx[i] = planet_helio[i] - dt * planet_helio[i + 3] - earth_helio[i];
+        }
+        if flags.contains(CalcFlags::SPEED) {
+            // Velocity at apparent time: C calls swi_moshplan at retarded time t
+            // and takes only the velocity, subtracts Earth velocity at teval
+            let vel_at_t = planet_helio_velocity_at(jd - dt, body, eps_j2000)?;
+            for i in 0..3 {
+                xx[i + 3] = vel_at_t[i] - earth_helio[i + 3];
+            }
+            // xxsp: change-of-dt speed correction. Light-time changes as the
+            // planet moves, affecting apparent speed. Correction =
+            // (dt - dt_prev) * planet_helio_vel, where dt_prev is light-time
+            // at t-1 day.
+            let geo_prev = [
+                planet_helio[0] - earth_helio[0] - (planet_helio[3] - earth_helio[3]),
+                planet_helio[1] - earth_helio[1] - (planet_helio[4] - earth_helio[4]),
+                planet_helio[2] - earth_helio[2] - (planet_helio[5] - earth_helio[5]),
+            ];
+            let dist_prev =
+                (geo_prev[0].powi(2) + geo_prev[1].powi(2) + geo_prev[2].powi(2)).sqrt();
+            let dt_sp = dist_prev * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xx[i + 3] -= (dt - dt_sp) * planet_helio[i + 3];
+            }
+        }
     }
 
     if !flags.contains(CalcFlags::SPEED) {
@@ -340,6 +365,14 @@ pub fn calc_planet(
             &[earth_helio[3], earth_helio[4], earth_helio[5]],
             flags.contains(CalcFlags::SPEED),
         );
+        // Earth velocity correction: observer velocity changed between
+        // emission (retarded time t) and reception (teval)
+        if flags.contains(CalcFlags::SPEED) {
+            let earth_vel_t = earth_helio_velocity_at(jd - dt, eps_j2000);
+            for i in 0..3 {
+                xx[i + 3] += earth_helio[i + 3] - earth_vel_t[i];
+            }
+        }
     }
 
     if !flags.contains(CalcFlags::SPEED) {
@@ -423,11 +456,16 @@ pub fn calc_moon(
     // Moon is already geocentric from backend (planet_helio is geocentric for Moon)
     let mut xx = pp.planet_helio;
 
-    // Light-time (linear, single step)
-    let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
-    let dt = dist * AUNIT / CLIGHT / 86400.0;
-    for i in 0..3 {
-        xx[i] -= dt * xx[i + 3];
+    // Light-time (C gates entire light-time on !TRUEPOS for Moon)
+    if !flags.contains(CalcFlags::TRUEPOS) {
+        let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+        let dt = dist * AUNIT / CLIGHT / 86400.0;
+        // C does a barycentric detour: converts geocentric→barycentric, retards
+        // with barycentric velocity, then subtracts unretarded Earth. Net effect
+        // on geocentric position: subtract dt * (geo_vel + earth_vel).
+        for i in 0..3 {
+            xx[i] -= dt * (xx[i + 3] + earth_helio[i + 3]);
+        }
     }
 
     if !flags.contains(CalcFlags::SPEED) {

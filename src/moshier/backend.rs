@@ -27,7 +27,7 @@ fn embofs_mosh(jd: f64, earth: &mut [f64; 3], eps_date: &Epsilon) {
 
     let mp_rad = mp * DEGTORAD;
     let (smp, cmp) = mp_rad.sin_cos();
-    let d2_rad = 2.0 * d_half * DEGTORAD;
+    let d2_rad = 2.0 * DEGTORAD * d_half;
     let (s2d, c2d) = d2_rad.sin_cos();
     let f_rad = f * DEGTORAD;
     let (sf, cf) = f_rad.sin_cos();
@@ -42,7 +42,7 @@ fn embofs_mosh(jd: f64, earth: &mut [f64; 3], eps_date: &Epsilon) {
     let m = normalize_degrees(((-3.3e-6 * t - 1.50e-4) * t + 35999.0498) * t + 358.475833);
     let sm = (m * DEGTORAD).sin();
 
-    l += 6.288750 * smp + 1.274018 * sx + 0.658309 * s2d + 0.213616 * s2mp
+    l = l + 6.288750 * smp + 1.274018 * sx + 0.658309 * s2d + 0.213616 * s2mp
         - 0.185596 * sm
         - 0.114336 * s2f;
 
@@ -54,6 +54,7 @@ fn embofs_mosh(jd: f64, earth: &mut [f64; 3], eps_date: &Epsilon) {
     let p = 0.950724 + 0.051818 * cmp + 0.009531 * cx + 0.007843 * c2d + 0.002824 * c2mp;
     let dist = 4.263523e-5 / (p * DEGTORAD).sin();
 
+    let l = normalize_degrees(l);
     let l_rad = l * DEGTORAD;
     let b_rad = b * DEGTORAD;
     let mut moon_xyz = polar_to_cartesian([l_rad, b_rad, dist]);
@@ -65,7 +66,6 @@ fn embofs_mosh(jd: f64, earth: &mut [f64; 3], eps_date: &Epsilon) {
         &AstroModels::default(),
         PrecessionDirection::DateToJ2000,
     );
-
     let factor = 1.0 / (EARTH_MOON_MRAT + 1.0);
     earth[0] -= moon_xyz[0] * factor;
     earth[1] -= moon_xyz[1] * factor;
@@ -155,6 +155,54 @@ fn compute_moon(jd: f64, eps_date: &Epsilon) -> [f64; 6] {
     result
 }
 
+fn planet_table(body: Body) -> Result<&'static super::PlantTbl, Error> {
+    match body {
+        Body::Mercury => Ok(&tables::MER404),
+        Body::Venus => Ok(&tables::VEN404),
+        Body::Mars => Ok(&tables::MAR404),
+        Body::Jupiter => Ok(&tables::JUP404),
+        Body::Saturn => Ok(&tables::SAT404),
+        Body::Uranus => Ok(&tables::URA404),
+        Body::Neptune => Ok(&tables::NEP404),
+        Body::Pluto => Ok(&tables::PLU404),
+        _ => Err(Error::EphemerisNotAvailable {
+            body,
+            source: EphemerisSource::Moshier,
+        }),
+    }
+}
+
+pub fn planet_helio_velocity_at(
+    jd: f64,
+    body: Body,
+    eps_j2000: &Epsilon,
+) -> Result<[f64; 3], Error> {
+    let table = planet_table(body)?;
+    let pos = helio_to_equatorial_j2000(jd, table, eps_j2000);
+    let pos_prev = helio_to_equatorial_j2000(jd - PLAN_SPEED_INTV, table, eps_j2000);
+    Ok([
+        (pos[0] - pos_prev[0]) / PLAN_SPEED_INTV,
+        (pos[1] - pos_prev[1]) / PLAN_SPEED_INTV,
+        (pos[2] - pos_prev[2]) / PLAN_SPEED_INTV,
+    ])
+}
+
+pub fn earth_helio_velocity_at(jd: f64, eps_j2000: &Epsilon) -> [f64; 3] {
+    let eps_date = obliquity(jd, CalcFlags::empty(), &AstroModels::default());
+    let eps_date_prev = obliquity(
+        jd - PLAN_SPEED_INTV,
+        CalcFlags::empty(),
+        &AstroModels::default(),
+    );
+    let earth = earth_position(jd, eps_j2000, &eps_date);
+    let earth_prev = earth_position(jd - PLAN_SPEED_INTV, eps_j2000, &eps_date_prev);
+    [
+        (earth[0] - earth_prev[0]) / PLAN_SPEED_INTV,
+        (earth[1] - earth_prev[1]) / PLAN_SPEED_INTV,
+        (earth[2] - earth_prev[2]) / PLAN_SPEED_INTV,
+    ]
+}
+
 pub fn compute_pipeline(
     jd: f64,
     body: Body,
@@ -194,22 +242,7 @@ pub fn compute_pipeline(
             result
         }
         _ => {
-            let table = match body {
-                Body::Mercury => &tables::MER404,
-                Body::Venus => &tables::VEN404,
-                Body::Mars => &tables::MAR404,
-                Body::Jupiter => &tables::JUP404,
-                Body::Saturn => &tables::SAT404,
-                Body::Uranus => &tables::URA404,
-                Body::Neptune => &tables::NEP404,
-                Body::Pluto => &tables::PLU404,
-                _ => {
-                    return Err(Error::EphemerisNotAvailable {
-                        body,
-                        source: EphemerisSource::Moshier,
-                    });
-                }
-            };
+            let table = planet_table(body)?;
             let pos = helio_to_equatorial_j2000(jd, table, eps_j2000);
             let pos_prev = helio_to_equatorial_j2000(jd - PLAN_SPEED_INTV, table, eps_j2000);
             [
