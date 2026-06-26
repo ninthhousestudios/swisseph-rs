@@ -7,6 +7,7 @@ pub mod types;
 pub mod ayanamsa;
 pub mod bias;
 pub mod calc;
+pub mod corrections;
 pub mod date;
 pub mod deltat;
 pub mod eclipse;
