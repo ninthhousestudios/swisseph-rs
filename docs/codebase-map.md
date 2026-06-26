@@ -27,6 +27,7 @@ src/
 ├── calc.rs             — EMPTY stub
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
+│   ├── backend.rs      — compute() public API: embofs_mosh, compute_planet (backward-diff speed), compute_moon (central-diff speed), Body dispatch
 │   ├── moon.rs         — moshmoon2() lunar series evaluator: MeanElements, mean_elements(), chewm(), moon1–4
 │   ├── moon_tables.rs  — generated const arrays: LR/MB/LRT/BT/LRT2/BT2 + z[25] (do not hand-edit, see scripts/gen_moshier_moon_tables.py)
 │   ├── planets.rs      — moshplan2() series evaluator, sscc() harmonic recurrence, fundamental argument constants
@@ -50,6 +51,7 @@ tests/
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
 │   ├── deltat.rs      — golden tests for delta-T (217 cases: 5 models × 43 epochs)
 │   ├── sidereal_time.rs — golden tests for sidereal time (128 cases: 4 models × 32 epochs)
+│   ├── moshier_backend.rs — golden tests for backend::compute (110 cases: 10 bodies × 11 epochs + Earth zero-check)
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   └── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
 ├── golden-data/
@@ -60,6 +62,7 @@ tests/
 │   ├── nutation.json   — C-generated reference data for nutation
 │   ├── deltat.json     — C-generated reference data for delta-T
 │   ├── sidereal_time.json — C-generated reference data for sidereal time
+│   ├── moshier_backend.json — C-generated reference data for backend::compute (swe_calc with ICRS)
 │   ├── moshier_moon.json — C-generated reference data for moshmoon2
 │   └── moshier_planet.json — C-generated reference data for moshplan2
 └── c-gen/
@@ -68,6 +71,7 @@ tests/
     ├── gen_nutation.c  — C harness to regenerate nutation.json
     ├── gen_deltat.c    — C harness to regenerate deltat.json
     ├── gen_sidereal_time.c — C harness to regenerate sidereal_time.json
+    ├── gen_moshier_backend.c — C harness to regenerate moshier_backend.json (swe_calc with all corrections disabled + ICRS)
     ├── gen_moshier_moon.c — C harness to regenerate moshier_moon.json
     └── gen_moshier_planet.c — C harness to regenerate moshier_planet.json
 ```
