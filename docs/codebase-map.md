@@ -25,7 +25,9 @@ src/
 │   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
 ├── sidereal_time.rs    — swe_sidtime0/swe_sidtime port: 4 GMST models, 33-term EoE, long-term model
 ├── calc.rs             — EMPTY stub
-├── moshier/mod.rs      — EMPTY stub
+├── moshier/
+│   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
+│   └── tables.rs       — generated const arrays: 9 planet tables (do not hand-edit, see scripts/gen_moshier_tables.py)
 ├── jpl.rs              — EMPTY stub
 ├── sweph_file.rs       — EMPTY stub
 ├── houses.rs           — EMPTY stub
