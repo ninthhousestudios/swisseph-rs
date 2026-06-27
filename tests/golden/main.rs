@@ -12,6 +12,7 @@ mod obliquity_bias;
 mod precession;
 mod se1_header;
 mod sidereal_time;
+mod sweph_eval;
 
 use std::path::PathBuf;
 

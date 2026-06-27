@@ -1,5 +1,9 @@
+mod evaluate;
 mod parse;
+mod segment;
 pub mod types;
+
+pub use evaluate::evaluate_body;
 
 use std::path::Path;
 
