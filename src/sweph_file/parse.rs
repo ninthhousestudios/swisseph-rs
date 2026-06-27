@@ -105,7 +105,7 @@ pub(super) fn parse_file(
     // Individual asteroid files (SEI_FILE_ANY_AST) have a 4th MPC elements line.
     // All other types (planet, moon, main asteroid) have 3 text lines.
     let num_text_lines: usize = match file_type {
-        FileType::Asteroid => 4,
+        FileType::Asteroid | FileType::PlanetaryMoon => 4,
         _ => 3,
     };
 
@@ -155,7 +155,7 @@ pub(super) fn parse_file(
         ipl.push(id);
     }
 
-    if file_type == FileType::Asteroid {
+    if matches!(file_type, FileType::Asteroid | FileType::PlanetaryMoon) {
         r.skip(30)?;
     }
 

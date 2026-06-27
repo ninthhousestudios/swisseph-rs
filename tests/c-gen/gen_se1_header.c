@@ -17,23 +17,24 @@
 #define ENDIAN_TEST_VAL 0x616263
 #define SEI_FLG_ELLIPSE 4
 #define SE_MARS 4
+#define SE_PLMOON_OFFSET 9000
+#define SE_AST_OFFSET 10000
 
-static const char *basename_of(const char *path) {
-    const char *p = strrchr(path, '/');
-    return p ? p + 1 : path;
+static const char *ephe_relative(const char *path) {
+    const char *marker = strstr(path, "ephe/");
+    return marker ? marker + 5 : path;
 }
 
-static void parse_se1(const char *path, const char *file_type_str, int is_last) {
+static void parse_se1(const char *path, const char *file_type_str, int num_text_lines, int has_astnam, int is_last) {
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         fprintf(stderr, "Cannot open %s\n", path);
         exit(1);
     }
 
-    /* --- Text header: 3 lines for planet/moon --- */
     char line[512];
     int version = 0;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < num_text_lines; i++) {
         if (!fgets(line, sizeof(line), fp)) {
             fprintf(stderr, "Failed to read text header line %d\n", i + 1);
             exit(1);
@@ -112,6 +113,10 @@ static void parse_se1(const char *path, const char *file_type_str, int is_last) 
         }
     }
 
+    if (has_astnam) {
+        fseek(fp, 30, SEEK_CUR);
+    }
+
     /* CRC32 — skip */
     fseek(fp, 4, SEEK_CUR);
 
@@ -120,7 +125,7 @@ static void parse_se1(const char *path, const char *file_type_str, int is_last) 
 
     /* --- Output --- */
     printf("  {\n");
-    printf("    \"filename\": \"%s\",\n", basename_of(path));
+    printf("    \"filename\": \"%s\",\n", ephe_relative(path));
     printf("    \"version\": %d,\n", version);
     printf("    \"file_type\": \"%s\",\n", file_type_str);
     printf("    \"tfstart\": %.20e,\n", tfstart);
@@ -143,7 +148,13 @@ static void parse_se1(const char *path, const char *file_type_str, int is_last) 
 
         int32_t rmax_raw;
         fread(&rmax_raw, 4, 1, fp);
-        double rmax = rmax_raw / 1000.0;
+        double rmax;
+        if (ipl[k] >= SE_PLMOON_OFFSET && ipl[k] < SE_AST_OFFSET
+            && ((ipl[k] % 100) == 99 || (ipl[k] - 9000) / 100 == 4)) {
+            rmax = rmax_raw / 1000000.0;
+        } else {
+            rmax = rmax_raw / 1000.0;
+        }
 
         double orbital[10];
         fread(orbital, 8, 10, fp);
@@ -178,13 +189,21 @@ static void parse_se1(const char *path, const char *file_type_str, int is_last) 
         printf("        \"dprot\": %.20e,\n", dprot);
         printf("        \"dqrot\": %.20e,\n", dqrot);
         printf("        \"peri\": %.20e,\n", peri);
-        printf("        \"dperi\": %.20e\n", dperi);
-        printf("      }%s\n", k < nplan - 1 ? "," : "");
+        printf("        \"dperi\": %.20e", dperi);
 
-        /* Skip refep if SEI_FLG_ELLIPSE */
         if (iflg & SEI_FLG_ELLIPSE) {
-            fseek(fp, ncoe * 2 * 8, SEEK_CUR);
+            int count = ncoe * 2;
+            printf(",\n        \"refep\": [");
+            for (int j = 0; j < count; j++) {
+                double coeff;
+                fread(&coeff, 8, 1, fp);
+                printf("%.20e", coeff);
+                if (j < count - 1) printf(", ");
+            }
+            printf("]");
         }
+
+        printf("\n      }%s\n", k < nplan - 1 ? "," : "");
     }
 
     printf("    ]\n");
@@ -196,8 +215,9 @@ static void parse_se1(const char *path, const char *file_type_str, int is_last) 
 int main(void) {
     printf("{\n");
     printf("  \"files\": [\n");
-    parse_se1("../../../swisseph/ephe/sepl_18.se1", "planet", 0);
-    parse_se1("../../../swisseph/ephe/semo_18.se1", "moon", 1);
+    parse_se1("../../../swisseph/ephe/sepl_18.se1", "planet", 3, 0, 0);
+    parse_se1("../../../swisseph/ephe/semo_18.se1", "moon", 3, 0, 0);
+    parse_se1("../../../swisseph/ephe/sat/sepm9401.se1", "planetary_moon", 4, 1, 1);
     printf("  ]\n");
     printf("}\n");
     return 0;

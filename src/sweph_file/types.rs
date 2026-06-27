@@ -37,6 +37,7 @@ pub enum FileType {
     Moon,
     MainAsteroid,
     Asteroid,
+    PlanetaryMoon,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

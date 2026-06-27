@@ -57,6 +57,10 @@ fn detect_file_type(path: &Path) -> Result<FileType, Error> {
         Ok(FileType::Moon)
     } else if stem.starts_with("seas") {
         Ok(FileType::MainAsteroid)
+    } else if stem.starts_with("sepm") {
+        Ok(FileType::PlanetaryMoon)
+    } else if stem.starts_with("se") && stem.len() > 2 && stem.as_bytes()[2].is_ascii_digit() {
+        Ok(FileType::Asteroid)
     } else {
         Err(Error::FileFormat(format!(
             "unrecognized SE1 file type: {}",

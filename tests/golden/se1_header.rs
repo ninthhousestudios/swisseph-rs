@@ -21,6 +21,8 @@ struct PlanetCase {
     dqrot: f64,
     peri: f64,
     dperi: f64,
+    #[serde(default)]
+    refep: Option<Vec<f64>>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +82,7 @@ fn header_fields_match_c() {
             "moon" => swisseph::sweph_file::FileType::Moon,
             "main_asteroid" => swisseph::sweph_file::FileType::MainAsteroid,
             "asteroid" => swisseph::sweph_file::FileType::Asteroid,
+            "planetary_moon" => swisseph::sweph_file::FileType::PlanetaryMoon,
             other => panic!("unknown file type: {other}"),
         };
         assert_eq!(h.file_type, expected_type, "{}: file_type", fc.filename);
@@ -112,6 +115,17 @@ fn header_fields_match_c() {
             super::assert_f64_exact(&format!("{label}: dqrot"), pc.dqrot, pd.dqrot);
             super::assert_f64_exact(&format!("{label}: peri"), pc.peri, pd.peri);
             super::assert_f64_exact(&format!("{label}: dperi"), pc.dperi, pd.dperi);
+            match (&pc.refep, &pd.refep) {
+                (Some(expected), Some(actual)) => {
+                    assert_eq!(expected.len(), actual.len(), "{label}: refep length");
+                    for (j, (e, a)) in expected.iter().zip(actual).enumerate() {
+                        super::assert_f64_exact(&format!("{label}: refep[{j}]"), *e, *a);
+                    }
+                }
+                (None, None) => {}
+                (Some(_), None) => panic!("{label}: expected refep but got None"),
+                (None, Some(_)) => panic!("{label}: expected no refep but got Some"),
+            }
         }
     }
 }
@@ -123,12 +137,17 @@ fn byte_order_detection_all_files() {
         .join("swisseph")
         .join("ephe");
     let mut count = 0;
-    for entry in std::fs::read_dir(&ephe_dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|e| e == "se1") {
-            SwissEphFile::open(&path)
-                .unwrap_or_else(|e| panic!("failed to open {}: {e}", path.display()));
-            count += 1;
+    let mut stack = vec![ephe_dir.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "se1") {
+                SwissEphFile::open(&path)
+                    .unwrap_or_else(|e| panic!("failed to open {}: {e}", path.display()));
+                count += 1;
+            }
         }
     }
     assert!(count > 0, "no .se1 files found in {}", ephe_dir.display());
