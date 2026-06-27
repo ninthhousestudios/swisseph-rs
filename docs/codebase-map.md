@@ -35,9 +35,11 @@ src/
 │   └── tables.rs       — generated const arrays: 9 planet tables (do not hand-edit, see scripts/gen_moshier_tables.py)
 ├── jpl.rs              — EMPTY stub
 ├── sweph_file/
-│   ├── mod.rs          — SwissEphFile (mmap-based .se1 reader), body_file_id(Body → ipl value)
+│   ├── mod.rs          — SwissEphFile (mmap-based .se1 reader), body_file_id(Body → ipl value), evaluate_body re-export
 │   ├── types.rs        — FileHeader, PlanetFileData, FileType, ByteOrder, SEI_*/SE_* body constants, SEI_FLG_* flags
-│   └── parse.rs        — binary format parser: Reader cursor, detect_byte_order, parse_file (header + per-planet metadata)
+│   ├── parse.rs        — binary format parser: Reader cursor, detect_byte_order, parse_file (header + per-planet metadata)
+│   ├── segment.rs      — Chebyshev coefficient unpacking from mmap'd bytes: 6 packing modes (4/3/2/1-byte, nibble, quarter-byte)
+│   └── evaluate.rs     — rot_back (orbital-plane→ecliptic/equatorial transform), evaluate_body (public API: file + body_id + jd → [x,y,z,vx,vy,vz])
 ├── houses.rs           — EMPTY stub
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
@@ -61,7 +63,8 @@ tests/
 │   ├── moshier_backend.rs — golden tests for backend::compute (110 cases: 10 bodies × 11 epochs + Earth zero-check)
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   ├── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
-│   └── se1_header.rs  — golden tests for SE1 file parsing (11 planet metadata fields, byte-order detection on 84 files)
+│   ├── se1_header.rs  — golden tests for SE1 file parsing (11 planet metadata fields, byte-order detection on 84 files)
+│   └── sweph_eval.rs  — golden tests for evaluate_body (80 cases: 10 bodies × 8 epochs, bitwise-exact positions + velocities)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -76,7 +79,8 @@ tests/
 │   ├── moshier_backend.json — C-generated reference data for backend::compute (swe_calc with ICRS)
 │   ├── moshier_moon.json — C-generated reference data for moshmoon2
 │   ├── moshier_planet.json — C-generated reference data for moshplan2
-│   └── se1_header.json — C-generated reference data for SE1 file headers (sepl_18, semo_18)
+│   ├── se1_header.json — C-generated reference data for SE1 file headers (sepl_18, semo_18)
+│   └── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -89,6 +93,7 @@ tests/
     ├── gen_moshier_backend.c — C harness to regenerate moshier_backend.json (swe_calc with all corrections disabled + ICRS)
     ├── gen_moshier_moon.c — C harness to regenerate moshier_moon.json
     ├── gen_moshier_planet.c — C harness to regenerate moshier_planet.json
+    ├── gen_sweph_eval.c — C harness to regenerate sweph_eval.json (raw SE1 Chebyshev eval via swed.pldat internals)
     └── gen_se1_header.c — standalone binary parser, dumps header + planet metadata as JSON
 ```
 
