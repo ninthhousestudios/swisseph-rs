@@ -19,6 +19,7 @@ pub enum Error {
     CircumpolarBody,
     InvalidTime { hour: i32, minute: i32, second: f64 },
     InvalidLeapSecond { year: i32, month: i32, day: i32 },
+    UnsupportedEphemeris(EphemerisSource),
     CError(String),
 }
 
@@ -51,6 +52,9 @@ impl fmt::Display for Error {
             }
             Self::InvalidLeapSecond { year, month, day } => {
                 write!(f, "no leap second on {year}-{month:02}-{day:02}")
+            }
+            Self::UnsupportedEphemeris(source) => {
+                write!(f, "ephemeris source {source:?} is not yet supported")
             }
             Self::CError(msg) => write!(f, "{msg}"),
         }

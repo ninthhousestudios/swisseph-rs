@@ -53,6 +53,9 @@ pub struct Ephemeris {
 
 impl Ephemeris {
     pub fn new(config: EphemerisConfig) -> crate::Result<Self> {
+        if config.ephemeris_source != EphemerisSource::Moshier {
+            return Err(Error::UnsupportedEphemeris(config.ephemeris_source));
+        }
         let leap_seconds = Self::build_leap_seconds(&config)?;
         Ok(Self {
             config,
