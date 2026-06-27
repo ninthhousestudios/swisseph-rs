@@ -34,7 +34,10 @@ src/
 │   ├── planets.rs      — moshplan2() series evaluator, sscc() harmonic recurrence, fundamental argument constants
 │   └── tables.rs       — generated const arrays: 9 planet tables (do not hand-edit, see scripts/gen_moshier_tables.py)
 ├── jpl.rs              — EMPTY stub
-├── sweph_file.rs       — EMPTY stub
+├── sweph_file/
+│   ├── mod.rs          — SwissEphFile (mmap-based .se1 reader), body_file_id(Body → ipl value)
+│   ├── types.rs        — FileHeader, PlanetFileData, FileType, ByteOrder, SEI_*/SE_* body constants, SEI_FLG_* flags
+│   └── parse.rs        — binary format parser: Reader cursor, detect_byte_order, parse_file (header + per-planet metadata)
 ├── houses.rs           — EMPTY stub
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
@@ -57,7 +60,8 @@ tests/
 │   ├── mean_elements.rs — golden tests for mean node, mean apogee, ECL_NUT (165 cases: 3 bodies × 11 epochs × 5 flag combos)
 │   ├── moshier_backend.rs — golden tests for backend::compute (110 cases: 10 bodies × 11 epochs + Earth zero-check)
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
-│   └── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
+│   ├── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
+│   └── se1_header.rs  — golden tests for SE1 file parsing (11 planet metadata fields, byte-order detection on 84 files)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -71,7 +75,8 @@ tests/
 │   ├── mean_elements.json — C-generated reference data for mean node, mean apogee, ECL_NUT
 │   ├── moshier_backend.json — C-generated reference data for backend::compute (swe_calc with ICRS)
 │   ├── moshier_moon.json — C-generated reference data for moshmoon2
-│   └── moshier_planet.json — C-generated reference data for moshplan2
+│   ├── moshier_planet.json — C-generated reference data for moshplan2
+│   └── se1_header.json — C-generated reference data for SE1 file headers (sepl_18, semo_18)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -83,7 +88,8 @@ tests/
     ├── gen_sidereal_time.c — C harness to regenerate sidereal_time.json
     ├── gen_moshier_backend.c — C harness to regenerate moshier_backend.json (swe_calc with all corrections disabled + ICRS)
     ├── gen_moshier_moon.c — C harness to regenerate moshier_moon.json
-    └── gen_moshier_planet.c — C harness to regenerate moshier_planet.json
+    ├── gen_moshier_planet.c — C harness to regenerate moshier_planet.json
+    └── gen_se1_header.c — standalone binary parser, dumps header + planet metadata as JSON
 ```
 
 ## Key Types in types.rs
