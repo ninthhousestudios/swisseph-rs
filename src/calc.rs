@@ -47,6 +47,9 @@ pub fn plaus_iflag(mut flags: CalcFlags) -> CalcFlags {
     if flags.contains(CalcFlags::XYZ) {
         flags.remove(CalcFlags::RADIANS);
     }
+    if flags.contains(CalcFlags::SPEED) && flags.contains(CalcFlags::SPEED3) {
+        flags.remove(CalcFlags::SPEED3);
+    }
 
     // Ephemeris selection: force MOSEPH for now (only backend available).
     // Clear Horizons flags — they only apply to JPL ephemeris.
@@ -537,6 +540,53 @@ pub fn extract_output(xreturn: &[f64; 24], flags: CalcFlags) -> [f64; 6] {
         data[4] *= DEGTORAD;
     }
     data
+}
+
+pub fn extract_ecl_nut(ecl_nut: &[f64; 6], flags: CalcFlags) -> [f64; 6] {
+    if flags.intersects(CalcFlags::EQUATORIAL | CalcFlags::XYZ) {
+        return [0.0; 6];
+    }
+    let mut data = *ecl_nut;
+    if flags.contains(CalcFlags::RADIANS) {
+        for v in &mut data[..4] {
+            *v *= DEGTORAD;
+        }
+    }
+    data
+}
+
+pub fn speed3_interval(body: Body) -> f64 {
+    match body {
+        Body::Moon => MOON_SPEED_INTV,
+        Body::OscuApogee | Body::TrueNode => 0.1,
+        _ => PLAN_SPEED_INTV,
+    }
+}
+
+pub fn denormalize_positions(x0: &mut [f64; 24], x1: &[f64; 24], x2: &mut [f64; 24]) {
+    for i in [0, 1, 2, 6, 7, 8, 12, 13, 14, 18, 19, 20] {
+        if x0[i] - x1[i] < -180.0 {
+            x0[i] += 360.0;
+        }
+        if x0[i] - x1[i] > 180.0 {
+            x0[i] -= 360.0;
+        }
+        if x2[i] - x1[i] < -180.0 {
+            x2[i] += 360.0;
+        }
+        if x2[i] - x1[i] > 180.0 {
+            x2[i] -= 360.0;
+        }
+    }
+}
+
+pub fn calc_speed_3point(x1: &mut [f64; 24], x0: &[f64; 24], x2: &[f64; 24], dt: f64) {
+    let dt2 = 2.0 * dt;
+    for base in [0, 6, 12, 18] {
+        for j in 0..3 {
+            x1[base + 3 + j] = (x2[base + j] - x0[base + j]) / dt2;
+        }
+    }
 }
 
 fn mean_element_pipeline(

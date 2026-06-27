@@ -68,24 +68,22 @@ impl Ephemeris {
         &self.leap_seconds
     }
 
+    /// Compute planetary position.
+    ///
+    /// Unlike the C library, this implementation does not cache computed
+    /// positions. Moshier evaluations are sub-microsecond; callers needing
+    /// deduplication for repeated same-JD queries should cache externally.
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let flags = crate::calc::plaus_iflag(flags);
         let unsupported = flags & (CalcFlags::TOPOCTR | CalcFlags::SIDEREAL);
         if !unsupported.is_empty() {
             return Err(Error::UnsupportedFlags(unsupported));
         }
-        let models = &self.config.astro_models;
 
         if body == Body::EclipticNutation {
-            let mut xreturn = [0.0; 24];
-            let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);
-            xreturn[..6].copy_from_slice(&ecl_nut);
-            // C routes ECL_NUT through the standard offset extraction (EQUATORIAL/XYZ
-            // read from slots 12+/6+ which are zero) but does NOT apply RADIANS —
-            // the values are always in degrees.
-            let flags_no_rad = flags & !CalcFlags::RADIANS;
+            let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, &self.config.astro_models);
             return Ok(CalcResult {
-                data: crate::calc::extract_output(&xreturn, flags_no_rad),
+                data: crate::calc::extract_ecl_nut(&ecl_nut, flags),
                 flags_used: flags,
             });
         }
@@ -97,22 +95,34 @@ impl Ephemeris {
             });
         }
 
+        if flags.contains(CalcFlags::SPEED3) {
+            return self.calc_speed3(jd_tt, body, flags);
+        }
+
+        let xreturn = self.calc_inner(jd_tt, body, flags)?;
+        Ok(CalcResult {
+            data: crate::calc::extract_output(&xreturn, flags),
+            flags_used: flags,
+        })
+    }
+
+    pub fn calc_ut(&self, jd_ut: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
+        let dt = crate::deltat::calc_deltat(jd_ut, &self.config);
+        self.calc(jd_ut + dt, body, flags)
+    }
+
+    fn calc_inner(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<[f64; 24], Error> {
+        let models = &self.config.astro_models;
+
         if matches!(body, Body::MeanNode | Body::MeanApogee) {
             if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
-                return Ok(CalcResult {
-                    data: [0.0; 6],
-                    flags_used: flags,
-                });
+                return Ok([0.0; 24]);
             }
-            let xreturn = match body {
-                Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models)?,
-                Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models)?,
+            return match body {
+                Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models),
+                Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models),
                 _ => unreachable!(),
             };
-            return Ok(CalcResult {
-                data: crate::calc::extract_output(&xreturn, flags),
-                flags_used: flags,
-            });
         }
 
         if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
@@ -124,9 +134,9 @@ impl Ephemeris {
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
-        let xreturn = match body {
-            Body::Sun => crate::calc::calc_sun(jd_tt, &eps_j2000, flags, models)?,
-            Body::Moon => crate::calc::calc_moon(jd_tt, &eps_j2000, flags, models)?,
+        match body {
+            Body::Sun => crate::calc::calc_sun(jd_tt, &eps_j2000, flags, models),
+            Body::Moon => crate::calc::calc_moon(jd_tt, &eps_j2000, flags, models),
             Body::Mercury
             | Body::Venus
             | Body::Mars
@@ -134,17 +144,27 @@ impl Ephemeris {
             | Body::Saturn
             | Body::Uranus
             | Body::Neptune
-            | Body::Pluto => crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models)?,
-            _ => {
-                return Err(Error::EphemerisNotAvailable {
-                    body,
-                    source: EphemerisSource::Moshier,
-                });
-            }
-        };
+            | Body::Pluto => crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models),
+            _ => Err(Error::EphemerisNotAvailable {
+                body,
+                source: EphemerisSource::Moshier,
+            }),
+        }
+    }
+
+    fn calc_speed3(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
+        let dt = crate::calc::speed3_interval(body);
+        let inner_flags = (flags & !CalcFlags::SPEED3) | CalcFlags::SPEED;
+
+        let mut x0 = self.calc_inner(jd_tt - dt, body, inner_flags)?;
+        let mut x2 = self.calc_inner(jd_tt + dt, body, inner_flags)?;
+        let mut x1 = self.calc_inner(jd_tt, body, inner_flags)?;
+
+        crate::calc::denormalize_positions(&mut x0, &x1, &mut x2);
+        crate::calc::calc_speed_3point(&mut x1, &x0, &x2, dt);
 
         Ok(CalcResult {
-            data: crate::calc::extract_output(&xreturn, flags),
+            data: crate::calc::extract_output(&x1, flags | CalcFlags::SPEED),
             flags_used: flags,
         })
     }
