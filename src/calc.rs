@@ -564,27 +564,31 @@ pub fn speed3_interval(body: Body) -> f64 {
 }
 
 pub fn denormalize_positions(x0: &mut [f64; 24], x1: &[f64; 24], x2: &mut [f64; 24]) {
-    for i in [0, 1, 2, 6, 7, 8, 12, 13, 14, 18, 19, 20] {
-        if x0[i] - x1[i] < -180.0 {
-            x0[i] += 360.0;
-        }
-        if x0[i] - x1[i] > 180.0 {
+    // Only ecliptic longitude [0] and right ascension [12] can wrap ±360°.
+    for i in [0, 12] {
+        if x1[i] - x0[i] < -180.0 {
             x0[i] -= 360.0;
         }
-        if x2[i] - x1[i] < -180.0 {
-            x2[i] += 360.0;
+        if x1[i] - x0[i] > 180.0 {
+            x0[i] += 360.0;
         }
-        if x2[i] - x1[i] > 180.0 {
+        if x1[i] - x2[i] < -180.0 {
             x2[i] -= 360.0;
+        }
+        if x1[i] - x2[i] > 180.0 {
+            x2[i] += 360.0;
         }
     }
 }
 
 pub fn calc_speed_3point(x1: &mut [f64; 24], x0: &[f64; 24], x2: &[f64; 24], dt: f64) {
-    let dt2 = 2.0 * dt;
+    // Quadratic interpolation derivative at t+dt (matches C's calc_speed).
     for base in [0, 6, 12, 18] {
         for j in 0..3 {
-            x1[base + 3 + j] = (x2[base + j] - x0[base + j]) / dt2;
+            let k = base + j;
+            let b = (x2[k] - x0[k]) / 2.0;
+            let a = (x2[k] + x0[k]) / 2.0 - x1[k];
+            x1[k + 3] = (2.0 * a + b) / dt;
         }
     }
 }

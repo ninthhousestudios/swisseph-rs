@@ -80,14 +80,6 @@ impl Ephemeris {
             return Err(Error::UnsupportedFlags(unsupported));
         }
 
-        if body == Body::EclipticNutation {
-            let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, &self.config.astro_models);
-            return Ok(CalcResult {
-                data: crate::calc::extract_ecl_nut(&ecl_nut, flags),
-                flags_used: flags,
-            });
-        }
-
         if body == Body::Earth {
             return Ok(CalcResult {
                 data: [0.0; 6],
@@ -101,7 +93,7 @@ impl Ephemeris {
 
         let xreturn = self.calc_inner(jd_tt, body, flags)?;
         Ok(CalcResult {
-            data: crate::calc::extract_output(&xreturn, flags),
+            data: Self::extract_for_body(&xreturn, body, flags),
             flags_used: flags,
         })
     }
@@ -111,8 +103,28 @@ impl Ephemeris {
         self.calc(jd_ut + dt, body, flags)
     }
 
+    fn extract_for_body(xreturn: &[f64; 24], body: Body, flags: CalcFlags) -> [f64; 6] {
+        if body == Body::EclipticNutation {
+            crate::calc::extract_ecl_nut(
+                &[
+                    xreturn[0], xreturn[1], xreturn[2], xreturn[3], xreturn[4], xreturn[5],
+                ],
+                flags,
+            )
+        } else {
+            crate::calc::extract_output(xreturn, flags)
+        }
+    }
+
     fn calc_inner(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<[f64; 24], Error> {
         let models = &self.config.astro_models;
+
+        if body == Body::EclipticNutation {
+            let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);
+            let mut xreturn = [0.0; 24];
+            xreturn[..6].copy_from_slice(&ecl_nut);
+            return Ok(xreturn);
+        }
 
         if matches!(body, Body::MeanNode | Body::MeanApogee) {
             if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
@@ -154,7 +166,7 @@ impl Ephemeris {
 
     fn calc_speed3(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let dt = crate::calc::speed3_interval(body);
-        let inner_flags = (flags & !CalcFlags::SPEED3) | CalcFlags::SPEED;
+        let inner_flags = flags & !CalcFlags::SPEED3;
 
         let mut x0 = self.calc_inner(jd_tt - dt, body, inner_flags)?;
         let mut x2 = self.calc_inner(jd_tt + dt, body, inner_flags)?;
@@ -164,7 +176,7 @@ impl Ephemeris {
         crate::calc::calc_speed_3point(&mut x1, &x0, &x2, dt);
 
         Ok(CalcResult {
-            data: crate::calc::extract_output(&x1, flags | CalcFlags::SPEED),
+            data: Self::extract_for_body(&x1, body, flags | CalcFlags::SPEED),
             flags_used: flags,
         })
     }
