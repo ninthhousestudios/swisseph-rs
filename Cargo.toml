@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2"
+memmap2 = "0.9"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
