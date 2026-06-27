@@ -21,7 +21,9 @@ impl SwissEphFile {
         let file_type = detect_file_type(path)?;
         let file =
             std::fs::File::open(path).map_err(|_| Error::FileNotFound(path.to_path_buf()))?;
-        // SAFETY: file is read-only and we do not modify the mapping
+        // SAFETY: the caller must ensure the file is not truncated, replaced, or
+        // modified by another process while this mapping is live. Ephemeris .se1
+        // files are static data installed once and never mutated at runtime.
         let mmap = unsafe { Mmap::map(&file) }
             .map_err(|e| Error::FileFormat(format!("mmap failed: {e}")))?;
         let (header, planets) = parse::parse_file(&mmap, file_type)?;
