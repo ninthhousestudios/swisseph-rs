@@ -3,7 +3,9 @@ use crate::constants::*;
 use crate::corrections::{aberr_light, deflect_light};
 use crate::error::Error;
 use crate::flags::CalcFlags;
-use crate::math::{cartesian_to_polar_with_speed, polar_to_cartesian_with_speed, rotate_x_sincos};
+use crate::math::{
+    cartesian_to_polar_with_speed, diff_radians, polar_to_cartesian_with_speed, rotate_x_sincos,
+};
 use crate::moshier::backend::{
     PipelinePositions, compute_pipeline, earth_helio_velocity_at, planet_helio_velocity_at,
 };
@@ -110,8 +112,11 @@ fn precess_speed(
     xx[4] = vel3[1];
     xx[5] = vel3[2];
 
-    // Obliquity of date for equatorial ↔ ecliptic transform
-    let oe = obliquity(jd, flags, models);
+    // C uses oec (of date) for J2000→Date, oec2000 for Date→J2000
+    let oe = match direction {
+        PrecessionDirection::J2000ToDate => obliquity(jd, flags, models),
+        PrecessionDirection::DateToJ2000 => obliquity(J2000, flags, models),
+    };
 
     // Equatorial → ecliptic (position and velocity)
     let pos_ecl = rotate_x_sincos([xx[0], xx[1], xx[2]], oe.sin_eps, oe.cos_eps);
@@ -531,4 +536,120 @@ pub fn extract_output(xreturn: &[f64; 24], flags: CalcFlags) -> [f64; 6] {
         data[4] *= DEGTORAD;
     }
     data
+}
+
+fn mean_element_pipeline(
+    xx: &mut [f64; 6],
+    jd: f64,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> [f64; 24] {
+    // Ecliptic polar → ecliptic cartesian (with speed)
+    let cart = polar_to_cartesian_with_speed(*xx);
+    *xx = cart;
+
+    // Ecliptic → equatorial: rotate by -obliquity of date
+    let eps_date = obliquity(jd, flags, models);
+    let pos_eq = rotate_x_sincos([xx[0], xx[1], xx[2]], -eps_date.sin_eps, eps_date.cos_eps);
+    let vel_eq = rotate_x_sincos([xx[3], xx[4], xx[5]], -eps_date.sin_eps, eps_date.cos_eps);
+    *xx = [
+        pos_eq[0], pos_eq[1], pos_eq[2], vel_eq[0], vel_eq[1], vel_eq[2],
+    ];
+
+    if !flags.contains(CalcFlags::SPEED) {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    // J2000: precess equatorial back to J2000
+    let eps = if flags.contains(CalcFlags::J2000) {
+        let mut pos3 = [xx[0], xx[1], xx[2]];
+        precess(
+            &mut pos3,
+            jd,
+            flags,
+            models,
+            PrecessionDirection::DateToJ2000,
+        );
+        xx[0] = pos3[0];
+        xx[1] = pos3[1];
+        xx[2] = pos3[2];
+        if flags.contains(CalcFlags::SPEED) {
+            precess_speed(xx, jd, flags, models, PrecessionDirection::DateToJ2000);
+        }
+        obliquity(J2000, flags, models)
+    } else {
+        eps_date
+    };
+
+    let nut_val = nutation(jd, flags, models);
+    let nutv = if flags.contains(CalcFlags::SPEED) {
+        Some(nutation(jd - NUT_SPEED_INTV, flags, models))
+    } else {
+        None
+    };
+
+    app_pos_rest(xx, flags, &eps, &nut_val, nutv.as_ref())
+}
+
+pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result<[f64; 24], Error> {
+    let pos = crate::moshier::moon::mean_node(jd)?;
+    let pos_prev = crate::moshier::moon::mean_node(jd - MEAN_NODE_SPEED_INTV)?;
+
+    let mut xx = [0.0; 6];
+    xx[0] = pos[0];
+    xx[1] = pos[1];
+    xx[2] = pos[2];
+    xx[3] = diff_radians(pos[0], pos_prev[0]) / MEAN_NODE_SPEED_INTV;
+    xx[4] = 0.0;
+    xx[5] = 0.0;
+
+    let mut xreturn = mean_element_pipeline(&mut xx, jd, flags, models);
+
+    if !flags.contains(CalcFlags::SIDEREAL) && !flags.contains(CalcFlags::J2000) {
+        xreturn[1] = 0.0;
+        xreturn[4] = 0.0;
+        xreturn[5] = 0.0;
+        xreturn[8] = 0.0;
+        xreturn[11] = 0.0;
+    }
+
+    Ok(xreturn)
+}
+
+pub fn calc_mean_apogee(
+    jd: f64,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let pos = crate::moshier::moon::mean_apogee(jd)?;
+    let pos_prev = crate::moshier::moon::mean_apogee(jd - MEAN_NODE_SPEED_INTV)?;
+
+    let mut xx = [0.0; 6];
+    xx[0] = pos[0];
+    xx[1] = pos[1];
+    xx[2] = pos[2];
+    xx[3] = diff_radians(pos[0], pos_prev[0]) / MEAN_NODE_SPEED_INTV;
+    xx[4] = diff_radians(pos[1], pos_prev[1]) / MEAN_NODE_SPEED_INTV;
+    xx[5] = 0.0;
+
+    let mut xreturn = mean_element_pipeline(&mut xx, jd, flags, models);
+
+    xreturn[5] = 0.0;
+
+    Ok(xreturn)
+}
+
+pub fn calc_ecl_nut(jd: f64, flags: CalcFlags, models: &AstroModels) -> [f64; 6] {
+    let eps = obliquity(jd, flags, models);
+    let nut_val = nutation(jd, flags, models);
+    [
+        (eps.eps + nut_val.deps) * RADTODEG,
+        eps.eps * RADTODEG,
+        nut_val.dpsi * RADTODEG,
+        nut_val.deps * RADTODEG,
+        0.0,
+        0.0,
+    ]
 }

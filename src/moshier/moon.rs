@@ -1,5 +1,11 @@
-use crate::constants::{AUNIT, J2000, STR};
-use crate::math::mods3600;
+use std::f64::consts::PI;
+
+use crate::constants::{
+    AUNIT, CORR_MNODE_JD_T0GREG, DEGTORAD, J2000, JPL_DE431_END, JPL_DE431_START, MOON_MEAN_DIST,
+    MOON_MEAN_ECC, MOON_MEAN_INCL, MOSHNDEPH_END, MOSHNDEPH_START, STR,
+};
+use crate::error::Error;
+use crate::math::{cartesian_to_polar, mod_2pi, mods3600, polar_to_cartesian, rotate_x};
 
 use super::moon_tables::*;
 
@@ -604,4 +610,72 @@ pub fn moshmoon2(jd: f64) -> [f64; 3] {
     moon3(&mut s, &me);
     moon4(&mut s);
     s.moonpol
+}
+
+fn corr_mean_node(jd: f64) -> f64 {
+    if jd < JPL_DE431_START || jd > JPL_DE431_END {
+        return 0.0;
+    }
+    let dj = jd - CORR_MNODE_JD_T0GREG;
+    let dayscty = 36524.25;
+    let i = (dj / dayscty).floor() as usize;
+    let dfrac = (dj - i as f64 * dayscty) / dayscty;
+    MEAN_NODE_CORR[i] + dfrac * (MEAN_NODE_CORR[i + 1] - MEAN_NODE_CORR[i])
+}
+
+fn corr_mean_apog(jd: f64) -> f64 {
+    if jd < JPL_DE431_START || jd > JPL_DE431_END {
+        return 0.0;
+    }
+    let dj = jd - CORR_MNODE_JD_T0GREG;
+    let dayscty = 36524.25;
+    let i = (dj / dayscty).floor() as usize;
+    let dfrac = (dj - i as f64 * dayscty) / dayscty;
+    MEAN_APSIS_CORR[i] + dfrac * (MEAN_APSIS_CORR[i + 1] - MEAN_APSIS_CORR[i])
+}
+
+pub fn mean_node(jd: f64) -> Result<[f64; 3], Error> {
+    if jd < MOSHNDEPH_START || jd > MOSHNDEPH_END {
+        return Err(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: MOSHNDEPH_START,
+            end: MOSHNDEPH_END,
+        });
+    }
+    let t = (jd - J2000) / 36525.0;
+    let me = mean_elements(t);
+    let dcor = corr_mean_node(jd) * 3600.0;
+    let lon = mod_2pi((me.swelp - me.nf - dcor) * STR);
+    Ok([lon, 0.0, MOON_MEAN_DIST / AUNIT])
+}
+
+pub fn mean_apogee(jd: f64) -> Result<[f64; 3], Error> {
+    if jd < MOSHNDEPH_START || jd > MOSHNDEPH_END {
+        return Err(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: MOSHNDEPH_START,
+            end: MOSHNDEPH_END,
+        });
+    }
+    let t = (jd - J2000) / 36525.0;
+    let me = mean_elements(t);
+
+    let mut pol = [
+        mod_2pi((me.swelp - me.mp) * STR + PI),
+        0.0,
+        MOON_MEAN_DIST * (1.0 + MOON_MEAN_ECC) / AUNIT,
+    ];
+
+    let dcor = corr_mean_apog(jd) * DEGTORAD;
+    pol[0] = mod_2pi(pol[0] - dcor);
+
+    let node = mod_2pi((me.swelp - me.nf) * STR - corr_mean_node(jd) * DEGTORAD);
+    pol[0] = mod_2pi(pol[0] - node);
+
+    let cart = polar_to_cartesian(pol);
+    let cart = rotate_x(cart, -MOON_MEAN_INCL * DEGTORAD);
+    pol = cartesian_to_polar(cart);
+
+    pol[0] = mod_2pi(pol[0] + node);
+    Ok(pol)
 }

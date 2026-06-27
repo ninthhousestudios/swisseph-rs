@@ -70,14 +70,21 @@ impl Ephemeris {
 
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let flags = crate::calc::plaus_iflag(flags);
-        let unsupported = flags
-            & (CalcFlags::HELCTR | CalcFlags::BARYCTR | CalcFlags::TOPOCTR | CalcFlags::SIDEREAL);
+        let unsupported = flags & (CalcFlags::TOPOCTR | CalcFlags::SIDEREAL);
         if !unsupported.is_empty() {
             return Err(Error::UnsupportedFlags(unsupported));
         }
         let models = &self.config.astro_models;
-        let eps_j2000 =
-            crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
+
+        if body == Body::EclipticNutation {
+            let mut xreturn = [0.0; 24];
+            let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);
+            xreturn[..6].copy_from_slice(&ecl_nut);
+            return Ok(CalcResult {
+                data: crate::calc::extract_output(&xreturn, flags),
+                flags_used: flags,
+            });
+        }
 
         if body == Body::Earth {
             return Ok(CalcResult {
@@ -86,10 +93,50 @@ impl Ephemeris {
             });
         }
 
+        if matches!(body, Body::MeanNode | Body::MeanApogee) {
+            if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
+                return Ok(CalcResult {
+                    data: [0.0; 6],
+                    flags_used: flags,
+                });
+            }
+            let xreturn = match body {
+                Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models)?,
+                Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models)?,
+                _ => unreachable!(),
+            };
+            return Ok(CalcResult {
+                data: crate::calc::extract_output(&xreturn, flags),
+                flags_used: flags,
+            });
+        }
+
+        if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
+            return Err(Error::UnsupportedFlags(
+                flags & (CalcFlags::HELCTR | CalcFlags::BARYCTR),
+            ));
+        }
+
+        let eps_j2000 =
+            crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
+
         let xreturn = match body {
             Body::Sun => crate::calc::calc_sun(jd_tt, &eps_j2000, flags, models)?,
             Body::Moon => crate::calc::calc_moon(jd_tt, &eps_j2000, flags, models)?,
-            _ => crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models)?,
+            Body::Mercury
+            | Body::Venus
+            | Body::Mars
+            | Body::Jupiter
+            | Body::Saturn
+            | Body::Uranus
+            | Body::Neptune
+            | Body::Pluto => crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models)?,
+            _ => {
+                return Err(Error::EphemerisNotAvailable {
+                    body,
+                    source: EphemerisSource::Moshier,
+                });
+            }
         };
 
         Ok(CalcResult {
