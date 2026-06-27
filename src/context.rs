@@ -80,8 +80,12 @@ impl Ephemeris {
             let mut xreturn = [0.0; 24];
             let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);
             xreturn[..6].copy_from_slice(&ecl_nut);
+            // C routes ECL_NUT through the standard offset extraction (EQUATORIAL/XYZ
+            // read from slots 12+/6+ which are zero) but does NOT apply RADIANS —
+            // the values are always in degrees.
+            let flags_no_rad = flags & !CalcFlags::RADIANS;
             return Ok(CalcResult {
-                data: crate::calc::extract_output(&xreturn, flags),
+                data: crate::calc::extract_output(&xreturn, flags_no_rad),
                 flags_used: flags,
             });
         }

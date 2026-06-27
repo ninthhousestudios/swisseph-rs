@@ -48,8 +48,9 @@ pub fn plaus_iflag(mut flags: CalcFlags) -> CalcFlags {
         flags.remove(CalcFlags::RADIANS);
     }
 
-    // Ephemeris selection: force MOSEPH for now (only backend available)
-    flags.remove(EPHMASK);
+    // Ephemeris selection: force MOSEPH for now (only backend available).
+    // Clear Horizons flags — they only apply to JPL ephemeris.
+    flags.remove(EPHMASK | CalcFlags::DPSIDEPS_1980 | CalcFlags::JPLHOR_APPROX);
     flags.insert(CalcFlags::MOSEPH);
 
     flags
