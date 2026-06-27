@@ -25,12 +25,12 @@ src/
 │   ├── mod.rs          — router + 5 algorithms: IAU 1980, Herring 1987, IAU 2000A/B, Woolard
 │   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
 ├── sidereal_time.rs    — swe_sidtime0/swe_sidtime port: 4 GMST models, 33-term EoE, long-term model
-├── calc.rs             — calc_planet, calc_sun, calc_moon: light-time, retarded velocity, aberration, deflection pipeline
+├── calc.rs             — calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
 │   ├── backend.rs      — compute() public API, compute_pipeline() for calc.rs, embofs_mosh, planet/earth velocity helpers, Body dispatch
-│   ├── moon.rs         — moshmoon2() lunar series evaluator: MeanElements, mean_elements(), chewm(), moon1–4
-│   ├── moon_tables.rs  — generated const arrays: LR/MB/LRT/BT/LRT2/BT2 + z[25] (do not hand-edit, see scripts/gen_moshier_moon_tables.py)
+│   ├── moon.rs         — moshmoon2() lunar series evaluator: MeanElements, mean_elements(), chewm(), moon1–4, mean_node(), mean_apogee(), correction interpolation
+│   ├── moon_tables.rs  — generated const arrays: LR/MB/LRT/BT/LRT2/BT2 + z[25] + MEAN_NODE_CORR[304] + MEAN_APSIS_CORR[304]
 │   ├── planets.rs      — moshplan2() series evaluator, sscc() harmonic recurrence, fundamental argument constants
 │   └── tables.rs       — generated const arrays: 9 planet tables (do not hand-edit, see scripts/gen_moshier_tables.py)
 ├── jpl.rs              — EMPTY stub
@@ -54,6 +54,7 @@ tests/
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
 │   ├── deltat.rs      — golden tests for delta-T (217 cases: 5 models × 43 epochs)
 │   ├── sidereal_time.rs — golden tests for sidereal time (128 cases: 4 models × 32 epochs)
+│   ├── mean_elements.rs — golden tests for mean node, mean apogee, ECL_NUT (165 cases: 3 bodies × 11 epochs × 5 flag combos)
 │   ├── moshier_backend.rs — golden tests for backend::compute (110 cases: 10 bodies × 11 epochs + Earth zero-check)
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   └── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
@@ -67,10 +68,12 @@ tests/
 │   ├── nutation.json   — C-generated reference data for nutation
 │   ├── deltat.json     — C-generated reference data for delta-T
 │   ├── sidereal_time.json — C-generated reference data for sidereal time
+│   ├── mean_elements.json — C-generated reference data for mean node, mean apogee, ECL_NUT
 │   ├── moshier_backend.json — C-generated reference data for backend::compute (swe_calc with ICRS)
 │   ├── moshier_moon.json — C-generated reference data for moshmoon2
 │   └── moshier_planet.json — C-generated reference data for moshplan2
 └── c-gen/
+    ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json
     ├── gen_precession.c — C harness to regenerate precession.json
