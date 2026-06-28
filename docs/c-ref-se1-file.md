@@ -608,3 +608,559 @@ For planetary moons (`ipli > SE_PLMOON_OFFSET && ipli < SE_AST_OFFSET`), the cod
 retries without the subdirectory prefix (e.g. `sat/` for Saturn moons).
 
 `swed.fidat[ifno].fptr == NULL` signals that no file is open for that slot.
+
+---
+
+## sweph() — Segment Evaluation Pipeline (sweph.c:2125–2358)
+
+`sweph()` is the core evaluation routine. It takes a Julian Day and internal body ID,
+ensures the correct `.se1` file is open, loads the right Chebyshev segment, rotates
+the packed coefficients to a usable frame, evaluates the polynomial, and returns
+Cartesian position + velocity.
+
+### Signature (sweph.c:2125)
+
+```c
+static int sweph(double tjd, int ipli, int ifno, int32 iflag,
+                 double *xsunb, AS_BOOL do_save, double *xpret, char *serr)
+```
+
+| Parameter | Purpose |
+|---|---|
+| `tjd` | Julian Day to evaluate |
+| `ipli` | Internal body ID (`SEI_*`) or asteroid/moon offset value |
+| `ifno` | File slot index (`SEI_FILE_*`) |
+| `iflag` | Computation flags (`SEFLG_SPEED`, `SEFLG_JPLEPH`, etc.) |
+| `xsunb` | Barycentric Sun position (AU); used to convert heliocentric asteroids to barycentric; may be NULL |
+| `do_save` | If true, write result into `pdp->x[]` and update `pdp->teval` |
+| `xpret` | Output array [6] for position+velocity; may be NULL |
+| `serr` | Error string buffer; may be NULL |
+
+Returns `OK`, `ERR`, or `NOT_AVAILABLE`.
+
+### Step 1 — Body ID Aliasing (sweph.c:2137–2142)
+
+Asteroids and planetary moons share one `plan_data` slot (`SEI_ANYBODY`):
+
+```c
+ipl = ipli;
+if (ipli > SE_AST_OFFSET)   ipl = SEI_ANYBODY;
+if (ipli > SE_PLMOON_OFFSET) ipl = SEI_ANYBODY;
+pdp = &swed.pldat[ipl];
+```
+
+`ipl` is used as the slot index throughout; `ipli` is kept for file lookup.
+
+### Step 2 — Cache Hit Check (sweph.c:2150–2160)
+
+```c
+speedf1 = pdp->xflgs & SEFLG_SPEED;
+speedf2 = iflag & SEFLG_SPEED;
+if (tjd == pdp->teval
+    && pdp->iephe == SEFLG_SWIEPH
+    && (!speedf2 || speedf1)
+    && ipl < SEI_ANYBODY) {
+  for (i = 0; i <= 5; i++) xpret[i] = pdp->x[i];
+  return OK;
+}
+```
+
+Skipped for asteroids/planetary moons (`ipl == SEI_ANYBODY`): they always recompute.
+
+### Step 3 — File Management (sweph.c:2164–2231)
+
+If the open file's time range no longer covers `tjd`, or the body ID changed (asteroid),
+close the file and free cached segment/refep:
+
+```c
+if (fdp->fptr != NULL) {
+  if (tjd < fdp->tfstart || tjd > fdp->tfend
+      || (ipl == SEI_ANYBODY && ipli != pdp->ibdy)) {
+    fclose(fdp->fptr);  fdp->fptr = NULL;
+    free(pdp->refep);   pdp->refep = NULL;
+    free(pdp->segp);    pdp->segp = NULL;
+  }
+}
+```
+
+If no file is open: call `swi_gen_filename(tjd, ipli, fname)` to derive filename from
+JD and body; open via `swi_fopen(ifno, fname, swed.ephepath, serr)`. On open failure:
+- Planetary moons: retry without subdirectory prefix (e.g. `sat/`)
+- Numbered asteroids: retry with `s` inserted before `.se1`; if still failing, try
+  without the `astN/` subdirectory as well
+- Otherwise: return `NOT_AVAILABLE`
+
+After successful open: call `read_const(ifno, serr)` to parse the header.
+
+### Step 4 — Segment Loading (sweph.c:2272–2283)
+
+Load a new segment if the cache is empty or `tjd` is outside the cached range:
+
+```c
+if (pdp->segp == NULL || tjd < pdp->tseg0 || tjd > pdp->tseg1) {
+  retc = get_new_segment(tjd, ipl, ifno, serr);
+  if (retc != OK) return retc;
+  if (pdp->iflg & SEI_FLG_ROTATE) {
+    rot_back(ipl);
+  } else {
+    pdp->neval = pdp->ncoe;
+  }
+}
+```
+
+After `get_new_segment()`, if `SEI_FLG_ROTATE` is set: call `rot_back()` to transform
+the Chebyshev coefficients from orbital-plane frame to the reference frame and set
+`pdp->neval` (the last significant coefficient index). Otherwise set `neval = ncoe`
+(use all coefficients).
+
+### Step 5 — Time Normalisation (sweph.c:2285–2287)
+
+Map `tjd` to the Chebyshev domain [-1, 1]:
+
+```
+t = (tjd - pdp->tseg0) / pdp->dseg   // ∈ [0, 1]
+t = t * 2 - 1                          // ∈ [-1, 1]
+```
+
+No explicit boundary clamping is applied; the caller ensures `tjd` is in range.
+
+### Step 6 — Chebyshev Evaluation (sweph.c:2294–2302)
+
+```c
+need_speed = (do_save || (iflag & SEFLG_SPEED));
+for (i = 0; i <= 2; i++) {
+  xp[i]   = swi_echeb(t, pdp->segp + i*pdp->ncoe, pdp->neval);
+  if (need_speed)
+    xp[i+3] = swi_edcheb(t, pdp->segp + i*pdp->ncoe, pdp->neval) / pdp->dseg * 2;
+  else
+    xp[i+3] = 0;
+}
+```
+
+Velocity scaling: `swi_edcheb` returns the derivative with respect to the normalised
+time `t`. Because `dt/d(tjd) = 2 / dseg`, the velocity in AU/day is:
+
+```
+xp[i+3] = (d/dt)[Chebyshev] * (2 / dseg)
+```
+
+`segp` layout after `get_new_segment()` + optional `rot_back()`:
+- `segp[0 .. ncoe-1]`         — X (or right-ascension component) coefficients
+- `segp[ncoe .. 2*ncoe-1]`    — Y coefficients
+- `segp[2*ncoe .. 3*ncoe-1]`  — Z coefficients
+
+### Step 7 — EMBHEL Special Case (sweph.c:2312–2331)
+
+Current `.se1` files do not have a direct barycentric Sun record. Instead they store
+heliocentric Earth. When `ipl == SEI_SUNBARY && (pdp->iflg & SEI_FLG_EMBHEL)`:
+
+```c
+// Force re-evaluation of EMB (don't use cached Earth value)
+tsv = pedp->teval;
+pedp->teval = 0;
+retc = sweph(tjd, SEI_EMB, ifno, iflag | SEFLG_SPEED, NULL, NO_SAVE, xemb, serr);
+pedp->teval = tsv;
+// barycentric Sun = barycentric EMB - heliocentric Earth
+for (i = 0; i <= 2; i++) xp[i] = xemb[i] - xp[i];
+if (need_speed)
+  for (i = 3; i <= 5; i++) xp[i] = xemb[i] - xp[i];
+```
+
+This is a recursive call to `sweph()` for `SEI_EMB` within the same function.
+
+### Step 8 — Asteroid Heliocentric → Barycentric (sweph.c:2334–2343)
+
+Asteroid positions in `.se1` files are heliocentric. When using JPL or SWISSEPH
+ephemeris and `xsunb != NULL`:
+
+```c
+if (ipl >= SEI_ANYBODY) {
+  for (i = 0; i <= 2; i++) xp[i] += xsunb[i];
+  if (need_speed)
+    for (i = 3; i <= 5; i++) xp[i] += xsunb[i];
+}
+```
+
+### Step 9 — Save and Return (sweph.c:2345–2358)
+
+```c
+if (do_save) {
+  pdp->teval = tjd;
+  pdp->xflgs = -1;   // invalidate coordinate-system cache
+  pdp->iephe = SEFLG_SWIEPH;  // (or psdp->iephe for asteroid files)
+}
+if (xpret != NULL)
+  for (i = 0; i <= 5; i++) xpret[i] = xp[i];
+return OK;
+```
+
+Output coordinate frame: for `SEI_FLG_ROTATE` bodies, `rot_back()` has already
+converted to barycentric/heliocentric rectangular coordinates. For the Moon the frame
+is equatorial J2000; for planets it is ecliptic J2000 (further transforms to date and
+geocentric happen in the caller `app_pos_etc_plan`).
+
+---
+
+## get_new_segment() — Coefficient Unpacking (sweph.c:4367–4503)
+
+Reads one Chebyshev segment from the open `.se1` file into `pdp->segp`.
+
+### Signature (sweph.c:4367)
+
+```c
+static int get_new_segment(double tjd, int ipli, int ifno, char *serr)
+```
+
+Returns `OK` or `ERR`. On error: closes `fdp->fptr`, frees all planet data, returns `ERR`.
+
+### Step 1 — Segment Number and Boundaries (sweph.c:4383–4387)
+
+```c
+iseg = (int32)((tjd - pdp->tfstart) / pdp->dseg);
+pdp->tseg0 = pdp->tfstart + iseg * pdp->dseg;
+pdp->tseg1 = pdp->tseg0 + pdp->dseg;
+```
+
+No bounds check on `iseg`; the caller ensures `tjd` is within `[pdp->tfstart, pdp->tfend]`.
+
+### Step 2 — Locate Segment Data in File (sweph.c:4389–4393)
+
+The segment index is a packed array of 3-byte (24-bit) absolute file offsets:
+
+```c
+fpos = pdp->lndx0 + iseg * 3;          // position of index entry
+do_fread(&fpos, 3, 1, 4, fp, fpos, ...); // read 3 bytes → int32
+fseek(fp, fpos, SEEK_SET);              // seek to coefficient data
+```
+
+### Step 3 — Allocate and Zero segp (sweph.c:4395–4397)
+
+```c
+if (pdp->segp == NULL)
+  pdp->segp = malloc(pdp->ncoe * 3 * 8);   // 3 coords × ncoe × sizeof(double)
+memset(pdp->segp, 0, pdp->ncoe * 3 * 8);
+```
+
+The zero-fill ensures trailing coefficients (for unpacked slots not present in the file)
+default to 0.0.
+
+### Step 4 — Per-Coordinate Header Parsing (sweph.c:4399–4425)
+
+For each coordinate `icoord` in `{0=X, 1=Y, 2=Z}`:
+
+```c
+idbl = icoord * pdp->ncoe;   // write offset into segp[]
+do_fread(c, 1, 2, 1, fp, SEI_CURR_FPOS, ...);  // read 2 header bytes
+
+if (c[0] & 128) {   // bit 7 set → 6 precision levels, read 2 more bytes
+  do_fread(c+2, 1, 2, 1, fp, SEI_CURR_FPOS, ...);
+  nsizes = 6;
+  nsize[0] = c[1] >> 4;   nsize[1] = c[1] & 0x0f;
+  nsize[2] = c[2] >> 4;   nsize[3] = c[2] & 0x0f;
+  nsize[4] = c[3] >> 4;   nsize[5] = c[3] & 0x0f;
+} else {            // bit 7 clear → 4 precision levels, 2-byte header
+  nsizes = 4;
+  nsize[0] = c[0] >> 4;   nsize[1] = c[0] & 0x0f;
+  nsize[2] = c[1] >> 4;   nsize[3] = c[1] & 0x0f;
+}
+nco = nsize[0] + ... + nsize[nsizes-1];
+assert(nco <= pdp->ncoe);   // sanity check
+```
+
+`nsize[i]` = number of coefficients packed at precision level `i`.
+`nco` = total coefficients written for this coordinate (may be less than `ncoe`; the
+rest remain 0.0 from the memset).
+
+### Step 5 — Unpacking Loop (sweph.c:4440–4494)
+
+For each precision level `i`:
+
+#### Levels 0–3: sign-magnitude integers (sweph.c:4443–4454)
+
+```c
+j = 4 - i;          // bytes per coefficient in file: 4, 3, 2, 1
+k = nsize[i];       // number of coefficients at this level
+do_fread(longs, j, k, 4, fp, SEI_CURR_FPOS, ...);
+// Reads k items of j bytes each, sign-extended to uint32
+for (m = 0; m < k; m++, idbl++) {
+  if (longs[m] & 1)          // odd → negative
+    segp[idbl] = -(((longs[m]+1) / 2) / 1e9 * rmax / 2);
+  else                       // even → positive
+    segp[idbl] = (longs[m] / 2) / 1e9 * rmax / 2;
+}
+```
+
+Sign encoding: the integer is the sign-magnitude value doubled. Bit 0 is the sign bit.
+Magnitude = `floor(v / 2)` for even, `floor((v+1) / 2)` for odd. Then scale by
+`rmax / 2 / 1e9`.
+
+#### Level 4: half-byte (4-bit) packing (sweph.c:4455–4473)
+
+```c
+k = (nsize[4] + 1) / 2;   // bytes to read (2 nibbles per byte)
+do_fread(longs, 1, k, 4, fp, SEI_CURR_FPOS, ...);
+// Two nibbles per byte: o=16 for high nibble, o=1 for low nibble
+for (m = 0, j = 0; m < k && j < nsize[4]; m++) {
+  for (n = 0, o = 16; n < 2 && j < nsize[4]; n++, j++, idbl++, longs[m] %= o, o /= 16) {
+    if (longs[m] & o)
+      segp[idbl] = -(((longs[m]+o) / o / 2) * rmax / 2 / 1e9);
+    else
+      segp[idbl] =  ((longs[m]    / o / 2) * rmax / 2 / 1e9);
+  }
+}
+```
+
+Each byte holds two 4-bit values. The sign bit is the `o`-bit of `longs[m]` before
+the modulo strips the already-processed nibble. Magnitude is `floor((v & (o-1)) / 2)`
+where `v` is the current byte value after previous nibbles are stripped.
+
+#### Level 5: quarter-byte (2-bit) packing (sweph.c:4474–4493)
+
+```c
+k = (nsize[5] + 3) / 4;   // bytes to read (4 pairs per byte)
+do_fread(longs, 1, k, 4, fp, SEI_CURR_FPOS, ...);
+// Four 2-bit values per byte: o=64, 16, 4, 1
+for (m = 0, j = 0; m < k && j < nsize[5]; m++) {
+  for (n = 0, o = 64; n < 4 && j < nsize[5]; n++, j++, idbl++, longs[m] %= o, o /= 4) {
+    if (longs[m] & o)
+      segp[idbl] = -(((longs[m]+o) / o / 2) * rmax / 2 / 1e9);
+    else
+      segp[idbl] =  ((longs[m]    / o / 2) * rmax / 2 / 1e9);
+  }
+}
+```
+
+Same sign-magnitude pattern as level 4, but with 2-bit granularity. Four values per
+byte, using `o = 64, 16, 4, 1` in successive iterations.
+
+### Scaling Summary
+
+All levels use the same final formula:
+
+```
+coefficient = magnitude_integer * (rmax / 2) / 1e9
+```
+
+where `rmax = pdp->rmax` (read from file; see `rmax` derivation in Per-Planet Metadata
+section above). This maps the integer mantissa to AU (or radians for angular quantities).
+
+### Result Layout in segp[]
+
+After the three-coordinate loop:
+
+```
+segp[0    .. ncoe-1]      X Chebyshev coefficients (degrees, low to high)
+segp[ncoe .. 2*ncoe-1]    Y Chebyshev coefficients
+segp[2*ncoe .. 3*ncoe-1]  Z Chebyshev coefficients
+```
+
+Trailing coefficients for each coordinate (beyond `nco` for that coordinate) remain
+0.0 from the memset.
+
+---
+
+## rot_back() — Orbital Plane to Reference Frame Rotation (sweph.c:4963–5054)
+
+`rot_back()` is called immediately after `get_new_segment()` when `pdp->iflg & SEI_FLG_ROTATE`.
+It transforms the Chebyshev coefficient arrays in `pdp->segp` **in place** from the
+orbital-plane frame to the ecliptic (or equatorial, for the Moon) J2000 frame, and
+optionally adds the reference ellipse.
+
+### Constants (sweph.c:4976–4977)
+
+```c
+double seps2000 = 0.39777715572793088;   // sin(eps2000) — obliquity of J2000 ecliptic
+double ceps2000 = 0.91748206215761929;   // cos(eps2000)
+// eps2000 ≈ 0.409092804 radians ≈ 23°26'21"
+```
+
+### Step 1 — Segment Midpoint and Time Difference (sweph.c:4980–4984)
+
+The orbital elements are interpolated at the **midpoint** of the segment, not at `tjd`:
+
+```c
+t = pdp->tseg0 + pdp->dseg / 2;
+tdiff = (t - pdp->telem) / 365250.0;   // Julian millennia from element epoch
+```
+
+### Step 2 — Interpolated Equinoctal Elements (sweph.c:4985–4994)
+
+**Moon** (ipli == SEI_MOON):
+
+```c
+dn = pdp->prot + tdiff * pdp->dprot;
+dn -= floor(dn / TWOPI) * TWOPI;         // reduce mod 2π
+qav = (pdp->qrot + tdiff * pdp->dqrot) * cos(dn);
+pav = (pdp->qrot + tdiff * pdp->dqrot) * sin(dn);
+```
+
+**All other bodies**:
+
+```c
+qav = pdp->qrot + tdiff * pdp->dqrot;
+pav = pdp->prot + pdp->dprot * tdiff;
+```
+
+Here `pav` and `qav` are the interpolated equinoctal inclination variables.
+
+### Step 3 — Reference Ellipse Addition (sweph.c:5001–5013)
+
+Only executed when `pdp->iflg & SEI_FLG_ELLIPSE`:
+
+```c
+omtild = pdp->peri + tdiff * pdp->dperi;
+omtild -= floor(omtild / TWOPI) * TWOPI;   // reduce mod 2π
+com = cos(omtild);
+som = sin(omtild);
+for (i = 0; i < nco; i++) {
+  x[i][0] = chcfx[i] + com * refepx[i] - som * refepy[i];
+  x[i][1] = chcfy[i] + com * refepy[i] + som * refepx[i];
+  // x[i][2] unchanged (chcfz[i])
+}
+```
+
+`refepx = pdp->refep` (first `ncoe` doubles), `refepy = pdp->refep + ncoe`.
+`omtild` is the perihelion longitude interpolated from `peri` and `dperi`.
+The rotation by `omtild` mixes the two ellipse coefficient arrays before adding
+them to the Chebyshev coefficients. Only X and Y are modified; Z is left as-is.
+
+Without `SEI_FLG_ELLIPSE`, `x[i][0..2]` is simply a copy of `chcfx/chcfy/chcfz`.
+
+### Step 4 — Equinoctal Frame Construction (sweph.c:5019–5032)
+
+From `pav` (p) and `qav` (q), three orthonormal basis vectors are computed:
+
+```c
+cosih2 = 1.0 / (1.0 + q*q + p*p);
+
+// Orbit pole (normal to orbital plane):
+uiz[0] =  2.0 * p * cosih2;
+uiz[1] = -2.0 * q * cosih2;
+uiz[2] =  (1.0 - q*q - p*p) * cosih2;
+
+// Origin of longitudes (in-plane, reference direction):
+uix[0] =  (1.0 + q*q - p*p) * cosih2;
+uix[1] =  2.0 * q * p * cosih2;
+uix[2] = -2.0 * p * cosih2;
+
+// In-plane vector perpendicular to uix:
+uiy[0] =  2.0 * q * p * cosih2;
+uiy[1] =  (1.0 - q*q + p*p) * cosih2;
+uiy[2] =  2.0 * q * cosih2;
+```
+
+These are the standard equinoctal element basis vectors. For planets, `p` and `q`
+are referenced to the ecliptic J2000 frame; for the Moon, they are referenced to
+the Moon's ecliptic orbital frame.
+
+### Step 5 — Rotation and neval Update (sweph.c:5034–5048)
+
+For each coefficient index `i` from 0 to `nco-1`:
+
+```c
+xrot = x[i][0]*uix[0] + x[i][1]*uiy[0] + x[i][2]*uiz[0];
+yrot = x[i][0]*uix[1] + x[i][1]*uiy[1] + x[i][2]*uiz[1];
+zrot = x[i][0]*uix[2] + x[i][1]*uiy[2] + x[i][2]*uiz[2];
+
+if (fabs(xrot) + fabs(yrot) + fabs(zrot) >= 1e-14)
+  pdp->neval = i;    // track last significant coefficient index (0-based)
+```
+
+The rotation matrix is `[uix | uiy | uiz]ᵀ`: each output component is the dot
+product of the input vector `x[i]` with one of the basis vectors.
+
+**Moon only** — additional ecliptic → equatorial J2000 rotation (sweph.c:5043–5047):
+
+```c
+if (ipli == SEI_MOON) {
+  x[i][1] = ceps2000 * yrot - seps2000 * zrot;
+  x[i][2] = seps2000 * yrot + ceps2000 * zrot;
+  // x[i][0] = xrot (unchanged, x-axis is the same)
+}
+```
+
+This is a rotation about the X axis by the obliquity of the ecliptic (eps2000):
+```
+| 1      0          0      |   | xrot |
+| 0   cos(ε)   -sin(ε)    | × | yrot |
+| 0   sin(ε)    cos(ε)    |   | zrot |
+```
+
+Non-Moon bodies: `x[i][0..2] = xrot, yrot, zrot` (no further rotation).
+
+### Step 6 — Write Back (sweph.c:5049–5053)
+
+```c
+for (i = 0; i < nco; i++) {
+  chcfx[i] = x[i][0];
+  chcfy[i] = x[i][1];
+  chcfz[i] = x[i][2];
+}
+```
+
+`chcfx/chcfy/chcfz` are pointers into `pdp->segp` (same layout as after `get_new_segment()`),
+so the rotation is performed in-place.
+
+### neval semantics
+
+`pdp->neval` after `rot_back()` holds the 0-based index of the last Chebyshev
+coefficient with magnitude ≥ 1e-14 (in L1 norm of all three components after
+rotation). `swi_echeb` and `swi_edcheb` are called with `neval` as `ncf`, which
+evaluates indices 0..neval-1 — consistently truncating one term below the tracked
+threshold, which is negligible for the precision goal.
+
+In the non-ROTATE path: `pdp->neval = pdp->ncoe` (evaluate all coefficients).
+
+---
+
+## Chebyshev Evaluation — swi_echeb / swi_edcheb (swephlib.c:171–213)
+
+Both functions use Clenshaw's recurrence (Roger Broucke's ACM algorithm 446, 1973).
+
+### swi_echeb — Position (swephlib.c:171–185)
+
+```c
+double swi_echeb(double x, double *coef, int ncf)
+{
+  double x2 = x * 2.0;
+  double br = 0., brp2 = 0., brpp = 0.;
+  for (int j = ncf - 1; j >= 0; j--) {
+    brp2 = brpp;
+    brpp = br;
+    br = x2 * brpp - brp2 + coef[j];
+  }
+  return (br - brp2) * 0.5;
+}
+```
+
+Evaluates `coef[0..ncf-1]` at `x ∈ [-1,1]`. This is the standard backward Clenshaw
+recurrence for `Σ cⱼ Tⱼ(x)` where `Tⱼ` are Chebyshev polynomials of the first kind.
+
+### swi_edcheb — Derivative (swephlib.c:190–213)
+
+```c
+double swi_edcheb(double x, double *coef, int ncf)
+{
+  double x2 = x * 2.0;
+  double xjp2 = 0., xjpl = 0., bjp2 = 0., bjpl = 0., bf = 0., bj = 0.;
+  for (int j = ncf - 1; j >= 1; j--) {
+    double dj = (double)(j + j);
+    double xj = coef[j] * dj + xjp2;
+    bj = x2 * bjpl - bjp2 + xj;
+    bf = bjp2;
+    bjp2 = bjpl;
+    bjpl = bj;
+    xjp2 = xjpl;
+    xjpl = xj;
+  }
+  return (bj - bf) * 0.5;
+}
+```
+
+Returns `d/dx [Σ cⱼ Tⱼ(x)]`. The result is the derivative with respect to the
+normalised time `t ∈ [-1,1]`, not with respect to JD. The caller in `sweph()` applies
+the chain rule:
+
+```
+velocity [AU/day] = swi_edcheb(t, coef, neval) * (2 / dseg)
+```
