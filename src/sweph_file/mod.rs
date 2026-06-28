@@ -12,7 +12,7 @@ use memmap2::Mmap;
 use crate::error::Error;
 use crate::types::Body;
 
-pub use types::{ByteOrder, FileHeader, FileType, PlanetFileData};
+pub use types::{ByteOrder, FileHeader, FileType, PlanetFileData, SEI_FLG_HELIO, SEI_SUNBARY};
 
 pub struct SwissEphFile {
     mmap: Mmap,
@@ -92,6 +92,34 @@ pub fn body_file_id(body: Body) -> Option<i32> {
         Body::Pluto => Some(9),
         _ => None,
     }
+}
+
+pub fn open_ephemeris_files(dir: &Path, prefix: &str) -> Result<Vec<SwissEphFile>, Error> {
+    let mut files = Vec::new();
+    let entries = std::fs::read_dir(dir).map_err(|_| Error::FileNotFound(dir.to_path_buf()))?;
+    for entry in entries {
+        let entry = entry.map_err(|_| Error::FileNotFound(dir.to_path_buf()))?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with(prefix) && name_str.ends_with(".se1") {
+            files.push(SwissEphFile::open(&entry.path())?);
+        }
+    }
+    files.sort_by(|a, b| {
+        a.header()
+            .time_range
+            .0
+            .partial_cmp(&b.header().time_range.0)
+            .unwrap()
+    });
+    Ok(files)
+}
+
+pub fn find_file_for_jd(files: &[SwissEphFile], body_id: i32, jd: f64) -> Option<&SwissEphFile> {
+    files.iter().find(|f| {
+        f.planet_data(body_id)
+            .map_or(false, |pd| jd >= pd.tfstart && jd <= pd.tfend)
+    })
 }
 
 #[cfg(test)]

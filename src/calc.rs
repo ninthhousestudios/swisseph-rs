@@ -12,16 +12,20 @@ use crate::moshier::backend::{
 use crate::nutation::nutation;
 use crate::obliquity::obliquity;
 use crate::precession::{ldp_peps, precess};
+use crate::sweph_file::types::SEI_MOON;
+use crate::sweph_file::{
+    SEI_FLG_HELIO, SEI_SUNBARY, SwissEphFile, body_file_id, evaluate_body, find_file_for_jd,
+};
 use crate::types::{
-    AstroModels, Body, Epsilon, FrameTransform, Nutation as NutationType, PrecessionDirection,
-    PrecessionModel,
+    AstroModels, Body, EphemerisSource, Epsilon, FrameTransform, Nutation as NutationType,
+    PrecessionDirection, PrecessionModel,
 };
 
 const EPHMASK: CalcFlags = CalcFlags::MOSEPH
     .union(CalcFlags::SWIEPH)
     .union(CalcFlags::JPLEPH);
 
-pub fn plaus_iflag(mut flags: CalcFlags) -> CalcFlags {
+pub fn plaus_iflag(mut flags: CalcFlags, source: EphemerisSource) -> CalcFlags {
     if flags.contains(CalcFlags::DPSIDEPS_1980) && flags.contains(CalcFlags::JPLHOR_APPROX) {
         flags.remove(CalcFlags::JPLHOR_APPROX);
     }
@@ -51,10 +55,12 @@ pub fn plaus_iflag(mut flags: CalcFlags) -> CalcFlags {
         flags.remove(CalcFlags::SPEED3);
     }
 
-    // Ephemeris selection: force MOSEPH for now (only backend available).
-    // Clear Horizons flags — they only apply to JPL ephemeris.
     flags.remove(EPHMASK | CalcFlags::DPSIDEPS_1980 | CalcFlags::JPLHOR_APPROX);
-    flags.insert(CalcFlags::MOSEPH);
+    match source {
+        EphemerisSource::Swiss => flags.insert(CalcFlags::SWIEPH),
+        EphemerisSource::Jpl => flags.insert(CalcFlags::JPLEPH),
+        EphemerisSource::Moshier => flags.insert(CalcFlags::MOSEPH),
+    }
 
     flags
 }
@@ -707,4 +713,374 @@ pub fn calc_ecl_nut(jd: f64, flags: CalcFlags, models: &AstroModels) -> [f64; 6]
         0.0,
         0.0,
     ]
+}
+
+// ---------------------------------------------------------------------------
+// SwissEph (.se1) backend
+// ---------------------------------------------------------------------------
+
+struct SwephPositions {
+    planet_bary: [f64; 6],
+    earth_bary: [f64; 6],
+    earth_helio: [f64; 6],
+    sun_bary: [f64; 6],
+}
+
+fn sweph_positions(
+    planet_file: &SwissEphFile,
+    moon_file: &SwissEphFile,
+    body_id: i32,
+    jd: f64,
+    need_speed: bool,
+) -> Result<SwephPositions, Error> {
+    let n = if need_speed { 6 } else { 3 };
+
+    let (emb, _) = evaluate_body(planet_file, 0, jd, need_speed)?;
+    let (moon_geo, _) = evaluate_body(moon_file, SEI_MOON, jd, need_speed)?;
+
+    let mut earth_bary = [0.0; 6];
+    for i in 0..n {
+        earth_bary[i] = emb[i] - moon_geo[i] / (EARTH_MOON_MRAT + 1.0);
+    }
+
+    let (helio_earth, _) = evaluate_body(planet_file, SEI_SUNBARY, jd, need_speed)?;
+    let mut sun_bary = [0.0; 6];
+    for i in 0..n {
+        sun_bary[i] = emb[i] - helio_earth[i];
+    }
+
+    let mut earth_helio = [0.0; 6];
+    for i in 0..n {
+        earth_helio[i] = earth_bary[i] - sun_bary[i];
+    }
+
+    let (mut planet, _) = evaluate_body(planet_file, body_id, jd, need_speed)?;
+    if let Some(pd) = planet_file.planet_data(body_id) {
+        if pd.iflg & SEI_FLG_HELIO != 0 {
+            for i in 0..n {
+                planet[i] += sun_bary[i];
+            }
+        }
+    }
+
+    Ok(SwephPositions {
+        planet_bary: planet,
+        earth_bary,
+        earth_helio,
+        sun_bary,
+    })
+}
+
+pub fn calc_planet_sweph(
+    jd: f64,
+    body: Body,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    _eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let body_id = body_file_id(body).ok_or(Error::EphemerisNotAvailable {
+        body,
+        source: crate::types::EphemerisSource::Swiss,
+    })?;
+    let need_speed = flags.contains(CalcFlags::SPEED);
+
+    let planet_file =
+        find_file_for_jd(planet_files, body_id, jd).ok_or(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: 0.0,
+            end: 0.0,
+        })?;
+    let moon_file =
+        find_file_for_jd(moon_files, SEI_MOON, jd).ok_or(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: 0.0,
+            end: 0.0,
+        })?;
+
+    let pos = sweph_positions(planet_file, moon_file, body_id, jd, need_speed)?;
+
+    // Geocentric
+    let mut xx = [0.0; 6];
+    for i in 0..6 {
+        xx[i] = pos.planet_bary[i] - pos.earth_bary[i];
+    }
+
+    // Light-time with niter=1
+    let mut dt = 0.0;
+    if !flags.contains(CalcFlags::TRUEPOS) {
+        // Save original barycentric position
+        let xxsv = pos.planet_bary;
+
+        // Speed correction: compute light-time at t-1 day
+        let mut xxsp = [xxsv[0] - xxsv[3], xxsv[1] - xxsv[4], xxsv[2] - xxsv[5]];
+        let xxsv_sp = xxsp;
+
+        // Speed correction loop (niter=1 → 2 iterations)
+        for _ in 0..=1 {
+            let dx = [
+                xxsp[0] - pos.earth_bary[0],
+                xxsp[1] - pos.earth_bary[1],
+                xxsp[2] - pos.earth_bary[2],
+            ];
+            let dist_sp = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt();
+            let dt_sp = dist_sp * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xxsp[i] = xxsv_sp[i] - dt_sp * xxsv[i + 3];
+            }
+        }
+
+        // Main light-time loop (niter=1 → 2 iterations)
+        for _ in 0..=1 {
+            let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+            dt = dist * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xx[i] = xxsv[i] - dt * xxsv[i + 3] - pos.earth_bary[i];
+            }
+        }
+
+        // Re-evaluate planet at retarded time t' = t - dt
+        let (mut retarded, _) = evaluate_body(planet_file, body_id, jd - dt, need_speed)?;
+        if let Some(pd) = planet_file.planet_data(body_id) {
+            if pd.iflg & SEI_FLG_HELIO != 0 {
+                for i in 0..6 {
+                    retarded[i] += pos.sun_bary[i];
+                }
+            }
+        }
+
+        // Geocentric from re-evaluated position
+        for i in 0..6 {
+            xx[i] = retarded[i] - pos.earth_bary[i];
+        }
+
+        // Speed correction: change-of-dt effect
+        if need_speed {
+            for i in 0..3 {
+                xxsp[i] -= xxsv_sp[i];
+            }
+            for i in 0..3 {
+                xx[i + 3] -= xxsp[i];
+            }
+        }
+    }
+
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    // Deflection
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOGDEFL) {
+        let mut planet_helio_retarded = [0.0; 6];
+        for i in 0..3 {
+            planet_helio_retarded[i] = xx[i] + pos.earth_helio[i];
+            planet_helio_retarded[i + 3] = pos.planet_bary[i + 3];
+        }
+        deflect_light(
+            &mut xx,
+            &pos.earth_helio,
+            &planet_helio_retarded,
+            need_speed,
+        );
+    }
+
+    // Aberration
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOABERR) {
+        aberr_light(
+            &mut xx,
+            &[pos.earth_bary[3], pos.earth_bary[4], pos.earth_bary[5]],
+            need_speed,
+        );
+        if need_speed {
+            let pos_ret = sweph_positions(planet_file, moon_file, body_id, jd - dt, true)?;
+            for i in 0..3 {
+                xx[i + 3] += pos.earth_bary[i + 3] - pos_ret.earth_bary[i + 3];
+            }
+        }
+    }
+
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    if !flags.contains(CalcFlags::ICRS) {
+        frame_bias(&mut xx, jd, flags, models, FrameTransform::GcrsToJ2000);
+    }
+
+    let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
+    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+}
+
+pub fn calc_sun_sweph(
+    jd: f64,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let need_speed = flags.contains(CalcFlags::SPEED);
+
+    let planet_file =
+        find_file_for_jd(planet_files, 0, jd).ok_or(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: 0.0,
+            end: 0.0,
+        })?;
+    let moon_file =
+        find_file_for_jd(moon_files, SEI_MOON, jd).ok_or(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: 0.0,
+            end: 0.0,
+        })?;
+
+    let pos = sweph_positions(planet_file, moon_file, 0, jd, need_speed)?;
+
+    // Geocentric Sun = -(heliocentric Earth)
+    // helio_earth = earth_bary - sun_bary
+    let mut xx = [0.0; 6];
+    for i in 0..6 {
+        xx[i] = -pos.earth_helio[i];
+    }
+
+    // Light-time: re-evaluate sun at retarded time
+    if !flags.contains(CalcFlags::TRUEPOS) {
+        let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+        let dt = dist * AUNIT / CLIGHT / 86400.0;
+
+        // Re-evaluate at t' = t - dt
+        let (helio_earth_ret, _) = evaluate_body(planet_file, SEI_SUNBARY, jd - dt, need_speed)?;
+        let (emb_ret, _) = evaluate_body(planet_file, 0, jd - dt, need_speed)?;
+        let (moon_ret, _) = evaluate_body(moon_file, SEI_MOON, jd - dt, need_speed)?;
+        let n = if need_speed { 6 } else { 3 };
+        let mut earth_bary_ret = [0.0; 6];
+        for i in 0..n {
+            earth_bary_ret[i] = emb_ret[i] - moon_ret[i] / (EARTH_MOON_MRAT + 1.0);
+        }
+        let mut sun_bary_ret = [0.0; 6];
+        for i in 0..n {
+            sun_bary_ret[i] = emb_ret[i] - helio_earth_ret[i];
+        }
+
+        // helio_earth at retarded time
+        for i in 0..6 {
+            xx[i] = sun_bary_ret[i] - earth_bary_ret[i];
+        }
+        if !need_speed {
+            xx[3] = 0.0;
+            xx[4] = 0.0;
+            xx[5] = 0.0;
+        }
+    }
+
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    // No deflection for Sun
+
+    // Aberration
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOABERR) {
+        aberr_light(
+            &mut xx,
+            &[pos.earth_bary[3], pos.earth_bary[4], pos.earth_bary[5]],
+            need_speed,
+        );
+    }
+
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    if !flags.contains(CalcFlags::ICRS) {
+        frame_bias(&mut xx, jd, flags, models, FrameTransform::GcrsToJ2000);
+    }
+
+    let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
+    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+}
+
+pub fn calc_moon_sweph(
+    jd: f64,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let need_speed = flags.contains(CalcFlags::SPEED);
+
+    let moon_file =
+        find_file_for_jd(moon_files, SEI_MOON, jd).ok_or(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: 0.0,
+            end: 0.0,
+        })?;
+    let planet_file =
+        find_file_for_jd(planet_files, 0, jd).ok_or(Error::BeyondEphemerisLimits {
+            jd_tt: jd,
+            start: 0.0,
+            end: 0.0,
+        })?;
+
+    // Moon geocentric from SE1 file
+    let (moon_geo, _) = evaluate_body(moon_file, SEI_MOON, jd, need_speed)?;
+    let mut xx = moon_geo;
+
+    // Need earth_bary for aberration
+    let pos = sweph_positions(planet_file, moon_file, 0, jd, need_speed)?;
+
+    // Light-time
+    if !flags.contains(CalcFlags::TRUEPOS) {
+        let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+        let dt = dist * AUNIT / CLIGHT / 86400.0;
+
+        // Re-evaluate moon and earth at retarded time via sweplan
+        let pos_ret = sweph_positions(planet_file, moon_file, 0, jd - dt, need_speed)?;
+        let (moon_geo_ret, _) = evaluate_body(moon_file, SEI_MOON, jd - dt, need_speed)?;
+
+        // moon_bary(t') = moon_geo(t') + earth_bary(t')
+        // geocentric at retarded time: moon_bary(t') - earth_bary(t)
+        let n = if need_speed { 6 } else { 3 };
+        for i in 0..n {
+            xx[i] = moon_geo_ret[i] + pos_ret.earth_bary[i] - pos.earth_bary[i];
+        }
+    }
+
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    // No deflection for Moon
+
+    // Aberration
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOABERR) {
+        aberr_light(
+            &mut xx,
+            &[pos.earth_bary[3], pos.earth_bary[4], pos.earth_bary[5]],
+            need_speed,
+        );
+    }
+
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    if !flags.contains(CalcFlags::ICRS) {
+        frame_bias(&mut xx, jd, flags, models, FrameTransform::GcrsToJ2000);
+    }
+
+    let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
+    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
 }

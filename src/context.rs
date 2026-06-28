@@ -49,17 +49,37 @@ impl Default for EphemerisConfig {
 pub struct Ephemeris {
     config: EphemerisConfig,
     leap_seconds: Vec<i32>,
+    planet_files: Vec<crate::sweph_file::SwissEphFile>,
+    moon_files: Vec<crate::sweph_file::SwissEphFile>,
 }
 
 impl Ephemeris {
     pub fn new(config: EphemerisConfig) -> crate::Result<Self> {
-        if config.ephemeris_source != EphemerisSource::Moshier {
-            return Err(Error::UnsupportedEphemeris(config.ephemeris_source));
-        }
         let leap_seconds = Self::build_leap_seconds(&config)?;
+        let (planet_files, moon_files) = match config.ephemeris_source {
+            EphemerisSource::Swiss => {
+                let dir = config.ephe_path.as_ref().ok_or_else(|| {
+                    Error::FileFormat("ephe_path required for Swisseph".to_string())
+                })?;
+                let planet = crate::sweph_file::open_ephemeris_files(dir, "sepl")?;
+                let moon = crate::sweph_file::open_ephemeris_files(dir, "semo")?;
+                if planet.is_empty() || moon.is_empty() {
+                    return Err(Error::FileFormat(
+                        "no planet or moon ephemeris files found".to_string(),
+                    ));
+                }
+                (planet, moon)
+            }
+            EphemerisSource::Jpl => {
+                return Err(Error::UnsupportedEphemeris(config.ephemeris_source));
+            }
+            EphemerisSource::Moshier => (Vec::new(), Vec::new()),
+        };
         Ok(Self {
             config,
             leap_seconds,
+            planet_files,
+            moon_files,
         })
     }
 
@@ -77,7 +97,7 @@ impl Ephemeris {
     /// positions. Moshier evaluations are sub-microsecond; callers needing
     /// deduplication for repeated same-JD queries should cache externally.
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
-        let flags = crate::calc::plaus_iflag(flags);
+        let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
         let unsupported = flags & (CalcFlags::TOPOCTR | CalcFlags::SIDEREAL);
         if !unsupported.is_empty() {
             return Err(Error::UnsupportedFlags(unsupported));
@@ -94,10 +114,10 @@ impl Ephemeris {
             return self.calc_speed3(jd_tt, body, flags);
         }
 
-        let xreturn = self.calc_inner(jd_tt, body, flags)?;
+        let (xreturn, flags_used) = self.calc_inner(jd_tt, body, flags)?;
         Ok(CalcResult {
-            data: Self::extract_for_body(&xreturn, body, flags),
-            flags_used: flags,
+            data: Self::extract_for_body(&xreturn, body, flags_used),
+            flags_used,
         })
     }
 
@@ -119,25 +139,31 @@ impl Ephemeris {
         }
     }
 
-    fn calc_inner(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<[f64; 24], Error> {
+    fn calc_inner(
+        &self,
+        jd_tt: f64,
+        body: Body,
+        flags: CalcFlags,
+    ) -> Result<([f64; 24], CalcFlags), Error> {
         let models = &self.config.astro_models;
 
         if body == Body::EclipticNutation {
             let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);
             let mut xreturn = [0.0; 24];
             xreturn[..6].copy_from_slice(&ecl_nut);
-            return Ok(xreturn);
+            return Ok((xreturn, flags));
         }
 
         if matches!(body, Body::MeanNode | Body::MeanApogee) {
             if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
-                return Ok([0.0; 24]);
+                return Ok(([0.0; 24], flags));
             }
-            return match body {
-                Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models),
-                Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models),
+            let xr = match body {
+                Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models)?,
+                Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models)?,
                 _ => unreachable!(),
             };
+            return Ok((xr, flags));
         }
 
         if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
@@ -149,9 +175,42 @@ impl Ephemeris {
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
+        match self.config.ephemeris_source {
+            EphemerisSource::Swiss => {
+                match self.calc_body_sweph(jd_tt, body, &eps_j2000, flags, models) {
+                    Ok(xr) => Ok((xr, flags)),
+                    Err(Error::BeyondEphemerisLimits { .. }) => {
+                        let fallback_flags = (flags & !CalcFlags::SWIEPH) | CalcFlags::MOSEPH;
+                        let xr = self.calc_body_moshier(
+                            jd_tt,
+                            body,
+                            &eps_j2000,
+                            fallback_flags,
+                            models,
+                        )?;
+                        Ok((xr, fallback_flags))
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            _ => {
+                let xr = self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models)?;
+                Ok((xr, flags))
+            }
+        }
+    }
+
+    fn calc_body_moshier(
+        &self,
+        jd_tt: f64,
+        body: Body,
+        eps_j2000: &crate::types::Epsilon,
+        flags: CalcFlags,
+        models: &crate::types::AstroModels,
+    ) -> Result<[f64; 24], Error> {
         match body {
-            Body::Sun => crate::calc::calc_sun(jd_tt, &eps_j2000, flags, models),
-            Body::Moon => crate::calc::calc_moon(jd_tt, &eps_j2000, flags, models),
+            Body::Sun => crate::calc::calc_sun(jd_tt, eps_j2000, flags, models),
+            Body::Moon => crate::calc::calc_moon(jd_tt, eps_j2000, flags, models),
             Body::Mercury
             | Body::Venus
             | Body::Mars
@@ -159,10 +218,56 @@ impl Ephemeris {
             | Body::Saturn
             | Body::Uranus
             | Body::Neptune
-            | Body::Pluto => crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models),
+            | Body::Pluto => crate::calc::calc_planet(jd_tt, body, eps_j2000, flags, models),
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Moshier,
+            }),
+        }
+    }
+
+    fn calc_body_sweph(
+        &self,
+        jd_tt: f64,
+        body: Body,
+        eps_j2000: &crate::types::Epsilon,
+        flags: CalcFlags,
+        models: &crate::types::AstroModels,
+    ) -> Result<[f64; 24], Error> {
+        match body {
+            Body::Sun => crate::calc::calc_sun_sweph(
+                jd_tt,
+                &self.planet_files,
+                &self.moon_files,
+                flags,
+                models,
+            ),
+            Body::Moon => crate::calc::calc_moon_sweph(
+                jd_tt,
+                &self.planet_files,
+                &self.moon_files,
+                flags,
+                models,
+            ),
+            Body::Mercury
+            | Body::Venus
+            | Body::Mars
+            | Body::Jupiter
+            | Body::Saturn
+            | Body::Uranus
+            | Body::Neptune
+            | Body::Pluto => crate::calc::calc_planet_sweph(
+                jd_tt,
+                body,
+                &self.planet_files,
+                &self.moon_files,
+                eps_j2000,
+                flags,
+                models,
+            ),
+            _ => Err(Error::EphemerisNotAvailable {
+                body,
+                source: EphemerisSource::Swiss,
             }),
         }
     }
@@ -171,16 +276,16 @@ impl Ephemeris {
         let dt = crate::calc::speed3_interval(body);
         let inner_flags = flags & !CalcFlags::SPEED3;
 
-        let mut x0 = self.calc_inner(jd_tt - dt, body, inner_flags)?;
-        let mut x2 = self.calc_inner(jd_tt + dt, body, inner_flags)?;
-        let mut x1 = self.calc_inner(jd_tt, body, inner_flags)?;
+        let (mut x0, _) = self.calc_inner(jd_tt - dt, body, inner_flags)?;
+        let (mut x2, _) = self.calc_inner(jd_tt + dt, body, inner_flags)?;
+        let (mut x1, flags_used) = self.calc_inner(jd_tt, body, inner_flags)?;
 
         crate::calc::denormalize_positions(&mut x0, &x1, &mut x2);
         crate::calc::calc_speed_3point(&mut x1, &x0, &x2, dt);
 
         Ok(CalcResult {
             data: Self::extract_for_body(&x1, body, flags | CalcFlags::SPEED),
-            flags_used: flags,
+            flags_used,
         })
     }
 
