@@ -1,4 +1,5 @@
 mod calc;
+mod calc_sweph;
 mod corrections;
 mod date;
 mod deltat;
@@ -40,3 +41,4 @@ fn assert_f64_eps(label: &str, expected: f64, actual: f64, eps: f64) {
         "{label}: expected {expected:.20}, got {actual:.20}, diff {diff:.20e} > eps {eps:.20e}",
     );
 }
+mod debug_sun;

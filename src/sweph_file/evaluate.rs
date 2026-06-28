@@ -15,7 +15,7 @@ pub fn evaluate_body(
     body_id: i32,
     jd: f64,
     need_speed: bool,
-) -> Result<[f64; 6], Error> {
+) -> Result<([f64; 6], usize), Error> {
     let planet = file
         .planet_data(body_id)
         .ok_or(Error::InvalidBody(body_id))?;
@@ -50,20 +50,7 @@ pub fn evaluate_body(
         }
     }
 
-    if !is_moon {
-        let y = result[1];
-        let z = result[2];
-        result[1] = CEPS2000 * y - SEPS2000 * z;
-        result[2] = SEPS2000 * y + CEPS2000 * z;
-        if need_speed {
-            let vy = result[4];
-            let vz = result[5];
-            result[4] = CEPS2000 * vy - SEPS2000 * vz;
-            result[5] = SEPS2000 * vy + CEPS2000 * vz;
-        }
-    }
-
-    Ok(result)
+    Ok((result, neval))
 }
 
 fn rot_back(

@@ -16,9 +16,6 @@
 #include "sweph.h"
 #include "swephlib.h"
 
-#define SEPS2000 0.39777715572793088
-#define CEPS2000 0.91748206215761929
-
 /* Internal body IDs matching the SE1 file body_id values */
 static int body_ids[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 /* SE_* API body to call swe_calc with, to trigger loading each internal body */
@@ -35,15 +32,14 @@ static double epochs[] = {
     2451545.0 + 100.0 * 365.25,       /* +100yr */
     2451545.0 - 100.0 * 365.25,       /* -100yr */
     2451545.0 + 500.0 * 365.25,       /* +500yr */
+    2378496.5,                        /* 1800-Jan-1 */
 };
-#define NEPOCHS 8
+#define NEPOCHS 9
 
 int main(void) {
     double xx[6];
     char serr[256];
     int first = 1;
-
-    swe_set_ephe_path("../../../swisseph/ephe");
 
     printf("{\"cases\": [\n");
 
@@ -52,8 +48,11 @@ int main(void) {
         for (int ib = 0; ib < NBODIES; ib++) {
             int body_id = body_ids[ib];
             int se_body = se_bodies[ib];
-            int is_moon = (body_id == 1);
-
+            /* Reset C library state before each call so file caching does not
+             * carry over between test cases. This gives deterministic, stateless
+             * golden data matching our stateless Rust implementation. */
+            swe_close();
+            swe_set_ephe_path("../../../swisseph/ephe");
             /* Force file loading and segment caching */
             int ret = swe_calc(jd, se_body, SEFLG_SWIEPH | SEFLG_SPEED, xx, serr);
             if (ret < 0) {
@@ -76,16 +75,6 @@ int main(void) {
                 pos[k] = swi_echeb(t, pdp->segp + k * pdp->ncoe, pdp->neval);
                 pos[k+3] = swi_edcheb(t, pdp->segp + k * pdp->ncoe, pdp->neval)
                            / pdp->dseg * 2.0;
-            }
-
-            /* Rotate ecliptic J2000 -> equatorial J2000 for non-Moon bodies */
-            if (!is_moon) {
-                double y = pos[1], z = pos[2];
-                pos[1] = CEPS2000 * y - SEPS2000 * z;
-                pos[2] = SEPS2000 * y + CEPS2000 * z;
-                double vy = pos[4], vz = pos[5];
-                pos[4] = CEPS2000 * vy - SEPS2000 * vz;
-                pos[5] = SEPS2000 * vy + CEPS2000 * vz;
             }
 
             if (!first) printf(",\n");

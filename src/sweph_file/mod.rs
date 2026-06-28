@@ -115,10 +115,24 @@ pub fn open_ephemeris_files(dir: &Path, prefix: &str) -> Result<Vec<SwissEphFile
     Ok(files)
 }
 
+/// Select the ephemeris file for `jd`. `files` must be sorted ascending by
+/// file-level `time_range.0` (as `open_ephemeris_files` guarantees).
+///
+/// Picks the latest-starting file whose file-level tfstart is ≤ `jd` and whose
+/// per-planet range covers `jd`. This mirrors C's `swi_gen_filename` logic: the
+/// file named for a given epoch is the one whose century boundary is the largest
+/// that does not exceed the epoch. Using `<=` (not strict `<`) matches C's
+/// behavior at exact file boundaries like jd=2378496.5 (1800-Jan-1 = sepl_18's
+/// tfstart): C opens sepl_18 for the main position at jd, then switches to sepl_12
+/// for the retarded epoch (jd-dt, which falls before sepl_18's tfstart). Callers
+/// that need the retarded-time file should call this function separately with the
+/// retarded jd.
 pub fn find_file_for_jd(files: &[SwissEphFile], body_id: i32, jd: f64) -> Option<&SwissEphFile> {
-    files.iter().find(|f| {
-        f.planet_data(body_id)
-            .map_or(false, |pd| jd >= pd.tfstart && jd <= pd.tfend)
+    files.iter().rev().find(|f| {
+        let (file_start, _) = f.header().time_range;
+        file_start <= jd
+            && f.planet_data(body_id)
+                .map_or(false, |pd| jd >= pd.tfstart && jd <= pd.tfend)
     })
 }
 
