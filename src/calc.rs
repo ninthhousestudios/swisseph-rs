@@ -303,7 +303,7 @@ pub fn calc_planet(
     eps_j2000: &Epsilon,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let pp = compute_pipeline(jd, body, eps_j2000)?;
     let PipelinePositions {
         planet_helio,
@@ -402,9 +402,13 @@ pub fn calc_planet(
     }
 
     // Precession + ephemeris data
+    let x2000 = xx;
     let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
 
-    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+    Ok((
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    ))
 }
 
 pub fn calc_sun(
@@ -412,7 +416,7 @@ pub fn calc_sun(
     eps_j2000: &Epsilon,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let pp = compute_pipeline(jd, Body::Sun, eps_j2000)?;
     let earth_helio = pp.earth_helio;
 
@@ -454,9 +458,13 @@ pub fn calc_sun(
     }
 
     // Precession + ephemeris data
+    let x2000 = xx;
     let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
 
-    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+    Ok((
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    ))
 }
 
 pub fn calc_moon(
@@ -464,7 +472,7 @@ pub fn calc_moon(
     eps_j2000: &Epsilon,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let pp = compute_pipeline(jd, Body::Moon, eps_j2000)?;
     let earth_helio = pp.earth_helio;
 
@@ -512,9 +520,13 @@ pub fn calc_moon(
     }
 
     // Precession + ephemeris data
+    let x2000 = xx;
     let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
 
-    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+    Ok((
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    ))
 }
 
 pub fn extract_output(xreturn: &[f64; 24], flags: CalcFlags) -> [f64; 6] {
@@ -885,7 +897,7 @@ fn apparent_planet<P: PositionProvider>(
     _eps_j2000: &Epsilon,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let need_speed = flags.contains(CalcFlags::SPEED);
 
     let pos = p.positions(body, jd, true)?;
@@ -996,8 +1008,12 @@ fn apparent_planet<P: PositionProvider>(
         frame_bias(&mut xx, jd, flags, models, FrameTransform::GcrsToJ2000);
     }
 
+    let x2000 = xx;
     let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
-    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+    Ok((
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    ))
 }
 
 fn apparent_sun<P: PositionProvider>(
@@ -1005,7 +1021,7 @@ fn apparent_sun<P: PositionProvider>(
     jd: f64,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let need_speed = flags.contains(CalcFlags::SPEED);
 
     // Always pass need_speed=true internally — velocity needed for aberration
@@ -1057,8 +1073,12 @@ fn apparent_sun<P: PositionProvider>(
         frame_bias(&mut xx, jd, flags, models, FrameTransform::GcrsToJ2000);
     }
 
+    let x2000 = xx;
     let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
-    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+    Ok((
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    ))
 }
 
 fn apparent_moon<P: PositionProvider>(
@@ -1066,7 +1086,7 @@ fn apparent_moon<P: PositionProvider>(
     jd: f64,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let need_speed = flags.contains(CalcFlags::SPEED);
 
     // Moon geocentric from provider
@@ -1124,8 +1144,12 @@ fn apparent_moon<P: PositionProvider>(
         frame_bias(&mut xx, jd, flags, models, FrameTransform::GcrsToJ2000);
     }
 
+    let x2000 = xx;
     let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
-    Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+    Ok((
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,7 +1216,7 @@ pub fn calc_planet_jpl(
     eps_j2000: &Epsilon,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = JplProvider { file };
     apparent_planet(&p, jd, body, eps_j2000, flags, models)
 }
@@ -1202,7 +1226,7 @@ pub fn calc_sun_jpl(
     file: &crate::jpl::JplFile,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = JplProvider { file };
     apparent_sun(&p, jd, flags, models)
 }
@@ -1212,7 +1236,7 @@ pub fn calc_moon_jpl(
     file: &crate::jpl::JplFile,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = JplProvider { file };
     apparent_moon(&p, jd, flags, models)
 }
@@ -1225,7 +1249,7 @@ pub fn calc_planet_sweph(
     _eps_j2000: &Epsilon,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = SwephProvider {
         planet_files,
         moon_files,
@@ -1239,7 +1263,7 @@ pub fn calc_sun_sweph(
     moon_files: &[SwissEphFile],
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = SwephProvider {
         planet_files,
         moon_files,
@@ -1253,7 +1277,7 @@ pub fn calc_moon_sweph(
     moon_files: &[SwissEphFile],
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = SwephProvider {
         planet_files,
         moon_files,

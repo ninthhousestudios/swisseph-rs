@@ -188,9 +188,9 @@ impl Ephemeris {
             return self.calc_speed3(jd_tt, body, flags);
         }
 
-        let (mut xreturn, flags_used) = self.calc_inner(jd_tt, body, flags)?;
+        let (mut xreturn, x2000, flags_used) = self.calc_inner(jd_tt, body, flags)?;
         if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
-            self.apply_sidereal(&mut xreturn, jd_tt, flags_used)?;
+            self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags_used)?;
         }
         Ok(CalcResult {
             data: Self::extract_for_body(&xreturn, body, flags_used),
@@ -242,26 +242,26 @@ impl Ephemeris {
         jd_tt: f64,
         body: Body,
         flags: CalcFlags,
-    ) -> Result<([f64; 24], CalcFlags), Error> {
+    ) -> Result<([f64; 24], [f64; 6], CalcFlags), Error> {
         let models = &self.config.astro_models;
 
         if body == Body::EclipticNutation {
             let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);
             let mut xreturn = [0.0; 24];
             xreturn[..6].copy_from_slice(&ecl_nut);
-            return Ok((xreturn, flags));
+            return Ok((xreturn, [0.0; 6], flags));
         }
 
         if matches!(body, Body::MeanNode | Body::MeanApogee) {
             if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
-                return Ok(([0.0; 24], flags));
+                return Ok(([0.0; 24], [0.0; 6], flags));
             }
             let xr = match body {
                 Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models)?,
                 Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models)?,
                 _ => unreachable!(),
             };
-            return Ok((xr, flags));
+            return Ok((xr, [0.0; 6], flags));
         }
 
         if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
@@ -276,28 +276,28 @@ impl Ephemeris {
         match self.config.ephemeris_source {
             EphemerisSource::Swiss => {
                 match self.calc_body_sweph(jd_tt, body, &eps_j2000, flags, models) {
-                    Ok(xr) => Ok((xr, flags)),
+                    Ok((xr, x2000)) => Ok((xr, x2000, flags)),
                     Err(Error::BeyondEphemerisLimits { .. }) => {
                         let fallback_flags = (flags & !CalcFlags::SWIEPH) | CalcFlags::MOSEPH;
-                        let xr = self.calc_body_moshier(
+                        let (xr, x2000) = self.calc_body_moshier(
                             jd_tt,
                             body,
                             &eps_j2000,
                             fallback_flags,
                             models,
                         )?;
-                        Ok((xr, fallback_flags))
+                        Ok((xr, x2000, fallback_flags))
                     }
                     Err(e) => Err(e),
                 }
             }
             EphemerisSource::Jpl => {
-                let xr = self.calc_body_jpl(jd_tt, body, &eps_j2000, flags, models)?;
-                Ok((xr, flags))
+                let (xr, x2000) = self.calc_body_jpl(jd_tt, body, &eps_j2000, flags, models)?;
+                Ok((xr, x2000, flags))
             }
             EphemerisSource::Moshier => {
-                let xr = self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models)?;
-                Ok((xr, flags))
+                let (xr, x2000) = self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models)?;
+                Ok((xr, x2000, flags))
             }
         }
     }
@@ -309,7 +309,7 @@ impl Ephemeris {
         eps_j2000: &crate::types::Epsilon,
         flags: CalcFlags,
         models: &crate::types::AstroModels,
-    ) -> Result<[f64; 24], Error> {
+    ) -> Result<([f64; 24], [f64; 6]), Error> {
         match body {
             Body::Sun => crate::calc::calc_sun(jd_tt, eps_j2000, flags, models),
             Body::Moon => crate::calc::calc_moon(jd_tt, eps_j2000, flags, models),
@@ -335,7 +335,7 @@ impl Ephemeris {
         eps_j2000: &crate::types::Epsilon,
         flags: CalcFlags,
         models: &crate::types::AstroModels,
-    ) -> Result<[f64; 24], Error> {
+    ) -> Result<([f64; 24], [f64; 6]), Error> {
         match body {
             Body::Sun => crate::calc::calc_sun_sweph(
                 jd_tt,
@@ -381,7 +381,7 @@ impl Ephemeris {
         eps_j2000: &crate::types::Epsilon,
         flags: CalcFlags,
         models: &crate::types::AstroModels,
-    ) -> Result<[f64; 24], Error> {
+    ) -> Result<([f64; 24], [f64; 6]), Error> {
         let file = self.jpl_file.as_ref().unwrap();
         match body {
             Body::Sun => crate::calc::calc_sun_jpl(jd_tt, file, flags, models),
@@ -407,15 +407,15 @@ impl Ephemeris {
         let dt = crate::calc::speed3_interval(body);
         let inner_flags = flags & !CalcFlags::SPEED3;
 
-        let (mut x0, _) = self.calc_inner(jd_tt - dt, body, inner_flags)?;
-        let (mut x2, _) = self.calc_inner(jd_tt + dt, body, inner_flags)?;
-        let (mut x1, flags_used) = self.calc_inner(jd_tt, body, inner_flags)?;
+        let (mut x0, _, _) = self.calc_inner(jd_tt - dt, body, inner_flags)?;
+        let (mut x2, _, _) = self.calc_inner(jd_tt + dt, body, inner_flags)?;
+        let (mut x1, x2000, flags_used) = self.calc_inner(jd_tt, body, inner_flags)?;
 
         crate::calc::denormalize_positions(&mut x0, &x1, &mut x2);
         crate::calc::calc_speed_3point(&mut x1, &x0, &x2, dt);
 
         if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
-            self.apply_sidereal(&mut x1, jd_tt, flags_used | CalcFlags::SPEED)?;
+            self.apply_sidereal(&mut x1, &x2000, jd_tt, flags_used | CalcFlags::SPEED)?;
         }
 
         Ok(CalcResult {
@@ -427,23 +427,88 @@ impl Ephemeris {
     fn apply_sidereal(
         &self,
         xreturn: &mut [f64; 24],
+        x2000: &[f64; 6],
         jd_tt: f64,
         flags: CalcFlags,
     ) -> Result<(), Error> {
-        if self
-            .config
-            .sidereal_bits
-            .intersects(SiderealBits::ECL_T0 | SiderealBits::SSY_PLANE)
-        {
-            return Err(Error::UnsupportedFlags(CalcFlags::SIDEREAL));
+        use crate::constants::RADTODEG;
+        use crate::math::cartesian_to_polar_with_speed;
+
+        let bits = self.config.sidereal_bits;
+        let models = &self.config.astro_models;
+        let has_speed = flags.contains(CalcFlags::SPEED);
+        let has_meaningful_x2000 = *x2000 != [0.0f64; 6];
+
+        if has_meaningful_x2000 && bits.contains(SiderealBits::ECL_T0) {
+            let (xecl, xequ) = crate::ayanamsa::trop_ra2sid_lon(x2000, &self.config, models, flags);
+
+            xreturn[6..12].copy_from_slice(&xecl);
+            xreturn[18..24].copy_from_slice(&xequ);
+
+            // Recompute ecliptic polar [0..6] from new Cartesian [6..12]
+            let ecl_pol = cartesian_to_polar_with_speed(xecl);
+            xreturn[0] = ecl_pol[0] * RADTODEG;
+            xreturn[1] = ecl_pol[1] * RADTODEG;
+            xreturn[2] = ecl_pol[2];
+            xreturn[3] = if has_speed {
+                ecl_pol[3] * RADTODEG
+            } else {
+                0.0
+            };
+            xreturn[4] = if has_speed {
+                ecl_pol[4] * RADTODEG
+            } else {
+                0.0
+            };
+            xreturn[5] = if has_speed { ecl_pol[5] } else { 0.0 };
+
+            // Recompute equatorial polar [12..18] from new Cartesian [18..24]
+            let equ_pol = cartesian_to_polar_with_speed(xequ);
+            xreturn[12] = equ_pol[0] * RADTODEG;
+            xreturn[13] = equ_pol[1] * RADTODEG;
+            xreturn[14] = equ_pol[2];
+            xreturn[15] = if has_speed {
+                equ_pol[3] * RADTODEG
+            } else {
+                0.0
+            };
+            xreturn[16] = if has_speed {
+                equ_pol[4] * RADTODEG
+            } else {
+                0.0
+            };
+            xreturn[17] = if has_speed { equ_pol[5] } else { 0.0 };
+        } else if has_meaningful_x2000 && bits.contains(SiderealBits::SSY_PLANE) {
+            let xecl = crate::ayanamsa::trop_ra2sid_lon_sosy(x2000, &self.config, models, flags);
+
+            xreturn[6..12].copy_from_slice(&xecl);
+
+            // Recompute ecliptic polar [0..6] from new Cartesian [6..12]
+            let ecl_pol = cartesian_to_polar_with_speed(xecl);
+            xreturn[0] = ecl_pol[0] * RADTODEG;
+            xreturn[1] = ecl_pol[1] * RADTODEG;
+            xreturn[2] = ecl_pol[2];
+            xreturn[3] = if has_speed {
+                ecl_pol[3] * RADTODEG
+            } else {
+                0.0
+            };
+            xreturn[4] = if has_speed {
+                ecl_pol[4] * RADTODEG
+            } else {
+                0.0
+            };
+            xreturn[5] = if has_speed { ecl_pol[5] } else { 0.0 };
+
+            // Recompute ecliptic Cartesian [6..12] from polar (already done above)
+            // Leave equatorial [12..24] untouched (matches C Branch 2)
+        } else {
+            // Default branch: ayanamsa subtraction on ecliptic polar
+            let daya =
+                crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd_tt, flags, models)?;
+            crate::calc::apply_sidereal_default(xreturn, daya, has_speed);
         }
-        let daya = crate::ayanamsa::get_ayanamsa_with_speed(
-            &self.config,
-            jd_tt,
-            flags,
-            &self.config.astro_models,
-        )?;
-        crate::calc::apply_sidereal_default(xreturn, daya, flags.contains(CalcFlags::SPEED));
+
         Ok(())
     }
 

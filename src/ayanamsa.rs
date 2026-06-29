@@ -1,8 +1,13 @@
-use crate::constants::{B1950, DEGTORAD, J1900, J2000, RADTODEG};
+use crate::constants::{
+    B1950, DEGTORAD, J1900, J2000, RADTODEG, SSY_PLANE_INCL, SSY_PLANE_NODE_E2000,
+};
 use crate::context::EphemerisConfig;
 use crate::error::Error;
 use crate::flags::{CalcFlags, SiderealBits};
-use crate::math::{cartesian_to_polar, normalize_degrees, polar_to_cartesian, rotate_x};
+use crate::math::{
+    cartesian_to_polar, cartesian_to_polar_with_speed, normalize_degrees, normalize_radians,
+    polar_to_cartesian, polar_to_cartesian_with_speed, rotate_x, rotate_x_sincos,
+};
 use crate::types::{AstroModels, PrecessionDirection, SiderealMode};
 
 #[derive(Debug, Clone, Copy)]
@@ -315,7 +320,7 @@ fn sidereal_index(config: &EphemerisConfig) -> usize {
     }
 }
 
-fn resolve_t0(config: &EphemerisConfig, flags: CalcFlags) -> f64 {
+pub(crate) fn resolve_t0(config: &EphemerisConfig, flags: CalcFlags) -> f64 {
     let mut t0 = config.sidereal_t0;
     if config.sidereal_t0_is_ut {
         t0 += crate::deltat::calc_deltat(t0, config);
@@ -464,6 +469,151 @@ pub fn get_ayanamsa_with_speed(
     let d0 = get_ayanamsa_ex(config, jd_tt, flags, models)?;
     let d2 = get_ayanamsa_ex(config, jd_tt - TINTV, flags, models)?;
     Ok([d0, (d0 - d2) / TINTV])
+}
+
+/// ECL_T0 projection: project body from J2000 equatorial onto ecliptic of t0.
+///
+/// Returns `(xecl, xequ)` — ecliptic-sidereal Cartesian and equatorial-sidereal Cartesian,
+/// both in the frame of epoch t0. Matches C `swi_trop_ra2sid_lon`.
+pub(crate) fn trop_ra2sid_lon(
+    x2000: &[f64; 6],
+    config: &EphemerisConfig,
+    models: &AstroModels,
+    flags: CalcFlags,
+) -> ([f64; 6], [f64; 6]) {
+    let mut x = *x2000;
+    let t0 = resolve_t0(config, flags);
+
+    // Step 1: precess J2000 → t0 (position and speed as SEPARATE calls, matching C)
+    if config.sidereal_t0 != J2000 {
+        let mut pos3 = [x[0], x[1], x[2]];
+        crate::precession::precess(
+            &mut pos3,
+            t0,
+            flags,
+            models,
+            PrecessionDirection::J2000ToDate,
+        );
+        x[0] = pos3[0];
+        x[1] = pos3[1];
+        x[2] = pos3[2];
+        if flags.contains(CalcFlags::SPEED) {
+            let mut vel3 = [x[3], x[4], x[5]];
+            crate::precession::precess(
+                &mut vel3,
+                t0,
+                flags,
+                models,
+                PrecessionDirection::J2000ToDate,
+            );
+            x[3] = vel3[0];
+            x[4] = vel3[1];
+            x[5] = vel3[2];
+        }
+    }
+
+    let xequ = x; // equatorial sidereal (frame of t0)
+
+    // Step 2: equatorial t0 → ecliptic t0 (C passes iflag here, not 0)
+    let oe = crate::obliquity::obliquity(t0, flags, models);
+    let pos3 = rotate_x_sincos([x[0], x[1], x[2]], oe.sin_eps, oe.cos_eps);
+    x[0] = pos3[0];
+    x[1] = pos3[1];
+    x[2] = pos3[2];
+    if flags.contains(CalcFlags::SPEED) {
+        let vel3 = rotate_x_sincos([x[3], x[4], x[5]], oe.sin_eps, oe.cos_eps);
+        x[3] = vel3[0];
+        x[4] = vel3[1];
+        x[5] = vel3[2];
+    }
+
+    // Step 3: Cartesian ecliptic → polar
+    let mut pol = cartesian_to_polar_with_speed(x);
+
+    // Step 4: subtract ayanamsa (in RADIANS) and apply correction
+    let corr = get_aya_correction(config, flags, models);
+    pol[0] -= config.sidereal_ayan_t0 * DEGTORAD;
+    pol[0] = normalize_radians(pol[0] + corr * DEGTORAD);
+
+    // Step 5: back to Cartesian
+    let xecl = polar_to_cartesian_with_speed(pol);
+
+    (xecl, xequ)
+}
+
+/// SSY_PLANE projection: project body onto solar-system invariable plane.
+///
+/// Returns ecliptic-sidereal Cartesian in the SSY plane. Matches C `swi_trop_ra2sid_lon_sosy`.
+pub(crate) fn trop_ra2sid_lon_sosy(
+    x2000: &[f64; 6],
+    config: &EphemerisConfig,
+    models: &AstroModels,
+    flags: CalcFlags,
+) -> [f64; 6] {
+    let oe = crate::obliquity::obliquity(J2000, flags, models);
+
+    // === Planet path ===
+    let mut x = *x2000;
+
+    // (a) equatorial J2000 → ecliptic J2000
+    let pos3 = rotate_x_sincos([x[0], x[1], x[2]], oe.sin_eps, oe.cos_eps);
+    x[0] = pos3[0];
+    x[1] = pos3[1];
+    x[2] = pos3[2];
+    if flags.contains(CalcFlags::SPEED) {
+        let vel3 = rotate_x_sincos([x[3], x[4], x[5]], oe.sin_eps, oe.cos_eps);
+        x[3] = vel3[0];
+        x[4] = vel3[1];
+        x[5] = vel3[2];
+    }
+
+    // (b) ecliptic Cartesian → polar
+    let mut xpol = cartesian_to_polar_with_speed(x);
+
+    // (c) longitude shift by -plane_node
+    xpol[0] -= SSY_PLANE_NODE_E2000;
+
+    // (d) polar → Cartesian, then tilt to SSY plane
+    let mut xcart = polar_to_cartesian_with_speed(xpol);
+    let pos3 = rotate_x([xcart[0], xcart[1], xcart[2]], SSY_PLANE_INCL);
+    xcart[0] = pos3[0];
+    xcart[1] = pos3[1];
+    xcart[2] = pos3[2];
+    if flags.contains(CalcFlags::SPEED) {
+        let vel3 = rotate_x([xcart[3], xcart[4], xcart[5]], SSY_PLANE_INCL);
+        xcart[3] = vel3[0];
+        xcart[4] = vel3[1];
+        xcart[5] = vel3[2];
+    }
+
+    // (e) Cartesian → polar in SSY plane
+    let mut x = cartesian_to_polar_with_speed(xcart);
+
+    // === Zero-point path (vernal point of t0 in SSY plane) ===
+    let mut x0 = [1.0_f64, 0.0, 0.0];
+    let t0 = resolve_t0(config, flags);
+
+    if config.sidereal_t0 != J2000 {
+        crate::precession::precess(&mut x0, t0, flags, models, PrecessionDirection::DateToJ2000);
+    }
+
+    // equatorial J2000 → ecliptic J2000
+    x0 = rotate_x_sincos(x0, oe.sin_eps, oe.cos_eps);
+    let mut x0pol = cartesian_to_polar(x0);
+    x0pol[0] -= SSY_PLANE_NODE_E2000;
+    let mut x0cart = polar_to_cartesian(x0pol);
+    x0cart = rotate_x(x0cart, SSY_PLANE_INCL);
+    let x0pol2 = cartesian_to_polar(x0cart);
+
+    // === Measure planet relative to zero point (work in DEGREES) ===
+    x[0] -= x0pol2[0]; // angle difference in radians
+    x[0] *= RADTODEG; // now in degrees
+
+    let corr = get_aya_correction(config, flags, models);
+    x[0] -= config.sidereal_ayan_t0;
+    x[0] = normalize_degrees(x[0] + corr) * DEGTORAD; // normalize in degrees then back to radians
+
+    polar_to_cartesian_with_speed(x)
 }
 
 #[cfg(test)]
