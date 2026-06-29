@@ -25,9 +25,22 @@ struct EquCase {
 }
 
 #[derive(Deserialize)]
+struct NoIndexCase {
+    body: String,
+    tjd: f64,
+    lon: f64,
+    lat: f64,
+    dist: f64,
+    lon_speed: f64,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     cases: Vec<Case>,
     equ: Vec<EquCase>,
+    ecl_t0: Vec<Case>,
+    user_ecl_t0: Vec<NoIndexCase>,
+    ssy: Vec<NoIndexCase>,
 }
 
 fn load() -> GoldenData {
@@ -134,5 +147,90 @@ fn golden_ayanamsa_calc_equatorial_tropical() {
             1e-12,
         );
         super::assert_f64_eps(&label("dist"), c.dist, sid.data[2], 1e-9);
+    }
+}
+
+/// ECL_T0 modes (18/19/20/34) project onto the ecliptic of epoch t0.
+/// swe_set_sid_mode auto-sets SE_SIDBIT_ECL_T0 for these indices.
+#[test]
+fn golden_ayanamsa_calc_ecl_t0() {
+    let data = load();
+    let flags = CalcFlags::MOSEPH | CalcFlags::SIDEREAL | CalcFlags::SPEED;
+
+    for (i, c) in data.ecl_t0.iter().enumerate() {
+        let mut cfg = EphemerisConfig::default();
+        cfg.set_sidereal_mode(c.index, 0.0, 0.0);
+        let eph = Ephemeris::new(cfg).expect("Ephemeris::new");
+        let body = body_from_str(&c.body);
+        let result = eph.calc(c.tjd, body, flags).unwrap_or_else(|e| {
+            panic!(
+                "ecl_t0 case {i} (idx={} body={} tjd={}): {e}",
+                c.index, c.body, c.tjd
+            )
+        });
+
+        let label = |field: &str| {
+            format!(
+                "ecl_t0 case {i} idx={} body={} tjd={:.1} {field}",
+                c.index, c.body, c.tjd
+            )
+        };
+        super::assert_f64_eps(&label("lon"), c.lon, result.data[0], 1e-9);
+        super::assert_f64_eps(&label("lat"), c.lat, result.data[1], 1e-9);
+        super::assert_f64_eps(&label("dist"), c.dist, result.data[2], 1e-9);
+        super::assert_f64_eps(&label("lon_speed"), c.lon_speed, result.data[3], 1e-7);
+    }
+}
+
+/// USER mode with ECL_T0 bit: SE_SIDM_USER|SE_SIDBIT_ECL_T0 = 511, t0=J2000, ayan=25°.
+#[test]
+fn golden_ayanamsa_calc_user_ecl_t0() {
+    let data = load();
+    let flags = CalcFlags::MOSEPH | CalcFlags::SIDEREAL | CalcFlags::SPEED;
+
+    let mut cfg = EphemerisConfig::default();
+    cfg.set_sidereal_mode(255 | 256, 2451545.0, 25.0);
+    let eph = Ephemeris::new(cfg).expect("Ephemeris::new");
+
+    for (i, c) in data.user_ecl_t0.iter().enumerate() {
+        let body = body_from_str(&c.body);
+        let result = eph.calc(c.tjd, body, flags).unwrap_or_else(|e| {
+            panic!("user_ecl_t0 case {i} (body={} tjd={}): {e}", c.body, c.tjd)
+        });
+
+        let label = |field: &str| {
+            format!(
+                "user_ecl_t0 case {i} body={} tjd={:.1} {field}",
+                c.body, c.tjd
+            )
+        };
+        super::assert_f64_eps(&label("lon"), c.lon, result.data[0], 1e-9);
+        super::assert_f64_eps(&label("lat"), c.lat, result.data[1], 1e-9);
+        super::assert_f64_eps(&label("dist"), c.dist, result.data[2], 1e-9);
+        super::assert_f64_eps(&label("lon_speed"), c.lon_speed, result.data[3], 1e-7);
+    }
+}
+
+/// SSY_PLANE: SE_SIDM_LAHIRI|SE_SIDBIT_SSY_PLANE = 513, Sun at J2000.
+#[test]
+fn golden_ayanamsa_calc_ssy_plane() {
+    let data = load();
+    let flags = CalcFlags::MOSEPH | CalcFlags::SIDEREAL | CalcFlags::SPEED;
+
+    let mut cfg = EphemerisConfig::default();
+    cfg.set_sidereal_mode(1 | 512, 0.0, 0.0);
+    let eph = Ephemeris::new(cfg).expect("Ephemeris::new");
+
+    for (i, c) in data.ssy.iter().enumerate() {
+        let body = body_from_str(&c.body);
+        let result = eph
+            .calc(c.tjd, body, flags)
+            .unwrap_or_else(|e| panic!("ssy case {i} (body={} tjd={}): {e}", c.body, c.tjd));
+
+        let label = |field: &str| format!("ssy case {i} body={} tjd={:.1} {field}", c.body, c.tjd);
+        super::assert_f64_eps(&label("lon"), c.lon, result.data[0], 1e-9);
+        super::assert_f64_eps(&label("lat"), c.lat, result.data[1], 1e-9);
+        super::assert_f64_eps(&label("dist"), c.dist, result.data[2], 1e-9);
+        super::assert_f64_eps(&label("lon_speed"), c.lon_speed, result.data[3], 1e-7);
     }
 }
