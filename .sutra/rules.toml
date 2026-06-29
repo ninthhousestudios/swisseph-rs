@@ -4,13 +4,21 @@
 # =============================================================================
 # Backend isolation — moshier, jpl, sweph_file are independent backends.
 # None may import from another. The calc dispatcher is the integration point.
+#
+# Globs re-pointed 2026-06-29 (checkpoint:swisseph-rs/8): sweph_file became a
+# directory module (the old "src/sweph_file.rs" globs had gone silently inert —
+# dead_constraint). jpl is converting to a directory in swisseph-rs/43; the
+# "src/jpl/**" globs are pre-pointed to that target and are intentionally inert
+# until 43 lands — the current src/jpl.rs is an empty stub with no imports, so
+# nothing is unguarded in the interim. (globset rejects a combined
+# "src/jpl{.rs,/**}" brace: recursive wildcards must be a lone path component.)
 # =============================================================================
 
 [[constraint]]
 kind = "forbidden_dep"
 name = "backend-isolation:moshier→jpl"
 from = "src/moshier/**"
-to = "src/jpl.rs"
+to = "src/jpl/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
 
@@ -18,14 +26,14 @@ provenance = "yojana:swisseph-rs §module-tree"
 kind = "forbidden_dep"
 name = "backend-isolation:moshier→sweph"
 from = "src/moshier/**"
-to = "src/sweph_file.rs"
+to = "src/sweph_file/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
 
 [[constraint]]
 kind = "forbidden_dep"
 name = "backend-isolation:jpl→moshier"
-from = "src/jpl.rs"
+from = "src/jpl/**"
 to = "src/moshier/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
@@ -33,15 +41,15 @@ provenance = "yojana:swisseph-rs §module-tree"
 [[constraint]]
 kind = "forbidden_dep"
 name = "backend-isolation:jpl→sweph"
-from = "src/jpl.rs"
-to = "src/sweph_file.rs"
+from = "src/jpl/**"
+to = "src/sweph_file/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
 
 [[constraint]]
 kind = "forbidden_dep"
 name = "backend-isolation:sweph→moshier"
-from = "src/sweph_file.rs"
+from = "src/sweph_file/**"
 to = "src/moshier/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
@@ -49,24 +57,36 @@ provenance = "yojana:swisseph-rs §module-tree"
 [[constraint]]
 kind = "forbidden_dep"
 name = "backend-isolation:sweph→jpl"
-from = "src/sweph_file.rs"
-to = "src/jpl.rs"
+from = "src/sweph_file/**"
+to = "src/jpl/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
+
+# =============================================================================
+# Checkpoint 2026-06-29 (checkpoint:swisseph-rs/8) — fired triggers
+# =============================================================================
+
+# FIRED: cross-module imports have existed since Phase 1 (date.rs); bound at the
+# JPL-planning checkpoint (overdue by six phases). Guards use-based import cycles
+# in src/. NB: sutra's import graph captures `use`-based edges only, so the
+# pre-existing context<->deltat coupling via crate::-qualified calls is not seen
+# here and is out of scope for this constraint.
+[[constraint]]
+kind = "no_cycles"
+name = "no-module-cycles"
+scope = "src/"
+severity = "blocking"
+provenance = "checkpoint:swisseph-rs/8"
 
 # =============================================================================
 # DEFERRED — uncomment when trigger condition is met
 # =============================================================================
 
-# TRIGGER: at first phase with real cross-module imports (Phase 1: date.rs)
-# [[constraint]]
-# kind = "no_cycles"
-# name = "no-module-cycles"
-# scope = "src/"
-# severity = "blocking"
-# provenance = "skill default"
-
-# TRIGGER: at Phase 5 (calc dispatcher exists) — app modules go through calc, not backends
+# TRIGGER: at first app module implementation (Phase 8+) — app modules go through calc, not backends.
+# Re-keyed 2026-06-29 (checkpoint:swisseph-rs/8): the calc dispatcher has existed
+# since Phase 5, but houses/eclipse/phenomena/heliacal/stars/ayanamsa are still
+# empty stubs (zero import edges). Binding now would produce 18 inert
+# dead_constraints; defer until the first app module has real code.
 # [[constraint]]
 # kind = "forbidden_dep"
 # name = "app-uses-calc-not-backends:houses→moshier"
