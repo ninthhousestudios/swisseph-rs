@@ -303,11 +303,6 @@ pub(crate) const AYANAMSA: [AyaInit; 47] = [
     }, // 46 LAHIRI_ICRC
 ];
 
-#[allow(dead_code)]
-pub(crate) fn aya_init(index: usize) -> AyaInit {
-    AYANAMSA[index]
-}
-
 // ---------------------------------------------------------------------------
 // Fixed-star ayanamsa indices: require star catalog, deferred.
 // ---------------------------------------------------------------------------
