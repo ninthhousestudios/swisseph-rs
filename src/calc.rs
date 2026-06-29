@@ -715,6 +715,28 @@ pub fn calc_ecl_nut(jd: f64, flags: CalcFlags, models: &AstroModels) -> [f64; 6]
     ]
 }
 
+/// Apply default-branch sidereal projection (Branch 3) to `xreturn`.
+///
+/// `daya[0]` is the ayanamsa in degrees; `daya[1]` is the ayanamsa speed in
+/// degrees/day. Adjusts ecliptic polar `[0..6]` and recomputes ecliptic
+/// Cartesian `[6..12]`. Leaves equatorial `[12..24]` untouched (matches C).
+pub fn apply_sidereal_default(xreturn: &mut [f64; 24], daya: [f64; 2], has_speed: bool) {
+    xreturn[0] = crate::math::normalize_degrees(xreturn[0] - daya[0]);
+    if has_speed {
+        xreturn[3] -= daya[1];
+    }
+    let polar = [
+        xreturn[0] * DEGTORAD,
+        xreturn[1] * DEGTORAD,
+        xreturn[2],
+        xreturn[3] * DEGTORAD,
+        xreturn[4] * DEGTORAD,
+        xreturn[5],
+    ];
+    let cart = crate::math::polar_to_cartesian_with_speed(polar);
+    xreturn[6..12].copy_from_slice(&cart);
+}
+
 // ---------------------------------------------------------------------------
 // SwissEph (.se1) backend
 // ---------------------------------------------------------------------------

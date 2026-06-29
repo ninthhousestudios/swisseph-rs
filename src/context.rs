@@ -172,7 +172,7 @@ impl Ephemeris {
     /// deduplication for repeated same-JD queries should cache externally.
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
-        let unsupported = flags & (CalcFlags::TOPOCTR | CalcFlags::SIDEREAL);
+        let unsupported = flags & CalcFlags::TOPOCTR;
         if !unsupported.is_empty() {
             return Err(Error::UnsupportedFlags(unsupported));
         }
@@ -188,7 +188,10 @@ impl Ephemeris {
             return self.calc_speed3(jd_tt, body, flags);
         }
 
-        let (xreturn, flags_used) = self.calc_inner(jd_tt, body, flags)?;
+        let (mut xreturn, flags_used) = self.calc_inner(jd_tt, body, flags)?;
+        if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
+            self.apply_sidereal(&mut xreturn, jd_tt, flags_used)?;
+        }
         Ok(CalcResult {
             data: Self::extract_for_body(&xreturn, body, flags_used),
             flags_used,
@@ -411,10 +414,37 @@ impl Ephemeris {
         crate::calc::denormalize_positions(&mut x0, &x1, &mut x2);
         crate::calc::calc_speed_3point(&mut x1, &x0, &x2, dt);
 
+        if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
+            self.apply_sidereal(&mut x1, jd_tt, flags_used | CalcFlags::SPEED)?;
+        }
+
         Ok(CalcResult {
             data: Self::extract_for_body(&x1, body, flags | CalcFlags::SPEED),
             flags_used,
         })
+    }
+
+    fn apply_sidereal(
+        &self,
+        xreturn: &mut [f64; 24],
+        jd_tt: f64,
+        flags: CalcFlags,
+    ) -> Result<(), Error> {
+        if self
+            .config
+            .sidereal_bits
+            .intersects(SiderealBits::ECL_T0 | SiderealBits::SSY_PLANE)
+        {
+            return Err(Error::UnsupportedFlags(CalcFlags::SIDEREAL));
+        }
+        let daya = crate::ayanamsa::get_ayanamsa_with_speed(
+            &self.config,
+            jd_tt,
+            flags,
+            &self.config.astro_models,
+        )?;
+        crate::calc::apply_sidereal_default(xreturn, daya, flags.contains(CalcFlags::SPEED));
+        Ok(())
     }
 
     fn build_leap_seconds(config: &EphemerisConfig) -> crate::Result<Vec<i32>> {
