@@ -1,4 +1,9 @@
-use crate::constants::{B1950, J1900, J2000};
+use crate::constants::{B1950, DEGTORAD, J1900, J2000, RADTODEG};
+use crate::context::EphemerisConfig;
+use crate::error::Error;
+use crate::flags::{CalcFlags, SiderealBits};
+use crate::math::{cartesian_to_polar, normalize_degrees, polar_to_cartesian, rotate_x};
+use crate::types::{AstroModels, PrecessionDirection, SiderealMode};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AyaInit {
@@ -296,6 +301,169 @@ pub(crate) const AYANAMSA: [AyaInit; 47] = [
 #[allow(dead_code)]
 pub(crate) fn aya_init(index: usize) -> AyaInit {
     AYANAMSA[index]
+}
+
+// ---------------------------------------------------------------------------
+// Fixed-star ayanamsa indices: require star catalog, deferred.
+// ---------------------------------------------------------------------------
+const FIXED_STAR_INDICES: [usize; 12] = [17, 27, 28, 29, 30, 31, 32, 33, 35, 36, 39, 40];
+
+fn sidereal_index(config: &EphemerisConfig) -> usize {
+    match config.sidereal_mode {
+        Some(mode) => mode as i32 as usize,
+        None => 0, // FaganBradley
+    }
+}
+
+fn resolve_t0(config: &EphemerisConfig, flags: CalcFlags) -> f64 {
+    let mut t0 = config.sidereal_t0;
+    if config.sidereal_t0_is_ut {
+        t0 += crate::deltat::calc_deltat(t0, config);
+    }
+    let _ = flags; // passed for API parity with C; doesn't affect precession output
+    t0
+}
+
+/// Core ayanamsa computation — no nutation. Matches `swi_get_ayanamsa_ex`.
+pub fn get_ayanamsa_ex(
+    config: &EphemerisConfig,
+    jd_tt: f64,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<f64, Error> {
+    let idx = sidereal_index(config);
+
+    if FIXED_STAR_INDICES.contains(&idx) {
+        let mode = config.sidereal_mode.unwrap_or(SiderealMode::FaganBradley);
+        return Err(Error::SiderealModeRequiresFixedStars(mode));
+    }
+
+    let t0 = resolve_t0(config, flags);
+    let ayan_t0 = config.sidereal_ayan_t0;
+
+    let lon = if config.sidereal_bits.contains(SiderealBits::ECL_DATE) {
+        // Method 2: propagate the zero-point through ecliptic-of-date
+        let mut x = polar_to_cartesian([normalize_degrees(ayan_t0) * DEGTORAD, 0.0, 1.0]);
+        let eps_t0 = crate::obliquity::obliquity(t0, CalcFlags::empty(), models).eps;
+        x = rotate_x(x, -eps_t0); // ecliptic of t0 → equatorial of t0
+        if t0 != J2000 {
+            crate::precession::precess(&mut x, t0, flags, models, PrecessionDirection::DateToJ2000);
+        }
+        crate::precession::precess(
+            &mut x,
+            jd_tt,
+            flags,
+            models,
+            PrecessionDirection::J2000ToDate,
+        );
+        let eps_d = crate::obliquity::obliquity(jd_tt, CalcFlags::empty(), models).eps;
+        x = rotate_x(x, eps_d); // equatorial of date → ecliptic of date
+        let polar = cartesian_to_polar(x);
+        normalize_degrees(polar[0] * RADTODEG)
+    } else {
+        // Method 1: precess vernal point at date back to t0
+        let mut x = [1.0_f64, 0.0, 0.0];
+        if jd_tt != J2000 {
+            crate::precession::precess(
+                &mut x,
+                jd_tt,
+                flags,
+                models,
+                PrecessionDirection::DateToJ2000,
+            );
+        }
+        crate::precession::precess(&mut x, t0, flags, models, PrecessionDirection::J2000ToDate);
+        let eps_t0 = crate::obliquity::obliquity(t0, CalcFlags::empty(), models).eps;
+        x = rotate_x(x, eps_t0); // equatorial of t0 → ecliptic of t0
+        let polar = cartesian_to_polar(x);
+        // FP note 1: write as negation-then-add, not subtract.
+        -polar[0] * RADTODEG + ayan_t0
+    };
+
+    let corr = get_aya_correction(config, flags, models);
+    Ok(normalize_degrees(lon - corr))
+}
+
+/// Precession-model correction. Returns 0 when not applicable.
+pub fn get_aya_correction(config: &EphemerisConfig, flags: CalcFlags, models: &AstroModels) -> f64 {
+    let idx = sidereal_index(config);
+    let prec_offset = if idx == 255 {
+        0
+    } else {
+        AYANAMSA[idx].prec_offset
+    };
+    let prec_model = models.prec_longterm as i32;
+
+    if config.sidereal_t0 == J2000
+        || config.sidereal_bits.contains(SiderealBits::NO_PREC_OFFSET)
+        || prec_offset == 0
+        || prec_offset < 0
+        || prec_model == prec_offset
+    {
+        return 0.0;
+    }
+
+    let t0 = resolve_t0(config, flags);
+    let mut x = [1.0_f64, 0.0, 0.0];
+
+    // Precess t0→J2000 with current model
+    crate::precession::precess(&mut x, t0, flags, models, PrecessionDirection::DateToJ2000);
+
+    // Precess J2000→t0 with the ayanamsa's original model
+    let orig_prec = match prec_offset {
+        1 => crate::types::PrecessionModel::IAU1976,
+        11 => crate::types::PrecessionModel::Newcomb,
+        _ => unreachable!("prec_offset {prec_offset} not reachable after guards"),
+    };
+    let models_orig = AstroModels {
+        prec_longterm: orig_prec,
+        prec_shortterm: orig_prec,
+        ..*models
+    };
+    crate::precession::precess(
+        &mut x,
+        t0,
+        flags,
+        &models_orig,
+        PrecessionDirection::J2000ToDate,
+    );
+
+    let eps = crate::obliquity::obliquity(t0, CalcFlags::empty(), models).eps;
+    x = rotate_x(x, eps); // equatorial → ecliptic
+    let polar = cartesian_to_polar(x);
+    let mut corr = polar[0] * RADTODEG;
+    if corr > 350.0 {
+        corr -= 360.0;
+    }
+    corr
+}
+
+/// Public ayanamsa with nutation added (unless NONUT). Matches `swe_get_ayanamsa_ex`.
+pub fn get_ayanamsa_ex_nut(
+    config: &EphemerisConfig,
+    jd_tt: f64,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<f64, Error> {
+    let mut daya = get_ayanamsa_ex(config, jd_tt, flags, models)?;
+    if !flags.contains(CalcFlags::NONUT) {
+        daya += crate::nutation::nutation(jd_tt, flags, models).dpsi * RADTODEG;
+    }
+    Ok(daya)
+}
+
+/// Two-point numerical ayanamsa speed derivative. Matches `swi_get_ayanamsa_with_speed`.
+/// Returns `[ayanamsa_deg, speed_deg_per_day]`.
+pub fn get_ayanamsa_with_speed(
+    config: &EphemerisConfig,
+    jd_tt: f64,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 2], Error> {
+    const TINTV: f64 = 0.001;
+    let d0 = get_ayanamsa_ex(config, jd_tt, flags, models)?;
+    let d2 = get_ayanamsa_ex(config, jd_tt - TINTV, flags, models)?;
+    Ok([d0, (d0 - d2) / TINTV])
 }
 
 #[cfg(test)]

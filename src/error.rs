@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use crate::flags::CalcFlags;
-use crate::types::{Body, EphemerisSource};
+use crate::types::{Body, EphemerisSource, SiderealMode};
 
 #[derive(Debug)]
 pub enum Error {
@@ -20,6 +20,7 @@ pub enum Error {
     InvalidTime { hour: i32, minute: i32, second: f64 },
     InvalidLeapSecond { year: i32, month: i32, day: i32 },
     UnsupportedEphemeris(EphemerisSource),
+    SiderealModeRequiresFixedStars(SiderealMode),
     CError(String),
 }
 
@@ -55,6 +56,12 @@ impl fmt::Display for Error {
             }
             Self::UnsupportedEphemeris(source) => {
                 write!(f, "ephemeris source {source:?} is not yet supported")
+            }
+            Self::SiderealModeRequiresFixedStars(mode) => {
+                write!(
+                    f,
+                    "sidereal mode {mode:?} requires the fixed-star subsystem (not yet implemented)"
+                )
             }
             Self::CError(msg) => write!(f, "{msg}"),
         }

@@ -200,6 +200,27 @@ impl Ephemeris {
         self.calc(jd_ut + dt, body, flags)
     }
 
+    /// Ayanamsa at `jd_tt` (TT), with nutation added unless `NONUT` is set.
+    pub fn get_ayanamsa_ex(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error> {
+        crate::ayanamsa::get_ayanamsa_ex_nut(&self.config, jd_tt, flags, &self.config.astro_models)
+    }
+
+    /// Ayanamsa at `jd_ut` (UT), with nutation added unless `NONUT` is set.
+    pub fn get_ayanamsa_ut(&self, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error> {
+        let dt = crate::deltat::calc_deltat(jd_ut, &self.config);
+        self.get_ayanamsa_ex(jd_ut + dt, flags)
+    }
+
+    /// Legacy ayanamsa accessor (no nutation) at `jd_tt` (TT).
+    pub fn get_ayanamsa(&self, jd_tt: f64) -> Result<f64, Error> {
+        crate::ayanamsa::get_ayanamsa_ex(
+            &self.config,
+            jd_tt,
+            CalcFlags::empty(),
+            &self.config.astro_models,
+        )
+    }
+
     fn extract_for_body(xreturn: &[f64; 24], body: Body, flags: CalcFlags) -> [f64; 6] {
         if body == Body::EclipticNutation {
             crate::calc::extract_ecl_nut(
