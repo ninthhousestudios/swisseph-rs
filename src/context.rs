@@ -51,11 +51,13 @@ pub struct Ephemeris {
     leap_seconds: Vec<i32>,
     planet_files: Vec<crate::sweph_file::SwissEphFile>,
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
+    jpl_file: Option<crate::jpl::JplFile>,
 }
 
 impl Ephemeris {
     pub fn new(config: EphemerisConfig) -> crate::Result<Self> {
         let leap_seconds = Self::build_leap_seconds(&config)?;
+        let mut jpl_file: Option<crate::jpl::JplFile> = None;
         let (planet_files, moon_files) = match config.ephemeris_source {
             EphemerisSource::Swiss => {
                 let dir = config.ephe_path.as_ref().ok_or_else(|| {
@@ -71,7 +73,14 @@ impl Ephemeris {
                 (planet, moon)
             }
             EphemerisSource::Jpl => {
-                return Err(Error::UnsupportedEphemeris(config.ephemeris_source));
+                let dir = config
+                    .ephe_path
+                    .as_ref()
+                    .ok_or_else(|| Error::FileFormat("ephe_path required for Jpl".to_string()))?;
+                let filename = config.jpl_filename.as_deref().unwrap_or("de441.eph");
+                let path = dir.join(filename);
+                jpl_file = Some(crate::jpl::JplFile::open(&path)?);
+                (Vec::new(), Vec::new())
             }
             EphemerisSource::Moshier => (Vec::new(), Vec::new()),
         };
@@ -80,6 +89,7 @@ impl Ephemeris {
             leap_seconds,
             planet_files,
             moon_files,
+            jpl_file,
         })
     }
 
@@ -193,7 +203,11 @@ impl Ephemeris {
                     Err(e) => Err(e),
                 }
             }
-            _ => {
+            EphemerisSource::Jpl => {
+                let xr = self.calc_body_jpl(jd_tt, body, &eps_j2000, flags, models)?;
+                Ok((xr, flags))
+            }
+            EphemerisSource::Moshier => {
                 let xr = self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models)?;
                 Ok((xr, flags))
             }
@@ -268,6 +282,35 @@ impl Ephemeris {
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Swiss,
+            }),
+        }
+    }
+
+    fn calc_body_jpl(
+        &self,
+        jd_tt: f64,
+        body: Body,
+        eps_j2000: &crate::types::Epsilon,
+        flags: CalcFlags,
+        models: &crate::types::AstroModels,
+    ) -> Result<[f64; 24], Error> {
+        let file = self.jpl_file.as_ref().unwrap();
+        match body {
+            Body::Sun => crate::calc::calc_sun_jpl(jd_tt, file, flags, models),
+            Body::Moon => crate::calc::calc_moon_jpl(jd_tt, file, flags, models),
+            Body::Mercury
+            | Body::Venus
+            | Body::Mars
+            | Body::Jupiter
+            | Body::Saturn
+            | Body::Uranus
+            | Body::Neptune
+            | Body::Pluto => {
+                crate::calc::calc_planet_jpl(jd_tt, body, file, eps_j2000, flags, models)
+            }
+            _ => Err(Error::EphemerisNotAvailable {
+                body,
+                source: EphemerisSource::Jpl,
             }),
         }
     }

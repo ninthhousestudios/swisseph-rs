@@ -1069,6 +1069,95 @@ fn apparent_moon<P: PositionProvider>(
     Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
 }
 
+// ---------------------------------------------------------------------------
+// JPL DE backend
+// ---------------------------------------------------------------------------
+
+fn body_to_jpl_index(body: Body) -> Option<i32> {
+    use crate::jpl::{
+        J_EARTH, J_JUPITER, J_MARS, J_MERCURY, J_MOON, J_NEPTUNE, J_PLUTO, J_SATURN, J_SUN,
+        J_URANUS, J_VENUS,
+    };
+    match body {
+        Body::Sun => Some(J_SUN),
+        Body::Moon => Some(J_MOON),
+        Body::Earth => Some(J_EARTH),
+        Body::Mercury => Some(J_MERCURY),
+        Body::Venus => Some(J_VENUS),
+        Body::Mars => Some(J_MARS),
+        Body::Jupiter => Some(J_JUPITER),
+        Body::Saturn => Some(J_SATURN),
+        Body::Uranus => Some(J_URANUS),
+        Body::Neptune => Some(J_NEPTUNE),
+        Body::Pluto => Some(J_PLUTO),
+        _ => None,
+    }
+}
+
+struct JplProvider<'a> {
+    file: &'a crate::jpl::JplFile,
+}
+
+impl<'a> PositionProvider for JplProvider<'a> {
+    fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
+        use crate::jpl::{J_EARTH, J_SBARY, J_SUN, jpl_pleph};
+        let j_target = body_to_jpl_index(body).ok_or(Error::EphemerisNotAvailable {
+            body,
+            source: EphemerisSource::Jpl,
+        })?;
+        let planet_bary = jpl_pleph(self.file, jd, j_target, J_SBARY, need_speed)?;
+        let earth_bary = jpl_pleph(self.file, jd, J_EARTH, J_SBARY, need_speed)?;
+        let sun_bary = jpl_pleph(self.file, jd, J_SUN, J_SBARY, need_speed)?;
+        let mut earth_helio = [0.0f64; 6];
+        for i in 0..6 {
+            earth_helio[i] = earth_bary[i] - sun_bary[i];
+        }
+        Ok(SwephPositions {
+            planet_bary,
+            earth_bary,
+            earth_helio,
+            sun_bary,
+        })
+    }
+
+    fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
+        use crate::jpl::{J_EARTH, J_MOON, jpl_pleph};
+        jpl_pleph(self.file, jd, J_MOON, J_EARTH, need_speed)
+    }
+}
+
+pub fn calc_planet_jpl(
+    jd: f64,
+    body: Body,
+    file: &crate::jpl::JplFile,
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let p = JplProvider { file };
+    apparent_planet(&p, jd, body, eps_j2000, flags, models)
+}
+
+pub fn calc_sun_jpl(
+    jd: f64,
+    file: &crate::jpl::JplFile,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let p = JplProvider { file };
+    apparent_sun(&p, jd, flags, models)
+}
+
+pub fn calc_moon_jpl(
+    jd: f64,
+    file: &crate::jpl::JplFile,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let p = JplProvider { file };
+    apparent_moon(&p, jd, flags, models)
+}
+
 pub fn calc_planet_sweph(
     jd: f64,
     body: Body,
