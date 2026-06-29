@@ -51,8 +51,8 @@ fn jpl_pleph_matches_c() {
             case.ntarg, case.ncent, case.jd
         );
         let eps = 1e-9;
-        for k in 0..6 {
-            super::assert_f64_eps(&format!("{label}:rrd[{k}]"), case.rrd[k], result[k], eps);
+        for (k, &r) in result.iter().enumerate() {
+            super::assert_f64_eps(&format!("{label}:rrd[{k}]"), case.rrd[k], r, eps);
         }
         tested += 1;
     }

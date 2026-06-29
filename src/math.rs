@@ -325,10 +325,8 @@ pub fn split_degrees(mut ddeg: f64, flags: SplitDegFlags) -> DegreeParts {
         if (ddeg + dadd) as i32 - ddeg as i32 > 0 {
             dadd = 0.0;
         }
-    } else if flags.contains(SplitDegFlags::KEEP_SIGN) {
-        if ddeg % 30.0 + dadd >= 30.0 {
-            dadd = 0.0;
-        }
+    } else if flags.contains(SplitDegFlags::KEEP_SIGN) && ddeg % 30.0 + dadd >= 30.0 {
+        dadd = 0.0;
     }
     ddeg += dadd;
     if flags.contains(SplitDegFlags::ZODIACAL) {

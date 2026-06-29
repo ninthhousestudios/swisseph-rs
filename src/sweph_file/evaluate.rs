@@ -7,7 +7,10 @@ use super::SwissEphFile;
 use super::segment::unpack_segment;
 use super::types::{SEI_FLG_ELLIPSE, SEI_FLG_ROTATE, SEI_MOON};
 
+// Verbatim sin/cos of the J2000 obliquity from the C source; full digits preserved.
+#[allow(clippy::excessive_precision)]
 const SEPS2000: f64 = 0.39777715572793088;
+#[allow(clippy::excessive_precision)]
 const CEPS2000: f64 = 0.91748206215761929;
 
 pub fn evaluate_body(
@@ -76,17 +79,17 @@ fn rot_back(
         )
     };
 
-    if planet.iflg & SEI_FLG_ELLIPSE != 0 {
-        if let Some(ref refep) = planet.refep {
-            let mut omtild = planet.peri + tdiff * planet.dperi;
-            omtild -= (omtild / TAU) as i32 as f64 * TAU;
-            let (som, com) = omtild.sin_cos();
-            for i in 0..ncoe {
-                let rx = refep[i];
-                let ry = refep[ncoe + i];
-                coeffs[i] = coeffs[i] + com * rx - som * ry;
-                coeffs[ncoe + i] = coeffs[ncoe + i] + com * ry + som * rx;
-            }
+    if planet.iflg & SEI_FLG_ELLIPSE != 0
+        && let Some(ref refep) = planet.refep
+    {
+        let mut omtild = planet.peri + tdiff * planet.dperi;
+        omtild -= (omtild / TAU) as i32 as f64 * TAU;
+        let (som, com) = omtild.sin_cos();
+        for i in 0..ncoe {
+            let rx = refep[i];
+            let ry = refep[ncoe + i];
+            coeffs[i] = coeffs[i] + com * rx - som * ry;
+            coeffs[ncoe + i] = coeffs[ncoe + i] + com * ry + som * rx;
         }
     }
 

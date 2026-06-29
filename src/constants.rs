@@ -35,6 +35,8 @@ pub const TWOPI: f64 = 2.0 * PI;
 pub const AUNIT_TO_KM: f64 = 149597870.700;
 pub const AUNIT_TO_LIGHTYEAR: f64 = 1.0 / 63241.07708427;
 pub const AUNIT_TO_PARSEC: f64 = 1.0 / 206264.8062471;
+// Verbatim arcsec-to-radian constant from the C source; full digits preserved.
+#[allow(clippy::excessive_precision)]
 pub const STR: f64 = 4.8481368110953599359e-6;
 
 // ---------------------------------------------------------------------------

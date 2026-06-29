@@ -49,7 +49,6 @@ struct D2lCase {
 struct ChebyshevCase {
     t: f64,
     label: String,
-    ncf: usize,
     coef: Vec<f64>,
     value: f64,
     deriv: f64,
@@ -346,8 +345,8 @@ fn golden_cartpol_sp() {
             c.xi[0], c.xi[1], c.xi[2], c.xi[3], c.xi[4], c.xi[5],
         ]);
         let label = format!("cartpol_sp[{i}]");
-        for j in 0..6 {
-            super::assert_f64_exact(&format!("{label} [{j}]"), c.xo[j], actual[j]);
+        for (j, &a) in actual.iter().enumerate() {
+            super::assert_f64_exact(&format!("{label} [{j}]"), c.xo[j], a);
         }
     }
 }
@@ -360,8 +359,8 @@ fn golden_polcart_sp() {
             c.li[0], c.li[1], c.li[2], c.li[3], c.li[4], c.li[5],
         ]);
         let label = format!("polcart_sp[{i}]");
-        for j in 0..6 {
-            super::assert_f64_exact(&format!("{label} [{j}]"), c.xo[j], actual[j]);
+        for (j, &a) in actual.iter().enumerate() {
+            super::assert_f64_exact(&format!("{label} [{j}]"), c.xo[j], a);
         }
     }
 }
@@ -387,8 +386,8 @@ fn golden_cotrans_sp() {
             c.eps,
         );
         let label = format!("cotrans_sp[{i}]");
-        for j in 0..6 {
-            super::assert_f64_exact(&format!("{label} [{j}]"), c.xo[j], actual[j]);
+        for (j, &a) in actual.iter().enumerate() {
+            super::assert_f64_exact(&format!("{label} [{j}]"), c.xo[j], a);
         }
     }
 }

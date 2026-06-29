@@ -1,3 +1,10 @@
+// This module is almost entirely verbatim Vondrák 2011 / IAU precession
+// coefficient tables transcribed from the C Swiss Ephemeris. The literals carry
+// more digits than an f64 can represent; rounding them would change the bit
+// pattern and break golden-data fidelity, so excessive_precision is allowed
+// module-wide rather than per-table.
+#![allow(clippy::excessive_precision)]
+
 use crate::constants::*;
 use crate::flags::CalcFlags;
 use crate::math::owen_chebyshev_basis;
@@ -41,6 +48,9 @@ const PEPS_PER: [[f64; 10]; 5] = [
 ];
 
 /// General precession in longitude (pA) via Vondrák 2011 model. Returns radians.
+// The loops index parallel rows of the coefficient matrices (PEPS_PER[0..3][i]),
+// so range indexing is clearer than zipped iterators here.
+#[allow(clippy::needless_range_loop)]
 pub fn ldp_peps(jd: f64) -> f64 {
     let t = (jd - J2000) / 36525.0;
     let mut p = 0.0;
@@ -65,6 +75,11 @@ pub fn ldp_peps(jd: f64) -> f64 {
 // Public entry point
 // ---------------------------------------------------------------------------
 
+// The short-term/long-term model-selection chain mirrors C's swi_precess: a
+// model can be requested for the short-term window (guarded by t.abs() bound) or
+// as the long-term default, producing adjacent branches with identical bodies
+// but distinct conditions. Collapsing them would obscure the C correspondence.
+#[allow(clippy::if_same_then_else)]
 pub fn precess(
     pos: &mut [f64; 3],
     jd: f64,
@@ -465,6 +480,8 @@ const PECL_PER: [[f64; 8]; 5] = [
     [-5523.863691, -549.74745, -310.998056, 421.535876, -36.776172, -145.278396, -34.74445, 22.885731],
 ];
 
+// Parallel-row indexing of PECL_PER/PECL_POL coefficient matrices.
+#[allow(clippy::needless_range_loop)]
 fn pre_pecl(jd: f64) -> [f64; 3] {
     let t = (jd - J2000) / 36525.0;
     let mut p = 0.0;
@@ -515,6 +532,8 @@ const PEQU_PER: [[f64; 14]; 5] = [
     [1558.515853, 7774.939698, -2219.534038, -2523.969396, 247.850422, -846.485643, -1393.124055, 368.526116, 749.045012, 444.704518, 235.934465, 374.049623, -171.33018, -22.899655],
 ];
 
+// Parallel-row indexing of PEQU_PER/PEQU_POL coefficient matrices.
+#[allow(clippy::needless_range_loop)]
 fn pre_pequ(jd: f64) -> [f64; 3] {
     let t = (jd - J2000) / 36525.0;
     let mut x = 0.0;

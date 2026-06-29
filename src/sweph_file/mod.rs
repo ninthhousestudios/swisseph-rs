@@ -132,7 +132,7 @@ pub fn find_file_for_jd(files: &[SwissEphFile], body_id: i32, jd: f64) -> Option
         let (file_start, _) = f.header().time_range;
         file_start <= jd
             && f.planet_data(body_id)
-                .map_or(false, |pd| jd >= pd.tfstart && jd <= pd.tfend)
+                .is_some_and(|pd| jd >= pd.tfstart && jd <= pd.tfend)
     })
 }
 

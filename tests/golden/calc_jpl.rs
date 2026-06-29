@@ -90,6 +90,9 @@ fn golden_calc_jpl() {
             // Speed components: stateless deflection geometry differs from C's
             // cached sun position by <1e-7 deg/day. SPEED3 has no file
             // boundaries in JPL (single continuous file), so 1e-7 is tight.
+            // Branches kept distinct to document each tolerance's rationale even
+            // where the values currently coincide.
+            #[allow(clippy::if_same_then_else)]
             let eps = if k >= 3 {
                 1e-7
             } else if is_speed3 {

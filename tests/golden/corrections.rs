@@ -72,8 +72,8 @@ fn golden_aberr_light() {
         let earth_vel = [c.earth[3], c.earth[4], c.earth[5]];
         aberr_light(&mut xx, &earth_vel, false);
         let label = format!("aberr case {i}");
-        for k in 0..3 {
-            super::assert_f64_exact(&format!("{label} [{k}]"), c.output[k], xx[k]);
+        for (k, &x) in xx.iter().enumerate().take(3) {
+            super::assert_f64_exact(&format!("{label} [{k}]"), c.output[k], x);
         }
     }
     assert_eq!(data.aberr_light.len(), 40);
@@ -104,8 +104,8 @@ fn golden_deflect_light() {
         ];
         deflect_light(&mut xx, &earth6, &planet6, false);
         let label = format!("defl case {i} {}", c.label);
-        for k in 0..3 {
-            super::assert_f64_exact(&format!("{label} [{k}]"), c.output[k], xx[k]);
+        for (k, &x) in xx.iter().enumerate().take(3) {
+            super::assert_f64_exact(&format!("{label} [{k}]"), c.output[k], x);
         }
     }
     assert_eq!(data.deflect_light.len(), 12);

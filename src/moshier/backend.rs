@@ -265,7 +265,7 @@ pub fn compute_pipeline(
 pub fn compute(jd: f64, body: Body, eps_j2000: &Epsilon) -> Result<[f64; 6], Error> {
     match body {
         Body::Moon => {
-            if jd < MOSHLUEPH_START - 0.2 || jd > MOSHLUEPH_END + 0.2 {
+            if !(MOSHLUEPH_START - 0.2..=MOSHLUEPH_END + 0.2).contains(&jd) {
                 return Err(Error::BeyondEphemerisLimits {
                     jd_tt: jd,
                     start: MOSHLUEPH_START,
@@ -294,7 +294,7 @@ pub fn compute(jd: f64, body: Body, eps_j2000: &Epsilon) -> Result<[f64; 6], Err
                     });
                 }
             };
-            if jd < MOSHPLEPH_START - 0.3 || jd > MOSHPLEPH_END + 0.3 {
+            if !(MOSHPLEPH_START - 0.3..=MOSHPLEPH_END + 0.3).contains(&jd) {
                 return Err(Error::BeyondEphemerisLimits {
                     jd_tt: jd,
                     start: MOSHPLEPH_START,

@@ -86,6 +86,9 @@ fn golden_calc_sweph() {
             // Speed components (k>=3): the stateless deflection geometry uses sun@t
             // instead of C's globally-cached sun@(t-dt). The difference is <0.06 mas
             // in speed — well below any practical significance. See swisseph-rs/41.
+            // Branches kept distinct to document each tolerance's rationale even
+            // where the values currently coincide.
+            #[allow(clippy::if_same_then_else)]
             let eps = if is_speed3_boundary {
                 if k < 3 { 1e-4 } else { 1.0 }
             } else if is_speed3 && k >= 3 {

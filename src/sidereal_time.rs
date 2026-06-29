@@ -130,6 +130,8 @@ fn gmst_iau2006(jd0: f64, secs: f64, tu: f64, config: &EphemerisConfig) -> f64 {
     gmst_0h + msday * secs
 }
 
+// Verbatim ERA / GMST polynomial coefficients from the C source.
+#[allow(clippy::excessive_precision)]
 fn gmst_era(tjd_ut: f64, config: &EphemerisConfig) -> f64 {
     let jdrel = tjd_ut - J2000;
     let tt = (tjd_ut + calc_deltat(tjd_ut, config) - J2000) / 36525.0;
@@ -207,22 +209,22 @@ fn sidtime_long_term(tjd_ut: f64, eps: f64, nut: f64, config: &EphemerisConfig) 
 pub fn sidereal_time0(tjd_ut: f64, eps: f64, nut: f64, config: &EphemerisConfig) -> f64 {
     let sidt_model = config.astro_models.sidereal_time;
 
-    if sidt_model == SiderealTimeModel::Longterm {
-        if tjd_ut <= SIDT_LTERM_T0 || tjd_ut >= SIDT_LTERM_T1 {
-            let mut gmst = sidtime_long_term(tjd_ut, eps, nut, config);
-            if tjd_ut <= SIDT_LTERM_T0 {
-                gmst -= SIDT_LTERM_OFS0;
-            } else {
-                gmst -= SIDT_LTERM_OFS1;
-            }
-            if gmst >= 24.0 {
-                gmst -= 24.0;
-            }
-            if gmst < 0.0 {
-                gmst += 24.0;
-            }
-            return gmst;
+    if sidt_model == SiderealTimeModel::Longterm
+        && (tjd_ut <= SIDT_LTERM_T0 || tjd_ut >= SIDT_LTERM_T1)
+    {
+        let mut gmst = sidtime_long_term(tjd_ut, eps, nut, config);
+        if tjd_ut <= SIDT_LTERM_T0 {
+            gmst -= SIDT_LTERM_OFS0;
+        } else {
+            gmst -= SIDT_LTERM_OFS1;
         }
+        if gmst >= 24.0 {
+            gmst -= 24.0;
+        }
+        if gmst < 0.0 {
+            gmst += 24.0;
+        }
+        return gmst;
     }
 
     let mut jd0 = tjd_ut.floor();

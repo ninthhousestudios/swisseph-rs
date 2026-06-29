@@ -1378,7 +1378,7 @@ pub const CLS: [[i32; 6]; 678] = [
 ];
 
 /// Planetary argument multipliers: [L, L', F, D, Om, Me, Ve, E, Ma, Ju, Sa, Ur, Ne, pre]
-pub const NPL: [[i16; 14]; 687] = [
+pub static NPL: [[i16; 14]; 687] = [
     [0, 0, 0, 0, 0, 0, 0, 8, -16, 4, 5, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, -8, 16, -4, -5, 0, 0, 2],
     [0, 0, 0, 0, 0, 0, 0, 8, -16, 4, 5, 0, 0, 2],

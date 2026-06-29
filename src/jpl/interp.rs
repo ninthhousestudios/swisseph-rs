@@ -62,7 +62,7 @@ fn interp(
     let mut pv = [0.0f64; 6];
 
     // Position: descending dot product per component
-    for c in 0..ncm {
+    for (c, pv_c) in pv.iter_mut().enumerate().take(ncm) {
         let base = (c + ni * ncm) * ncf;
         let mut sum = 0.0f64;
         let mut j = ncf;
@@ -70,7 +70,7 @@ fn interp(
             j -= 1;
             sum += pc[j] * coeffs[base + j];
         }
-        pv[c] = sum;
+        *pv_c = sum;
     }
 
     if need_speed {

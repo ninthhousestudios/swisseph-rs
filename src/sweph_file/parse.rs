@@ -167,16 +167,13 @@ pub(super) fn parse_file(
 
     // --- Per-planet metadata ---
     let mut planets = Vec::with_capacity(nplan);
-    for i in 0..nplan {
-        let ipli = ipl[i];
-
+    for &ipli in &ipl {
         let lndx0 = r.read_i32()? as usize;
         let iflg = r.read_u8()? as u32;
         let ncoe = r.read_u8()? as usize;
 
         let rmax_raw = r.read_i32()?;
-        let rmax = if ipli >= SE_PLMOON_OFFSET
-            && ipli < SE_AST_OFFSET
+        let rmax = if (SE_PLMOON_OFFSET..SE_AST_OFFSET).contains(&ipli)
             && ((ipli % 100) == 99 || (ipli - 9000) / 100 == 4)
         {
             rmax_raw as f64 / 1_000_000.0

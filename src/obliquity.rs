@@ -1,3 +1,8 @@
+// Obliquity coefficient tables (IAU 1976/2000/2006, Vondrák, Owen) are verbatim
+// transcriptions from the C Swiss Ephemeris; rounding their literals to f64
+// precision would change bit patterns and break golden-data fidelity.
+#![allow(clippy::excessive_precision)]
+
 use std::f64::consts::TAU;
 
 use crate::constants::*;
@@ -17,6 +22,11 @@ const DCOR_EPS_JPL: [f64; 51] = [
     35.385, 35.375, 35.415,
 ];
 
+// The short-term/long-term model-selection chain mirrors C's swi_epsiln: a model
+// can be requested for the short-term window (guarded by t.abs() bound) or as the
+// long-term default, producing adjacent branches with identical bodies but
+// distinct conditions. Collapsing them would obscure the C correspondence.
+#[allow(clippy::if_same_then_else)]
 pub fn obliquity(jd: f64, flags: CalcFlags, models: &AstroModels) -> Epsilon {
     let t = (jd - J2000) / 36525.0;
 

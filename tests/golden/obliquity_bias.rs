@@ -136,8 +136,8 @@ fn golden_bias() {
             "bias[{}][{},{},jd={},flags={}]",
             i, c.bias_model, c.direction, c.jd, c.flags
         );
-        for j in 0..6 {
-            super::assert_f64_exact(&format!("{label}[{j}]"), c.output[j], pos[j]);
+        for (j, &p) in pos.iter().enumerate() {
+            super::assert_f64_exact(&format!("{label}[{j}]"), c.output[j], p);
         }
     }
 }

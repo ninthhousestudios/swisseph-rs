@@ -3626,6 +3626,9 @@ const MAR_ARG_TBL: [i8; 1291] = [
     7, 4, 0, -1,
 ];
 
+// A table coefficient (0.31831) coincidentally matches FRAC_1_PI; it is a
+// verbatim Moshier series term, not the std constant.
+#[allow(clippy::approx_constant)]
 const MAR_LON_TBL: [f64; 677] = [
     43471.66140,
     21291.11063,
@@ -9991,6 +9994,9 @@ const URA_ARG_TBL: [i8; 1167] = [
     7, 1, 3, 2, 5, -2, 7, 2, 8, 0, 1, 2, 5, 0, 2, 3, 5, -3, 7, 0, 2, 3, 5, -1, 7, 0, -1,
 ];
 
+// A table coefficient (-0.43420) coincidentally matches LOG10_E; it is a
+// verbatim Moshier series term, not the std constant.
+#[allow(clippy::approx_constant)]
 const URA_LON_TBL: [f64; 532] = [
     21.56000,
     -4652.06828,

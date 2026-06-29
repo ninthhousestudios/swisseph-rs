@@ -39,8 +39,7 @@ pub(super) fn unpack_segment(
             )));
         }
 
-        for i in 0..nsizes {
-            let count = nsize[i];
+        for (i, &count) in nsize.iter().enumerate().take(nsizes) {
             if count == 0 {
                 continue;
             }
@@ -175,6 +174,9 @@ fn read_integer(data: &[u8], pos: usize, width: usize, order: ByteOrder) -> u32 
     }
 }
 
+// Low-level binary-unpack helper mirroring the C .se1 coefficient reader; its
+// parameter list matches the on-disk decode context and isn't worth bundling.
+#[allow(clippy::too_many_arguments)]
 fn unpack_integer_coeffs(
     data: &[u8],
     mut pos: usize,
@@ -209,7 +211,7 @@ fn unpack_nibble_coeffs(
     coeffs: &mut [f64],
     idbl: &mut usize,
 ) -> Result<usize, Error> {
-    let nbytes = (count + 1) / 2;
+    let nbytes = count.div_ceil(2);
     ensure(data, pos, nbytes)?;
     let mut j = 0;
     for _ in 0..nbytes {
@@ -245,7 +247,7 @@ fn unpack_quarter_coeffs(
     coeffs: &mut [f64],
     idbl: &mut usize,
 ) -> Result<usize, Error> {
-    let nbytes = (count + 3) / 4;
+    let nbytes = count.div_ceil(4);
     ensure(data, pos, nbytes)?;
     let mut j = 0;
     for _ in 0..nbytes {

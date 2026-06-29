@@ -431,7 +431,11 @@ fn moon1(s: &mut MoonState, me: &MeanElements) {
     let cg = g.cos();
     let sg = g.sin();
     s.l += -0.133430 * cg + 0.041079 * sg;
-    s.l1 += 6.28 * cg + 169.08 * sg;
+    // 6.28 is a verbatim perturbation amplitude (arcsec), not an approximation of TAU.
+    #[allow(clippy::approx_constant)]
+    {
+        s.l1 += 6.28 * cg + 169.08 * sg;
+    }
 
     // Term 21: 3V - 4E
     let g = STR * (3.0 * s.ve - 4.0 * s.ea);
@@ -579,7 +583,7 @@ fn moon3(s: &mut MoonState, me: &MeanElements) {
 fn moon4(s: &mut MoonState) {
     s.moonpol[2] /= AUNIT / 1000.0;
     s.moonpol[0] = STR * mods3600(s.moonpol[0]);
-    s.moonpol[1] = STR * s.moonpol[1];
+    s.moonpol[1] *= STR;
 }
 
 pub fn moshmoon2(jd: f64) -> [f64; 3] {
@@ -613,7 +617,7 @@ pub fn moshmoon2(jd: f64) -> [f64; 3] {
 }
 
 fn corr_mean_node(jd: f64) -> f64 {
-    if jd < JPL_DE431_START || jd > JPL_DE431_END {
+    if !(JPL_DE431_START..=JPL_DE431_END).contains(&jd) {
         return 0.0;
     }
     let dj = jd - CORR_MNODE_JD_T0GREG;
@@ -624,7 +628,7 @@ fn corr_mean_node(jd: f64) -> f64 {
 }
 
 fn corr_mean_apog(jd: f64) -> f64 {
-    if jd < JPL_DE431_START || jd > JPL_DE431_END {
+    if !(JPL_DE431_START..=JPL_DE431_END).contains(&jd) {
         return 0.0;
     }
     let dj = jd - CORR_MNODE_JD_T0GREG;
@@ -635,7 +639,7 @@ fn corr_mean_apog(jd: f64) -> f64 {
 }
 
 pub fn mean_node(jd: f64) -> Result<[f64; 3], Error> {
-    if jd < MOSHNDEPH_START || jd > MOSHNDEPH_END {
+    if !(MOSHNDEPH_START..=MOSHNDEPH_END).contains(&jd) {
         return Err(Error::BeyondEphemerisLimits {
             jd_tt: jd,
             start: MOSHNDEPH_START,
@@ -650,7 +654,7 @@ pub fn mean_node(jd: f64) -> Result<[f64; 3], Error> {
 }
 
 pub fn mean_apogee(jd: f64) -> Result<[f64; 3], Error> {
-    if jd < MOSHNDEPH_START || jd > MOSHNDEPH_END {
+    if !(MOSHNDEPH_START..=MOSHNDEPH_END).contains(&jd) {
         return Err(Error::BeyondEphemerisLimits {
             jd_tt: jd,
             start: MOSHNDEPH_START,

@@ -541,10 +541,11 @@ impl Ephemeris {
                         if trimmed.is_empty() || trimmed.starts_with('#') {
                             continue;
                         }
-                        if let Ok(ndat) = trimmed.parse::<i32>() {
-                            if ndat > last_hardcoded && !table.contains(&ndat) {
-                                table.push(ndat);
-                            }
+                        if let Ok(ndat) = trimmed.parse::<i32>()
+                            && ndat > last_hardcoded
+                            && !table.contains(&ndat)
+                        {
+                            table.push(ndat);
                         }
                     }
                 }

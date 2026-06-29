@@ -789,11 +789,11 @@ fn sweph_positions(
     }
 
     let (mut planet, _) = evaluate_body(planet_file, body_id, jd, need_speed)?;
-    if let Some(pd) = planet_file.planet_data(body_id) {
-        if pd.iflg & SEI_FLG_HELIO != 0 {
-            for i in 0..n {
-                planet[i] += sun_bary[i];
-            }
+    if let Some(pd) = planet_file.planet_data(body_id)
+        && pd.iflg & SEI_FLG_HELIO != 0
+    {
+        for i in 0..n {
+            planet[i] += sun_bary[i];
         }
     }
 
@@ -904,8 +904,8 @@ fn apparent_planet<P: PositionProvider>(
 
     // Geocentric
     let mut xx = [0.0; 6];
-    for i in 0..6 {
-        xx[i] = pos.planet_bary[i] - pos.earth_bary[i];
+    for (i, x) in xx.iter_mut().enumerate() {
+        *x = pos.planet_bary[i] - pos.earth_bary[i];
     }
 
     // Light-time with niter=1
@@ -952,8 +952,8 @@ fn apparent_planet<P: PositionProvider>(
         let pos_ret = p.positions(body, jd - dt, true)?;
 
         // Geocentric from re-evaluated position
-        for i in 0..6 {
-            xx[i] = pos_ret.planet_bary[i] - pos.earth_bary[i];
+        for (i, x) in xx.iter_mut().enumerate() {
+            *x = pos_ret.planet_bary[i] - pos.earth_bary[i];
         }
 
         // Apply change-of-dt speed correction
@@ -1030,8 +1030,8 @@ fn apparent_sun<P: PositionProvider>(
 
     // Geocentric Sun = -(heliocentric Earth)
     let mut xx = [0.0; 6];
-    for i in 0..6 {
-        xx[i] = -pos.earth_helio[i];
+    for (i, x) in xx.iter_mut().enumerate() {
+        *x = -pos.earth_helio[i];
     }
 
     // Light-time: re-evaluate Sun at retarded time, Earth stays at t
@@ -1040,8 +1040,8 @@ fn apparent_sun<P: PositionProvider>(
             let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
             let dt = dist * AUNIT / CLIGHT / 86400.0;
             let pos_ret = p.positions(Body::Sun, jd - dt, true)?;
-            for i in 0..6 {
-                xx[i] = -(pos.earth_bary[i] - pos_ret.sun_bary[i]);
+            for (i, x) in xx.iter_mut().enumerate() {
+                *x = -(pos.earth_bary[i] - pos_ret.sun_bary[i]);
             }
         }
     }

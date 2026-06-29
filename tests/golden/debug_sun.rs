@@ -68,8 +68,8 @@ fn debug_sun_positions() {
     use swisseph::flags::CalcFlags;
     use swisseph::moshier::backend::compute_pipeline;
     use swisseph::obliquity::obliquity;
+    use swisseph::types::AstroModels;
     use swisseph::types::Body;
-    use swisseph::types::{AstroModels, Epsilon};
     let eps_j2000 = obliquity(2451545.0, CalcFlags::empty(), &AstroModels::default());
     let pp = compute_pipeline(jd, Body::Sun, &eps_j2000).unwrap();
     eprintln!(

@@ -15,6 +15,8 @@ const DCOR_RA_JPL: [f64; 51] = [
     -52.165, -52.141, -52.255,
 ];
 
+// Verbatim frame-bias matrix from the C source; full digits preserved.
+#[allow(clippy::excessive_precision)]
 #[rustfmt::skip]
 const BIAS_IAU2006: [[f64; 3]; 3] = [
     [ 0.99999999999999412,  0.00000007078368695, -0.00000008056214212],

@@ -29,10 +29,10 @@ fn adjust_for_tidacc(
 // ---------------------------------------------------------------------------
 
 fn resolve_tidal_acceleration(config: &EphemerisConfig) -> f64 {
-    if let Some(ta) = config.tidal_acceleration {
-        if ta != TIDAL_AUTOMATIC {
-            return ta;
-        }
+    if let Some(ta) = config.tidal_acceleration
+        && ta != TIDAL_AUTOMATIC
+    {
+        return ta;
     }
     match config.ephemeris_source {
         EphemerisSource::Moshier => TIDAL_DE404,
@@ -270,10 +270,10 @@ fn bessel_interpolation(y: f64, tid_acc: f64) -> f64 {
     // First differences with boundary zero-padding
     let mut d = [0.0_f64; 5];
     let k_start = iy as i32 - 2;
-    for i in 0..5 {
+    for (i, di) in d.iter_mut().enumerate() {
         let k = k_start + i as i32;
         if k >= 0 && (k + 1) < tabsiz as i32 {
-            d[i] = DT[(k + 1) as usize] - DT[k as usize];
+            *di = DT[(k + 1) as usize] - DT[k as usize];
         }
     }
 
@@ -360,6 +360,8 @@ pub fn calc_deltat(tjd: f64, config: &EphemerisConfig) -> f64 {
             }
             dt
         }
+        // Verbatim epoch bound from the C source; full digits preserved.
+        #[allow(clippy::excessive_precision)]
         DeltaTModel::EspenakMeeus2006 if tjd < 2317746.13090277789 => {
             deltat_espenak_meeus_1620(tjd, tid_acc)
         }

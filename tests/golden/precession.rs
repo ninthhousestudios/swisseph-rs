@@ -123,11 +123,11 @@ fn golden_precession() {
                 | "mixed_IAU2000short_Owen"
         );
 
-        for j in 0..3 {
+        for (j, &p) in pos.iter().enumerate() {
             if uses_trig {
-                super::assert_f64_eps(&format!("{label}[{j}]"), c.output[j], pos[j], 1e-15);
+                super::assert_f64_eps(&format!("{label}[{j}]"), c.output[j], p, 1e-15);
             } else {
-                super::assert_f64_exact(&format!("{label}[{j}]"), c.output[j], pos[j]);
+                super::assert_f64_exact(&format!("{label}[{j}]"), c.output[j], p);
             }
         }
     }
@@ -161,8 +161,8 @@ fn golden_precession_roundtrip() {
         );
 
         let label = format!("roundtrip[{}][{},jd={}]", i, base_model, c.jd);
-        for j in 0..3 {
-            super::assert_f64_eps(&format!("{label}[{j}]"), c.output[j], pos[j], 1e-14);
+        for (j, &p) in pos.iter().enumerate() {
+            super::assert_f64_eps(&format!("{label}[{j}]"), c.output[j], p, 1e-14);
         }
     }
 }
