@@ -3,8 +3,10 @@ use std::path::PathBuf;
 
 use crate::date::LEAP_SECONDS;
 use crate::error::Error;
-use crate::flags::CalcFlags;
-use crate::types::{AstroModels, Body, DeltaT, EphemerisSource, JdUt1, SiderealMode};
+use crate::flags::{CalcFlags, SiderealBits};
+use crate::types::{
+    AstroModels, Body, DeltaT, EphemerisSource, JdUt1, NutationModel, PrecessionModel, SiderealMode,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TopoPosition {
@@ -21,6 +23,8 @@ pub struct EphemerisConfig {
     pub sidereal_mode: Option<SiderealMode>,
     pub sidereal_t0: f64,
     pub sidereal_ayan_t0: f64,
+    pub sidereal_bits: SiderealBits,
+    pub sidereal_t0_is_ut: bool,
     pub topographic: Option<TopoPosition>,
     pub astro_models: AstroModels,
     pub tidal_acceleration: Option<f64>,
@@ -37,12 +41,72 @@ impl Default for EphemerisConfig {
             sidereal_mode: None,
             sidereal_t0: 0.0,
             sidereal_ayan_t0: 0.0,
+            sidereal_bits: SiderealBits::empty(),
+            sidereal_t0_is_ut: false,
             topographic: None,
             astro_models: AstroModels::default(),
             tidal_acceleration: None,
             extra_leap_seconds: Vec::new(),
             leap_seconds_file: None,
         }
+    }
+}
+
+impl EphemerisConfig {
+    pub fn set_sidereal_mode(&mut self, mut sid_mode: i32, t0: f64, ayan_t0: f64) {
+        if sid_mode < 0 {
+            sid_mode = 0;
+        }
+        let mut index = (sid_mode % 256) as usize;
+
+        let mut bits = if matches!(index, 18 | 19 | 20 | 34) {
+            SiderealBits::ECL_T0
+        } else if matches!(
+            index,
+            17 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 35 | 36 | 39 | 40
+        ) {
+            SiderealBits::empty()
+        } else {
+            SiderealBits::from_bits_truncate((sid_mode as u32) & !0xFF_u32)
+        };
+
+        if index >= 47 && index != 255 {
+            index = 0;
+            bits = SiderealBits::empty();
+        }
+
+        if index == 255 {
+            self.sidereal_t0 = t0;
+            self.sidereal_ayan_t0 = ayan_t0;
+            self.sidereal_t0_is_ut = bits.contains(SiderealBits::USER_UT);
+        } else {
+            let a = crate::ayanamsa::AYANAMSA[index];
+            self.sidereal_t0 = a.t0;
+            self.sidereal_ayan_t0 = a.ayan_t0;
+            self.sidereal_t0_is_ut = a.t0_is_ut;
+        }
+
+        if bits.contains(SiderealBits::PREC_ORIG) && index != 255 {
+            let prec_offset = crate::ayanamsa::AYANAMSA[index].prec_offset;
+            if prec_offset > 0 {
+                let prec_model = match prec_offset {
+                    1 => PrecessionModel::IAU1976,
+                    11 => PrecessionModel::Newcomb,
+                    _ => unreachable!(),
+                };
+                self.astro_models.prec_longterm = prec_model;
+                self.astro_models.prec_shortterm = prec_model;
+                self.astro_models.nutation = match prec_offset {
+                    11 => NutationModel::Woolard,
+                    1 => NutationModel::IAU1980,
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        self.sidereal_mode =
+            Some(SiderealMode::try_from(index as i32).unwrap_or(SiderealMode::FaganBradley));
+        self.sidereal_bits = bits;
     }
 }
 
