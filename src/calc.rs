@@ -783,20 +783,57 @@ struct SwephProvider<'a> {
     moon_files: &'a [SwissEphFile],
 }
 
+/// Days of slop allowed past a file's per-body coverage before declaring a jd
+/// out of range. Larger than the maximum one-way light-time in the solar system
+/// (Pluto ~0.23 d) but far smaller than a file's century-scale span.
+const BOUNDARY_SLOP: f64 = 0.3;
+
+/// Select the `.se1` file for `(body_id, jd)`. Falls back to the nearest covering
+/// file when no file's `file_start <= jd` window matches but `jd` lies within
+/// `BOUNDARY_SLOP` of a file's per-body range.
+///
+/// This restores the pre-refactor `find_file_for_jd(..).unwrap_or(primary_file)`
+/// behavior used for retarded light-time epochs: when `jd - dt` falls just past
+/// the absolute earliest ephemeris boundary, C extrapolates the cached segment
+/// rather than erroring. Genuine out-of-range epochs (more than a light-time off)
+/// still return `None`, preserving the `BeyondEphemerisLimits` contract.
+fn find_file_or_nearest(files: &[SwissEphFile], body_id: i32, jd: f64) -> Option<&SwissEphFile> {
+    if let Some(f) = find_file_for_jd(files, body_id, jd) {
+        return Some(f);
+    }
+    let mut best: Option<(&SwissEphFile, f64)> = None;
+    for f in files {
+        let Some(pd) = f.planet_data(body_id) else {
+            continue;
+        };
+        let dist = if jd < pd.tfstart {
+            pd.tfstart - jd
+        } else if jd > pd.tfend {
+            jd - pd.tfend
+        } else {
+            0.0
+        };
+        if dist <= BOUNDARY_SLOP && best.is_none_or(|(_, d)| dist < d) {
+            best = Some((f, dist));
+        }
+    }
+    best.map(|(f, _)| f)
+}
+
 impl<'a> PositionProvider for SwephProvider<'a> {
     fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
         let body_id = body_file_id(body).ok_or(Error::EphemerisNotAvailable {
             body,
             source: EphemerisSource::Swiss,
         })?;
-        let planet_file = find_file_for_jd(self.planet_files, body_id, jd).ok_or(
+        let planet_file = find_file_or_nearest(self.planet_files, body_id, jd).ok_or(
             Error::BeyondEphemerisLimits {
                 jd_tt: jd,
                 start: 0.0,
                 end: 0.0,
             },
         )?;
-        let moon_file = find_file_for_jd(self.moon_files, SEI_MOON, jd).ok_or(
+        let moon_file = find_file_or_nearest(self.moon_files, SEI_MOON, jd).ok_or(
             Error::BeyondEphemerisLimits {
                 jd_tt: jd,
                 start: 0.0,
@@ -807,7 +844,7 @@ impl<'a> PositionProvider for SwephProvider<'a> {
     }
 
     fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
-        let moon_file = find_file_for_jd(self.moon_files, SEI_MOON, jd).ok_or(
+        let moon_file = find_file_or_nearest(self.moon_files, SEI_MOON, jd).ok_or(
             Error::BeyondEphemerisLimits {
                 jd_tt: jd,
                 start: 0.0,

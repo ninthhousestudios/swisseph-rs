@@ -2,6 +2,11 @@ use crate::error::Error;
 
 use super::JplFile;
 
+/// Maximum Chebyshev coefficients per component this implementation supports;
+/// sizes the fixed `pc[]`/`vc[]` buffers in [`interp`]. DE441's max ncf is 14.
+/// [`super::header::parse_header`] rejects files whose ncf exceeds this.
+pub(super) const MAX_NCF: usize = 18;
+
 /// Read record `nr` from the mmap'd file into a Vec<f64>.
 /// buf[0] = segment start JD, buf[1] = segment end JD, buf[2..] = coefficients.
 fn read_record(file: &JplFile, nr: usize) -> Vec<f64> {
@@ -46,7 +51,7 @@ fn interp(
     let tc = (temp.rem_euclid(1.0) + dt1) * 2.0 - 1.0;
 
     // Position Chebyshev polynomials T_0..T_{ncf-1} (swejpl.c:511-533)
-    let mut pc = [0.0f64; 18];
+    let mut pc = [0.0f64; MAX_NCF];
     pc[0] = 1.0;
     pc[1] = tc;
     let twot = tc * 2.0;
@@ -70,7 +75,7 @@ fn interp(
 
     if need_speed {
         // Velocity derivative polynomials (swejpl.c:540-553)
-        let mut vc = [0.0f64; 18];
+        let mut vc = [0.0f64; MAX_NCF];
         vc[0] = 0.0;
         vc[1] = 1.0;
         if ncf > 2 {
@@ -120,10 +125,13 @@ pub(super) fn state(
         });
     }
 
-    // Epoch decomposition (swejpl.c:783–797)
+    // Epoch decomposition (swejpl.c:783–797). Match C's accumulation order:
+    // et_fr = s - floor(s) (NOT et - et_mn), so the fractional day is formed from
+    // the same operands C uses.
     let s = et - 0.5;
-    let et_mn = s.floor() + 0.5;
-    let et_fr = et - et_mn;
+    let et_mn_floor = s.floor();
+    let et_fr = s - et_mn_floor;
+    let et_mn = et_mn_floor + 0.5;
 
     // Record number (+2: records 0 and 1 are header and constants)
     let mut nr = ((et_mn - ss[0]) / ss[2]) as i32 + 2;

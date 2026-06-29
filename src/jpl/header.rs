@@ -7,13 +7,6 @@ pub enum ByteOrder {
 }
 
 impl ByteOrder {
-    pub fn read_i16(self, bytes: [u8; 2]) -> i16 {
-        match self {
-            Self::Little => i16::from_le_bytes(bytes),
-            Self::Big => i16::from_be_bytes(bytes),
-        }
-    }
-
     pub fn read_i32(self, bytes: [u8; 4]) -> i32 {
         match self {
             Self::Little => i32::from_le_bytes(bytes),
@@ -60,18 +53,6 @@ impl<'a> Reader<'a> {
         let bytes: [u8; 8] = self.data[self.pos..self.pos + 8].try_into().unwrap();
         self.pos += 8;
         Ok(self.order.read_f64(bytes))
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn skip(&mut self, n: usize) -> Result<(), Error> {
-        self.ensure(n)?;
-        self.pos += n;
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn seek(&mut self, pos: usize) {
-        self.pos = pos;
     }
 }
 
@@ -187,6 +168,18 @@ pub(super) fn parse_header(data: &[u8]) -> Result<JplHeader, Error> {
             "JPL ss[1]={} outside plausibility range",
             ss[1]
         )));
+    }
+
+    // interp() uses fixed-size [f64; MAX_NCF] Chebyshev buffers; reject any file
+    // whose coefficient count per component exceeds that. (DE441 max ncf = 14.)
+    for i in 0..13usize {
+        let ncf = ipt[i * 3 + 1];
+        if ncf as usize > super::interp::MAX_NCF {
+            return Err(Error::FileFormat(format!(
+                "JPL ncf {ncf} for body {i} exceeds supported maximum {}",
+                super::interp::MAX_NCF
+            )));
+        }
     }
 
     let ksize = compute_ksize(&ipt)?;
