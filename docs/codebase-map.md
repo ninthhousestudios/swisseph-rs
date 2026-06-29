@@ -33,7 +33,9 @@ src/
 │   ├── moon_tables.rs  — generated const arrays: LR/MB/LRT/BT/LRT2/BT2 + z[25] + MEAN_NODE_CORR[304] + MEAN_APSIS_CORR[304]
 │   ├── planets.rs      — moshplan2() series evaluator, sscc() harmonic recurrence, fundamental argument constants
 │   └── tables.rs       — generated const arrays: 9 planet tables (do not hand-edit, see scripts/gen_moshier_tables.py)
-├── jpl.rs              — EMPTY stub
+├── jpl/
+│   ├── mod.rs          — JplFile (mmap + JplHeader), JplFile::open, byte_order/header/bytes accessors. Re-exports ByteOrder, JplHeader.
+│   └── header.rs       — ByteOrder enum + Reader cursor, detect_byte_order (plausibility of ss[2]), parse_header (record-0 offsets), compute_ksize (ipt[] algorithm), validate_file_length, JplHeader struct
 ├── sweph_file/
 │   ├── mod.rs          — SwissEphFile (mmap-based .se1 reader), body_file_id(Body → ipl value), evaluate_body re-export
 │   ├── types.rs        — FileHeader, PlanetFileData, FileType, ByteOrder, SEI_*/SE_* body constants, SEI_FLG_* flags

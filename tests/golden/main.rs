@@ -3,6 +3,7 @@ mod calc_sweph;
 mod corrections;
 mod date;
 mod deltat;
+mod jpl_header;
 mod math;
 mod mean_elements;
 mod moshier_backend;
