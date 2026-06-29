@@ -719,11 +719,11 @@ pub fn calc_ecl_nut(jd: f64, flags: CalcFlags, models: &AstroModels) -> [f64; 6]
 // SwissEph (.se1) backend
 // ---------------------------------------------------------------------------
 
-struct SwephPositions {
-    planet_bary: [f64; 6],
-    earth_bary: [f64; 6],
-    earth_helio: [f64; 6],
-    sun_bary: [f64; 6],
+pub(crate) struct SwephPositions {
+    pub(crate) planet_bary: [f64; 6],
+    pub(crate) earth_bary: [f64; 6],
+    pub(crate) earth_helio: [f64; 6],
+    pub(crate) sun_bary: [f64; 6],
 }
 
 fn sweph_positions(
@@ -771,35 +771,65 @@ fn sweph_positions(
     })
 }
 
-pub fn calc_planet_sweph(
+pub(crate) trait PositionProvider {
+    /// Barycentric equatorial-J2000 positions of `body`, Earth, and Sun at `jd`.
+    fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error>;
+    /// Geocentric equatorial-J2000 Moon at `jd`.
+    fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error>;
+}
+
+struct SwephProvider<'a> {
+    planet_files: &'a [SwissEphFile],
+    moon_files: &'a [SwissEphFile],
+}
+
+impl<'a> PositionProvider for SwephProvider<'a> {
+    fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
+        let body_id = body_file_id(body).ok_or(Error::EphemerisNotAvailable {
+            body,
+            source: EphemerisSource::Swiss,
+        })?;
+        let planet_file = find_file_for_jd(self.planet_files, body_id, jd).ok_or(
+            Error::BeyondEphemerisLimits {
+                jd_tt: jd,
+                start: 0.0,
+                end: 0.0,
+            },
+        )?;
+        let moon_file = find_file_for_jd(self.moon_files, SEI_MOON, jd).ok_or(
+            Error::BeyondEphemerisLimits {
+                jd_tt: jd,
+                start: 0.0,
+                end: 0.0,
+            },
+        )?;
+        sweph_positions(planet_file, moon_file, body_id, jd, need_speed)
+    }
+
+    fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
+        let moon_file = find_file_for_jd(self.moon_files, SEI_MOON, jd).ok_or(
+            Error::BeyondEphemerisLimits {
+                jd_tt: jd,
+                start: 0.0,
+                end: 0.0,
+            },
+        )?;
+        let (pos, _) = evaluate_body(moon_file, SEI_MOON, jd, need_speed)?;
+        Ok(pos)
+    }
+}
+
+fn apparent_planet<P: PositionProvider>(
+    p: &P,
     jd: f64,
     body: Body,
-    planet_files: &[SwissEphFile],
-    moon_files: &[SwissEphFile],
     _eps_j2000: &Epsilon,
     flags: CalcFlags,
     models: &AstroModels,
 ) -> Result<[f64; 24], Error> {
-    let body_id = body_file_id(body).ok_or(Error::EphemerisNotAvailable {
-        body,
-        source: crate::types::EphemerisSource::Swiss,
-    })?;
     let need_speed = flags.contains(CalcFlags::SPEED);
 
-    let planet_file =
-        find_file_for_jd(planet_files, body_id, jd).ok_or(Error::BeyondEphemerisLimits {
-            jd_tt: jd,
-            start: 0.0,
-            end: 0.0,
-        })?;
-    let moon_file =
-        find_file_for_jd(moon_files, SEI_MOON, jd).ok_or(Error::BeyondEphemerisLimits {
-            jd_tt: jd,
-            start: 0.0,
-            end: 0.0,
-        })?;
-
-    let pos = sweph_positions(planet_file, moon_file, body_id, jd, true)?;
+    let pos = p.positions(body, jd, true)?;
 
     // Geocentric
     let mut xx = [0.0; 6];
@@ -846,28 +876,13 @@ pub fn calc_planet_sweph(
             xxsp[i] = dt * xxsv[i + 3] - xxsp[i];
         }
 
-        // Re-evaluate planet at retarded time t' = t - dt.
-        // Look up the file for the retarded epoch separately: when jd falls exactly on
-        // a file boundary (e.g. jd=2378496.5 = sepl_18's tfstart), the retarded epoch
-        // jd-dt may fall before that file's tfstart and require the previous file.
-        let ret_jd = jd - dt;
-        let ret_planet_file =
-            find_file_for_jd(planet_files, body_id, ret_jd).unwrap_or(planet_file);
-        let (mut retarded, _) = evaluate_body(ret_planet_file, body_id, ret_jd, true)?;
-        if let Some(pd) = ret_planet_file.planet_data(body_id) {
-            if pd.iflg & SEI_FLG_HELIO != 0 {
-                let (helio_earth_ret, _) =
-                    evaluate_body(ret_planet_file, SEI_SUNBARY, ret_jd, true)?;
-                let (emb_ret, _) = evaluate_body(ret_planet_file, 0, ret_jd, true)?;
-                for i in 0..6 {
-                    retarded[i] += emb_ret[i] - helio_earth_ret[i];
-                }
-            }
-        }
+        // Re-evaluate planet at retarded time t' = t - dt; file selection is
+        // inside the provider (handles file-boundary retarded-epoch lookup).
+        let pos_ret = p.positions(body, jd - dt, true)?;
 
         // Geocentric from re-evaluated position
         for i in 0..6 {
-            xx[i] = retarded[i] - pos.earth_bary[i];
+            xx[i] = pos_ret.planet_bary[i] - pos.earth_bary[i];
         }
 
         // Apply change-of-dt speed correction
@@ -905,17 +920,7 @@ pub fn calc_planet_sweph(
             need_speed,
         );
         if need_speed {
-            let ret_planet_file_aberr =
-                find_file_for_jd(planet_files, body_id, jd - dt).unwrap_or(planet_file);
-            let ret_moon_file_aberr =
-                find_file_for_jd(moon_files, SEI_MOON, jd - dt).unwrap_or(moon_file);
-            let pos_ret = sweph_positions(
-                ret_planet_file_aberr,
-                ret_moon_file_aberr,
-                body_id,
-                jd - dt,
-                true,
-            )?;
+            let pos_ret = p.positions(body, jd - dt, true)?;
             for i in 0..3 {
                 xx[i + 3] += pos.earth_bary[i + 3] - pos_ret.earth_bary[i + 3];
             }
@@ -936,31 +941,17 @@ pub fn calc_planet_sweph(
     Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
 }
 
-pub fn calc_sun_sweph(
+fn apparent_sun<P: PositionProvider>(
+    p: &P,
     jd: f64,
-    planet_files: &[SwissEphFile],
-    moon_files: &[SwissEphFile],
     flags: CalcFlags,
     models: &AstroModels,
 ) -> Result<[f64; 24], Error> {
     let need_speed = flags.contains(CalcFlags::SPEED);
 
-    // Always compute velocity internally — needed for aberration even when
-    // the caller doesn't request speed output.
-    let planet_file =
-        find_file_for_jd(planet_files, 0, jd).ok_or(Error::BeyondEphemerisLimits {
-            jd_tt: jd,
-            start: 0.0,
-            end: 0.0,
-        })?;
-    let moon_file =
-        find_file_for_jd(moon_files, SEI_MOON, jd).ok_or(Error::BeyondEphemerisLimits {
-            jd_tt: jd,
-            start: 0.0,
-            end: 0.0,
-        })?;
-
-    let pos = sweph_positions(planet_file, moon_file, 0, jd, true)?;
+    // Always pass need_speed=true internally — velocity needed for aberration
+    // even when the caller doesn't request speed output.
+    let pos = p.positions(Body::Sun, jd, true)?;
 
     // Geocentric Sun = -(heliocentric Earth)
     let mut xx = [0.0; 6];
@@ -973,22 +964,9 @@ pub fn calc_sun_sweph(
         for _ in 0..=1 {
             let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
             let dt = dist * AUNIT / CLIGHT / 86400.0;
-            let ret_jd = jd - dt;
-
-            // Use a separate file lookup for the retarded epoch: when jd falls on a file
-            // boundary (e.g. sepl_18 tfstart = jd exactly), the retarded epoch jd-dt
-            // falls before that file's coverage and requires the previous file.
-            let ret_planet_file = find_file_for_jd(planet_files, 0, ret_jd).unwrap_or(planet_file);
-
-            let (helio_earth_ret, _) = evaluate_body(ret_planet_file, SEI_SUNBARY, ret_jd, true)?;
-            let (emb_ret, _) = evaluate_body(ret_planet_file, 0, ret_jd, true)?;
-            let mut sun_bary_ret = [0.0; 6];
+            let pos_ret = p.positions(Body::Sun, jd - dt, true)?;
             for i in 0..6 {
-                sun_bary_ret[i] = emb_ret[i] - helio_earth_ret[i];
-            }
-
-            for i in 0..6 {
-                xx[i] = -(pos.earth_bary[i] - sun_bary_ret[i]);
+                xx[i] = -(pos.earth_bary[i] - pos_ret.sun_bary[i]);
             }
         }
     }
@@ -1024,49 +1002,29 @@ pub fn calc_sun_sweph(
     Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
 }
 
-pub fn calc_moon_sweph(
+fn apparent_moon<P: PositionProvider>(
+    p: &P,
     jd: f64,
-    planet_files: &[SwissEphFile],
-    moon_files: &[SwissEphFile],
     flags: CalcFlags,
     models: &AstroModels,
 ) -> Result<[f64; 24], Error> {
     let need_speed = flags.contains(CalcFlags::SPEED);
 
-    let moon_file =
-        find_file_for_jd(moon_files, SEI_MOON, jd).ok_or(Error::BeyondEphemerisLimits {
-            jd_tt: jd,
-            start: 0.0,
-            end: 0.0,
-        })?;
-    let planet_file =
-        find_file_for_jd(planet_files, 0, jd).ok_or(Error::BeyondEphemerisLimits {
-            jd_tt: jd,
-            start: 0.0,
-            end: 0.0,
-        })?;
+    // Moon geocentric from provider
+    let mut xx = p.moon_geo(jd, true)?;
 
-    // Moon geocentric from SE1 file
-    let (moon_geo, _) = evaluate_body(moon_file, SEI_MOON, jd, true)?;
-    let mut xx = moon_geo;
-
-    // Need earth_bary for aberration
-    let pos = sweph_positions(planet_file, moon_file, 0, jd, true)?;
+    // Earth context for aberration (body=Earth maps to EMB file entry, same as
+    // the original sweph_positions call with body_id=0)
+    let pos = p.positions(Body::Earth, jd, true)?;
 
     // Light-time
     let mut earth_bary_ret = pos.earth_bary;
     if !flags.contains(CalcFlags::TRUEPOS) {
         let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
         let dt = dist * AUNIT / CLIGHT / 86400.0;
-        let ret_jd = jd - dt;
-
-        // Use separate file lookups for the retarded epoch.
-        let ret_planet_file = find_file_for_jd(planet_files, 0, ret_jd).unwrap_or(planet_file);
-        let ret_moon_file = find_file_for_jd(moon_files, SEI_MOON, ret_jd).unwrap_or(moon_file);
-
-        let pos_ret = sweph_positions(ret_planet_file, ret_moon_file, 0, ret_jd, true)?;
+        let pos_ret = p.positions(Body::Earth, jd - dt, true)?;
         earth_bary_ret = pos_ret.earth_bary;
-        let (moon_geo_ret, _) = evaluate_body(ret_moon_file, SEI_MOON, ret_jd, true)?;
+        let moon_geo_ret = p.moon_geo(jd - dt, true)?;
 
         // moon_bary(t') = moon_geo(t') + earth_bary(t')
         // geocentric at retarded time: moon_bary(t') - earth_bary(t)
@@ -1109,4 +1067,48 @@ pub fn calc_moon_sweph(
 
     let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
     Ok(app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()))
+}
+
+pub fn calc_planet_sweph(
+    jd: f64,
+    body: Body,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    _eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let p = SwephProvider {
+        planet_files,
+        moon_files,
+    };
+    apparent_planet(&p, jd, body, _eps_j2000, flags, models)
+}
+
+pub fn calc_sun_sweph(
+    jd: f64,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let p = SwephProvider {
+        planet_files,
+        moon_files,
+    };
+    apparent_sun(&p, jd, flags, models)
+}
+
+pub fn calc_moon_sweph(
+    jd: f64,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> Result<[f64; 24], Error> {
+    let p = SwephProvider {
+        planet_files,
+        moon_files,
+    };
+    apparent_moon(&p, jd, flags, models)
 }
