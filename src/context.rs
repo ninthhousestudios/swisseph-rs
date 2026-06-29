@@ -407,16 +407,27 @@ impl Ephemeris {
         let dt = crate::calc::speed3_interval(body);
         let inner_flags = flags & !CalcFlags::SPEED3;
 
-        let (mut x0, _, _) = self.calc_inner(jd_tt - dt, body, inner_flags)?;
-        let (mut x2, _, _) = self.calc_inner(jd_tt + dt, body, inner_flags)?;
-        let (mut x1, x2000, flags_used) = self.calc_inner(jd_tt, body, inner_flags)?;
+        let (mut x0, x2000_0, _) = self.calc_inner(jd_tt - dt, body, inner_flags)?;
+        let (mut x2, x2000_2, _) = self.calc_inner(jd_tt + dt, body, inner_flags)?;
+        let (mut x1, x2000_1, flags_used) = self.calc_inner(jd_tt, body, inner_flags)?;
+
+        // Sidereal projection must be applied to each of the three points
+        // BEFORE the 3-point derivative, matching C's `use_speed3`, which calls
+        // swecalc three times with SEFLG_SIDEREAL set and then differences the
+        // already-projected positions (sweph.c:495-519). Project positions only
+        // (no SPEED) — the speed is what the 3-point derivative produces. Applying
+        // the projection after differencing would discard the 3-point speed and,
+        // for the ECL_T0/SSY branches, read a zero velocity from x2000 (the inner
+        // evals run without SPEED), collapsing the longitude speed to ~0.
+        if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
+            let pos_flags = flags_used & !CalcFlags::SPEED;
+            self.apply_sidereal(&mut x0, &x2000_0, jd_tt - dt, pos_flags)?;
+            self.apply_sidereal(&mut x2, &x2000_2, jd_tt + dt, pos_flags)?;
+            self.apply_sidereal(&mut x1, &x2000_1, jd_tt, pos_flags)?;
+        }
 
         crate::calc::denormalize_positions(&mut x0, &x1, &mut x2);
         crate::calc::calc_speed_3point(&mut x1, &x0, &x2, dt);
-
-        if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
-            self.apply_sidereal(&mut x1, &x2000, jd_tt, flags_used | CalcFlags::SPEED)?;
-        }
 
         Ok(CalcResult {
             data: Self::extract_for_body(&x1, body, flags | CalcFlags::SPEED),

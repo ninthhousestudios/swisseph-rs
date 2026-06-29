@@ -41,6 +41,7 @@ struct GoldenData {
     ecl_t0: Vec<Case>,
     user_ecl_t0: Vec<NoIndexCase>,
     ssy: Vec<NoIndexCase>,
+    speed3: Vec<Case>,
 }
 
 fn load() -> GoldenData {
@@ -202,6 +203,39 @@ fn golden_ayanamsa_calc_user_ecl_t0() {
             format!(
                 "user_ecl_t0 case {i} body={} tjd={:.1} {field}",
                 c.body, c.tjd
+            )
+        };
+        super::assert_f64_eps(&label("lon"), c.lon, result.data[0], 1e-9);
+        super::assert_f64_eps(&label("lat"), c.lat, result.data[1], 1e-9);
+        super::assert_f64_eps(&label("dist"), c.dist, result.data[2], 1e-9);
+        super::assert_f64_eps(&label("lon_speed"), c.lon_speed, result.data[3], 1e-7);
+    }
+}
+
+/// SIDEREAL with SEFLG_SPEED3 (no SEFLG_SPEED) must match C's `use_speed3`, which
+/// projects each of the three points and differences the projected positions.
+/// Covers both a default-branch mode (Lahiri) and an ECL_T0 mode (J2000) — the
+/// latter is a regression guard for swisseph-rs/53, where the projection branch
+/// previously discarded the 3-point speed and returned lon_speed≈0.
+#[test]
+fn golden_ayanamsa_calc_speed3() {
+    let data = load();
+    let flags = CalcFlags::MOSEPH | CalcFlags::SIDEREAL | CalcFlags::SPEED3;
+
+    for (i, c) in data.speed3.iter().enumerate() {
+        let eph = eph_for_index(c.index);
+        let body = body_from_str(&c.body);
+        let result = eph.calc(c.tjd, body, flags).unwrap_or_else(|e| {
+            panic!(
+                "speed3 case {i} (idx={} body={} tjd={}): {e}",
+                c.index, c.body, c.tjd
+            )
+        });
+
+        let label = |field: &str| {
+            format!(
+                "speed3 case {i} idx={} body={} tjd={:.1} {field}",
+                c.index, c.body, c.tjd
             )
         };
         super::assert_f64_eps(&label("lon"), c.lon, result.data[0], 1e-9);

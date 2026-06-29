@@ -211,6 +211,48 @@ int main(void) {
                xx[0], xx[1], xx[2], xx[3]);
     }
 
+    printf("\n  ],\n");
+
+    /* SPEED3 group: SEFLG_SPEED3 (no SEFLG_SPEED) triggers C's use_speed3,
+     * which calls swecalc 3x with SEFLG_SIDEREAL and differences the projected
+     * positions. Covers a default-branch mode (Lahiri) and an ECL_T0 mode
+     * (J2000) so the projected-then-differenced speed is exercised on both. */
+    printf("  \"speed3\": [\n");
+
+    int s3_indices[] = {SE_SIDM_LAHIRI, SE_SIDM_J2000}; /* 1 (default), 18 (ECL_T0) */
+    int s3_bodies[] = {SE_SUN, SE_MOON, SE_MARS};
+    const char *s3_body_names[] = {"Sun", "Moon", "Mars"};
+    double s3_epochs[] = {2451545.0, 2458849.5};
+    int s3_first = 1;
+
+    for (int ii = 0; ii < 2; ii++) {
+        for (int ib = 0; ib < 3; ib++) {
+            for (int ie = 0; ie < 2; ie++) {
+                swe_close();
+                swe_set_ephe_path(NULL);
+                swe_set_sid_mode(s3_indices[ii], 0, 0);
+
+                int f3 = SEFLG_MOSEPH | SEFLG_SIDEREAL | SEFLG_SPEED3;
+                memset(xx, 0, sizeof(xx));
+                int rc3 = swe_calc(s3_epochs[ie], s3_bodies[ib], f3, xx, serr);
+                if (rc3 < 0) {
+                    fprintf(stderr, "SPEED3 error: idx=%d body=%d jd=%.1f: %s\n",
+                            s3_indices[ii], s3_bodies[ib], s3_epochs[ie], serr);
+                    continue;
+                }
+
+                if (!s3_first) printf(",\n");
+                s3_first = 0;
+
+                printf("    {\"index\":%d,\"body\":\"%s\",\"tjd\":%.1f,"
+                       "\"lon\":%.17g,\"lat\":%.17g,\"dist\":%.17g,"
+                       "\"lon_speed\":%.17g}",
+                       s3_indices[ii], s3_body_names[ib], s3_epochs[ie],
+                       xx[0], xx[1], xx[2], xx[3]);
+            }
+        }
+    }
+
     printf("\n  ]\n}\n");
     return 0;
 }
