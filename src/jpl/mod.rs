@@ -1,4 +1,5 @@
 mod header;
+mod interp;
 
 pub use header::{ByteOrder, JplHeader};
 
@@ -7,6 +8,24 @@ use std::path::Path;
 use memmap2::Mmap;
 
 use crate::error::Error;
+
+// JPL body indices (swejpl.h:68–83). Used as `ntarg`/`ncent` in `jpl_pleph`
+// and as slot indices in the internal `pv[13]` array.
+pub const J_MERCURY: i32 = 0;
+pub const J_VENUS: i32 = 1;
+pub const J_EARTH: i32 = 2;
+pub const J_MARS: i32 = 3;
+pub const J_JUPITER: i32 = 4;
+pub const J_SATURN: i32 = 5;
+pub const J_URANUS: i32 = 6;
+pub const J_NEPTUNE: i32 = 7;
+pub const J_PLUTO: i32 = 8;
+pub const J_MOON: i32 = 9;
+pub const J_SUN: i32 = 10;
+pub const J_SBARY: i32 = 11;
+pub const J_EMB: i32 = 12;
+pub const J_NUT: i32 = 13;
+pub const J_LIB: i32 = 14;
 
 pub struct JplFile {
     mmap: Mmap,
@@ -38,6 +57,91 @@ impl JplFile {
     pub fn byte_order(&self) -> ByteOrder {
         self.header.byte_order
     }
+}
+
+/// Return the state of body `ntarg` relative to `ncent` in barycentric equatorial
+/// J2000/ICRF. Units: AU (position), AU/day (velocity). (swejpl.c:362–449)
+///
+/// `ntarg` / `ncent`: J_* constants defined in this module.
+/// `need_speed`: when false, velocity components of the result are zero.
+pub fn jpl_pleph(
+    file: &JplFile,
+    et: f64,
+    ntarg: i32,
+    ncent: i32,
+    need_speed: bool,
+) -> Result<[f64; 6], Error> {
+    let val: u8 = if need_speed { 2 } else { 1 };
+    let mut list = [0u8; 12];
+
+    // Populate list[] for target and center. Sun and SBARY need no list entry
+    // (Sun comes from pvsun always; SBARY is the zero origin). (swejpl.c:374–416)
+    for &body in &[ntarg, ncent] {
+        match body {
+            b if b == J_MOON => {
+                list[J_MOON as usize] = val;
+                list[J_EARTH as usize] = val;
+            }
+            b if b == J_EARTH => {
+                list[J_EARTH as usize] = val;
+                list[J_MOON as usize] = val;
+            }
+            b if b == J_EMB => {
+                list[J_EARTH as usize] = val;
+            }
+            b if (0..10).contains(&b) => {
+                list[b as usize] = val;
+            }
+            _ => {} // J_SUN, J_SBARY: no list entry needed
+        }
+    }
+
+    let (mut pv, pvsun) = interp::state(file, et, &list, true, need_speed)?;
+
+    // Post-state assembly (swejpl.c:418–447).
+    // Order matters: copy EMB slot before Earth/Moon decomposition alters pv[J_EARTH].
+    if ntarg == J_SUN || ncent == J_SUN {
+        pv[J_SUN as usize] = pvsun;
+    }
+    if ntarg == J_SBARY || ncent == J_SBARY {
+        pv[J_SBARY as usize] = [0.0; 6];
+    }
+    if ntarg == J_EMB || ncent == J_EMB {
+        pv[J_EMB as usize] = pv[J_EARTH as usize];
+    }
+
+    // Earth/Moon decomposition: pv[J_EARTH] from state() is the EMB (barycentric
+    // Earth-Moon Barycenter); pv[J_MOON] is geocentric Moon.
+    let is_earth_moon_pair =
+        (ntarg == J_EARTH && ncent == J_MOON) || (ntarg == J_MOON && ncent == J_EARTH);
+
+    if is_earth_moon_pair {
+        // Moon is already geocentric; zero Earth so the result is the raw geocentric Moon.
+        pv[J_EARTH as usize] = [0.0; 6];
+    } else {
+        let emrat = file.header().emrat;
+        if list[J_EARTH as usize] > 0 {
+            // EMB → barycentric Earth: Earth = EMB - Moon_geo / (emrat + 1)
+            let moon = pv[J_MOON as usize];
+            for k in 0..6 {
+                pv[J_EARTH as usize][k] -= moon[k] / (emrat + 1.0);
+            }
+        }
+        if list[J_MOON as usize] > 0 {
+            // Geocentric Moon → barycentric Moon: Moon_bary = Moon_geo + Earth_bary
+            let earth = pv[J_EARTH as usize];
+            for k in 0..6 {
+                pv[J_MOON as usize][k] += earth[k];
+            }
+        }
+    }
+
+    let mut rrd = [0.0f64; 6];
+    for k in 0..6 {
+        rrd[k] = pv[ntarg as usize][k] - pv[ncent as usize][k];
+    }
+
+    Ok(rrd)
 }
 
 #[cfg(test)]
