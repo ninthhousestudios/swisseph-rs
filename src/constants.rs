@@ -153,6 +153,7 @@ pub const MOSHLUEPH_END: f64 = 2818000.5;
 pub const MOSHNDEPH_START: f64 = -3100015.5;
 pub const MOSHNDEPH_END: f64 = 8000016.5;
 pub const PLAN_SPEED_INTV: f64 = 0.0001;
+pub const FIXSTAR_DT: f64 = PLAN_SPEED_INTV * 0.1; // = 0.00001 days
 pub const MOON_SPEED_INTV: f64 = 0.00005;
 pub const DEFL_SPEED_INTV: f64 = 0.0000005;
 pub const NUT_SPEED_INTV: f64 = 0.0001;

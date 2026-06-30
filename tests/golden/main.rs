@@ -6,6 +6,7 @@ mod calc_sweph;
 mod corrections;
 mod date;
 mod deltat;
+mod fixstar;
 mod jpl_header;
 mod jpl_pleph;
 mod math;

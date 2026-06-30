@@ -1,6 +1,9 @@
 use crate::constants::*;
 use crate::flags::CalcFlags;
-use crate::math::{cartesian_to_polar, polar_to_cartesian};
+use crate::math::{
+    cartesian_to_polar, cartesian_to_polar_with_speed, polar_to_cartesian,
+    polar_to_cartesian_with_speed,
+};
 use crate::types::*;
 
 const DCOR_RA_JPL_TJD0: f64 = 2437846.5;
@@ -118,4 +121,54 @@ fn approx_jplhor(
     }
     let cart = polar_to_cartesian(polar);
     x[..3].copy_from_slice(&cart);
+}
+
+// GCRS/ICRS ↔ FK5 rotation (swephlib.c:2292–2333).
+// backward=true: FK5 → ICRS (rb · x).
+// backward=false: ICRS → FK5 (rb^T · x).
+// Writes back all 6 components unconditionally (matching C); since the fixstar
+// pipeline forces SPEED internally, has_speed is always true in practice.
+#[rustfmt::skip]
+const RB: [[f64; 3]; 3] = [
+    [0.9999999999999928, 0.0000001110223287, 0.0000000441180557],
+    [-0.0000001110223330, 0.9999999999999891, 0.0000000964779176],
+    [-0.0000000441180450, -0.0000000964779225, 0.9999999999999943],
+];
+
+pub(crate) fn icrs2fk5(x: &mut [f64; 6], has_speed: bool, backward: bool) {
+    let mut xx = [0.0f64; 6];
+    if backward {
+        // FK5 → ICRS: xx = rb · x (row-major)
+        for i in 0..3 {
+            xx[i] = x[0] * RB[i][0] + x[1] * RB[i][1] + x[2] * RB[i][2];
+            if has_speed {
+                xx[i + 3] = x[3] * RB[i][0] + x[4] * RB[i][1] + x[5] * RB[i][2];
+            }
+        }
+    } else {
+        // ICRS → FK5: xx = rb^T · x (column-major = transpose)
+        for i in 0..3 {
+            xx[i] = x[0] * RB[0][i] + x[1] * RB[1][i] + x[2] * RB[2][i];
+            if has_speed {
+                xx[i + 3] = x[3] * RB[0][i] + x[4] * RB[1][i] + x[5] * RB[2][i];
+            }
+        }
+    }
+    *x = xx;
+}
+
+// FK4 → FK5 RA correction in polar space (swephlib.c:4098–4112).
+// Reference: Explanatory Supplement to the Astronomical Almanac, p. 167f.
+pub(crate) fn fk4_fk5(xp: &mut [f64; 6], tjd: f64) {
+    if xp[0] == 0.0 && xp[1] == 0.0 && xp[2] == 0.0 {
+        return;
+    }
+    let correct_speed = xp[3] != 0.0;
+    *xp = cartesian_to_polar_with_speed(*xp);
+    // 0.035 is a standalone constant, NOT divided by 36524.2198782
+    xp[0] += (0.035 + 0.085 * (tjd - B1950) / 36524.2198782) / 3600.0 * 15.0 * DEGTORAD;
+    if correct_speed {
+        xp[3] += (0.085 / 36524.2198782) / 3600.0 * 15.0 * DEGTORAD;
+    }
+    *xp = polar_to_cartesian_with_speed(*xp);
 }

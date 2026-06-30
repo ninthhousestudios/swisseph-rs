@@ -116,6 +116,7 @@ pub struct Ephemeris {
     planet_files: Vec<crate::sweph_file::SwissEphFile>,
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
     jpl_file: Option<crate::jpl::JplFile>,
+    stars: crate::stars::StarCatalog,
 }
 
 impl Ephemeris {
@@ -148,12 +149,14 @@ impl Ephemeris {
             }
             EphemerisSource::Moshier => (Vec::new(), Vec::new()),
         };
+        let stars = crate::stars::load_catalog(config.ephe_path.as_deref());
         Ok(Self {
             config,
             leap_seconds,
             planet_files,
             moon_files,
             jpl_file,
+            stars,
         })
     }
 
@@ -521,6 +524,313 @@ impl Ephemeris {
         }
 
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Fixed-star API
+    // -----------------------------------------------------------------------
+
+    /// Compute apparent position of a fixed star at `jd_tt` (TT).
+    ///
+    /// Returns `(canonical_name, CalcResult)` where the name is
+    /// `"traditional,bayer"` matching `swe_fixstar2` output.
+    pub fn fixstar2(
+        &self,
+        star: &str,
+        jd_tt: f64,
+        flags: CalcFlags,
+    ) -> Result<(String, CalcResult), Error> {
+        // C's swe_fixstar2 returns the original input iflag unchanged (it passes
+        // iflag by value to fixstar_calc_from_struct and ignores the return).
+        let orig_flags = flags;
+        let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
+        let resolved = if let Some(s) = crate::stars::builtin_star(star) {
+            s
+        } else {
+            self.stars.search(star)?
+        };
+        let data = self.calc_fixstar(&resolved, jd_tt, flags)?;
+        let name = format!("{},{}", resolved.name, resolved.bayer);
+        Ok((
+            name,
+            CalcResult {
+                data,
+                flags_used: orig_flags,
+            },
+        ))
+    }
+
+    /// UT variant of `fixstar2`.
+    pub fn fixstar2_ut(
+        &self,
+        star: &str,
+        jd_ut: f64,
+        flags: CalcFlags,
+    ) -> Result<(String, CalcResult), Error> {
+        let dt = crate::deltat::calc_deltat(jd_ut, &self.config);
+        self.fixstar2(star, jd_ut + dt, flags)
+    }
+
+    /// Magnitude lookup for a star by name. Searches catalog only — builtin
+    /// stars are not available via this function, matching C `swe_fixstar2_mag`.
+    pub fn fixstar2_mag(&self, star: &str) -> Result<(String, f64), Error> {
+        let resolved = self.stars.search(star)?;
+        let name = format!("{},{}", resolved.name, resolved.bayer);
+        Ok((name, resolved.mag))
+    }
+
+    /// Core fixed-star position pipeline (port of `fixstar_calc_from_struct`).
+    /// Always computes speed internally; zeros it in the output if the caller
+    /// did not request `SPEED`.
+    fn calc_fixstar(
+        &self,
+        star: &crate::stars::Star,
+        jd: f64,
+        flags: CalcFlags,
+    ) -> Result<[f64; 6], Error> {
+        use crate::bias::{fk4_fk5, frame_bias, icrs2fk5};
+        use crate::calc::{nutate, precess_speed};
+        use crate::constants::*;
+        use crate::corrections::{aberr_light, deflect_light};
+        use crate::math::{
+            cartesian_to_polar_with_speed, polar_to_cartesian_with_speed, rotate_x_sincos,
+        };
+        use crate::nutation::nutation;
+        use crate::obliquity::obliquity;
+        use crate::precession::precess;
+        use crate::types::FrameTransform;
+        use crate::types::PrecessionDirection;
+
+        let models = &self.config.astro_models;
+        // Force speed internally; honor caller's SPEED for output (step 18).
+        let iflag = flags | CalcFlags::SPEED;
+
+        // Step 1: Elapsed days since catalog epoch.
+        let t = if star.epoch == 1950.0 {
+            jd - B1950
+        } else {
+            jd - J2000
+        };
+
+        // Step 2: Initial polar+speed vector (radians / AU / day).
+        let rdist = if star.parall == 0.0 {
+            1e9
+        } else {
+            (1.0 / (star.parall * RADTODEG * 3600.0)) * PARSEC_TO_AUNIT
+        };
+        let mut x: [f64; 6] = [
+            star.ra,
+            star.de,
+            rdist,
+            star.ramot / 36525.0,
+            star.demot / 36525.0,
+            star.radvel / 36525.0,
+        ];
+
+        // Step 3: Polar → Cartesian with full space-motion.
+        x = polar_to_cartesian_with_speed(x);
+
+        // Step 4: FK4/FK5/ICRS frame corrections.
+        if star.epoch == 1950.0 {
+            fk4_fk5(&mut x, B1950);
+            let mut pos3 = [x[0], x[1], x[2]];
+            precess(
+                &mut pos3,
+                B1950,
+                CalcFlags::empty(),
+                models,
+                PrecessionDirection::DateToJ2000,
+            );
+            x[0] = pos3[0];
+            x[1] = pos3[1];
+            x[2] = pos3[2];
+            let mut vel3 = [x[3], x[4], x[5]];
+            precess(
+                &mut vel3,
+                B1950,
+                CalcFlags::empty(),
+                models,
+                PrecessionDirection::DateToJ2000,
+            );
+            x[3] = vel3[0];
+            x[4] = vel3[1];
+            x[5] = vel3[2];
+        }
+        if star.epoch != 0.0 {
+            // FK5 → ICRS.
+            icrs2fk5(&mut x, true, true);
+            // ICRS → J2000 frame bias. C's swi_get_denum returns 403 for Moshier,
+            // so this is applied unconditionally here (403 >= 403 is always true).
+            frame_bias(
+                &mut x,
+                J2000,
+                CalcFlags::SPEED,
+                models,
+                FrameTransform::GcrsToJ2000,
+            );
+        }
+
+        // Steps 5–6: Earth heliocentric position for parallax / deflection /
+        // aberration. Moshier returns heliocentric, matching C's xearth for MOSEPH.
+        let eps_j2000 = obliquity(J2000, CalcFlags::empty(), models);
+        let pp =
+            crate::moshier::backend::compute_pipeline(jd, crate::types::Body::Sun, &eps_j2000)?;
+        let xobs = pp.earth_helio; // heliocentric Earth = geocenter reference
+
+        // Step 7: Proper motion + parallax (geocentric).
+        for i in 0..3 {
+            x[i] += t * x[i + 3]; // proper motion over elapsed days
+            x[i] -= xobs[i]; // subtract observer (parallax)
+            x[i + 3] -= xobs[i + 3]; // subtract observer velocity
+        }
+
+        // Step 8: Gravitational deflection (dt=0 for stars, matching C).
+        if !iflag.contains(CalcFlags::TRUEPOS) && !iflag.contains(CalcFlags::NOGDEFL) {
+            let mut planet_helio = [0.0f64; 6];
+            for i in 0..3 {
+                planet_helio[i] = x[i] + xobs[i]; // heliocentric star direction
+                planet_helio[i + 3] = x[i + 3];
+            }
+            deflect_light(&mut x, &xobs, &planet_helio, true);
+        }
+
+        // Step 9: Annual aberration — swi_aberr_light_ex pattern.
+        // C computes Earth state at both t and t-dt; speed = (pos_t - pos_t-dt) / FIXSTAR_DT.
+        // This replaces (not adds to) x[3..6], matching C's swi_aberr_light_ex.
+        if !iflag.contains(CalcFlags::TRUEPOS) && !iflag.contains(CalcFlags::NOABERR) {
+            let orig = [x[0], x[1], x[2]];
+            let orig_vel = [x[3], x[4], x[5]];
+            let ev: [f64; 3] = [xobs[3], xobs[4], xobs[5]];
+            aberr_light(&mut x, &ev, false);
+            // Earth state at t-dt for speed via finite difference.
+            let pp_dt = crate::moshier::backend::compute_pipeline(
+                jd - FIXSTAR_DT,
+                crate::types::Body::Sun,
+                &eps_j2000,
+            )?;
+            let xobs_dt = pp_dt.earth_helio;
+            let ev_dt: [f64; 3] = [xobs_dt[3], xobs_dt[4], xobs_dt[5]];
+            let mut xx2: [f64; 6] = [
+                orig[0] - FIXSTAR_DT * orig_vel[0],
+                orig[1] - FIXSTAR_DT * orig_vel[1],
+                orig[2] - FIXSTAR_DT * orig_vel[2],
+                orig_vel[0],
+                orig_vel[1],
+                orig_vel[2],
+            ];
+            aberr_light(&mut xx2, &ev_dt, false);
+            for i in 0..3 {
+                x[i + 3] = (x[i] - xx2[i]) / FIXSTAR_DT;
+            }
+        }
+
+        // Step 10: ICRS → J2000 frame bias.
+        // C condition: !(iflag & SEFLG_ICRS) && (denum >= 403 || BARYCTR).
+        // Moshier: swi_get_denum returns 403, so this is always applied.
+        if !iflag.contains(CalcFlags::ICRS) {
+            frame_bias(&mut x, jd, iflag, models, FrameTransform::GcrsToJ2000);
+        }
+
+        // Step 11: Save J2000 equatorial Cartesian for sidereal branch.
+        let xxsv = x;
+
+        // Step 12: Precession J2000 → equinox of date.
+        let eps_date = if !iflag.contains(CalcFlags::J2000) {
+            let mut pos3 = [x[0], x[1], x[2]];
+            precess(
+                &mut pos3,
+                jd,
+                iflag,
+                models,
+                PrecessionDirection::J2000ToDate,
+            );
+            x[0] = pos3[0];
+            x[1] = pos3[1];
+            x[2] = pos3[2];
+            precess_speed(&mut x, jd, iflag, models, PrecessionDirection::J2000ToDate);
+            obliquity(jd, iflag, models)
+        } else {
+            obliquity(J2000, iflag, models)
+        };
+
+        // Step 13: Nutation.
+        let nut_val = nutation(jd, iflag, models);
+        let nutv = Some(nutation(jd - NUT_SPEED_INTV, iflag, models));
+        if !iflag.contains(CalcFlags::NONUT) {
+            nutate(&mut x, &eps_date, &nut_val, nutv.as_ref(), true);
+        }
+
+        // Step 14: Equatorial → ecliptic (skip when EQUATORIAL requested).
+        if !iflag.contains(CalcFlags::EQUATORIAL) {
+            let pos3 = rotate_x_sincos([x[0], x[1], x[2]], eps_date.sin_eps, eps_date.cos_eps);
+            x[0] = pos3[0];
+            x[1] = pos3[1];
+            x[2] = pos3[2];
+            let vel3 = rotate_x_sincos([x[3], x[4], x[5]], eps_date.sin_eps, eps_date.cos_eps);
+            x[3] = vel3[0];
+            x[4] = vel3[1];
+            x[5] = vel3[2];
+            if !iflag.contains(CalcFlags::NONUT) {
+                let snut = nut_val.deps.sin();
+                let cnut = nut_val.deps.cos();
+                let pos3 = rotate_x_sincos([x[0], x[1], x[2]], snut, cnut);
+                x[0] = pos3[0];
+                x[1] = pos3[1];
+                x[2] = pos3[2];
+                let vel3 = rotate_x_sincos([x[3], x[4], x[5]], snut, cnut);
+                x[3] = vel3[0];
+                x[4] = vel3[1];
+                x[5] = vel3[2];
+            }
+        }
+
+        // Step 15: Sidereal transform.
+        if iflag.contains(CalcFlags::SIDEREAL) {
+            let bits = self.config.sidereal_bits;
+            if bits.contains(crate::flags::SiderealBits::ECL_T0) {
+                let (xecl, xequ) =
+                    crate::ayanamsa::trop_ra2sid_lon(&xxsv, &self.config, models, iflag);
+                x = if iflag.contains(CalcFlags::EQUATORIAL) {
+                    xequ
+                } else {
+                    xecl
+                };
+            } else if bits.contains(crate::flags::SiderealBits::SSY_PLANE) {
+                let xecl =
+                    crate::ayanamsa::trop_ra2sid_lon_sosy(&xxsv, &self.config, models, iflag);
+                x = xecl;
+            } else {
+                // Default: subtract ayanamsa from ecliptic (or equatorial) longitude.
+                x = cartesian_to_polar_with_speed(x);
+                let daya =
+                    crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd, iflag, models)?;
+                x[0] -= daya[0] * DEGTORAD;
+                x[3] -= daya[1] * DEGTORAD;
+                x = polar_to_cartesian_with_speed(x);
+            }
+        }
+
+        // Step 16: Cartesian → polar.
+        if !iflag.contains(CalcFlags::XYZ) {
+            x = cartesian_to_polar_with_speed(x);
+        }
+
+        // Step 17: Radians → degrees (angles only, not distances).
+        if !iflag.contains(CalcFlags::RADIANS) && !iflag.contains(CalcFlags::XYZ) {
+            x[0] *= RADTODEG;
+            x[1] *= RADTODEG;
+            x[3] *= RADTODEG;
+            x[4] *= RADTODEG;
+        }
+
+        // Step 18: Zero speeds if caller did not request them.
+        if !flags.contains(CalcFlags::SPEED) {
+            x[3] = 0.0;
+            x[4] = 0.0;
+            x[5] = 0.0;
+        }
+
+        Ok(x)
     }
 
     fn build_leap_seconds(config: &EphemerisConfig) -> crate::Result<Vec<i32>> {

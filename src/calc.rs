@@ -103,7 +103,7 @@ fn precess_and_ephem(
     }
 }
 
-fn precess_speed(
+pub(crate) fn precess_speed(
     xx: &mut [f64; 6],
     jd: f64,
     flags: CalcFlags,
@@ -182,7 +182,7 @@ fn nut_matrix(eps: &Epsilon, nut: &NutationType) -> [[f64; 3]; 3] {
     ]
 }
 
-fn nutate(
+pub(crate) fn nutate(
     pos: &mut [f64; 6],
     eps: &Epsilon,
     nut: &NutationType,
