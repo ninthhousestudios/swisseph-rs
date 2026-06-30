@@ -2,7 +2,7 @@
 //! (`swe_houses_armc_ex2`). See `docs/c-ref-houses.md`.
 
 use crate::error::Error;
-use crate::math::{diff_degrees, normalize_degrees};
+use crate::math::{cotrans, diff_degrees, normalize_degrees};
 use crate::types::HouseSystem;
 
 // ---------------------------------------------------------------------------
@@ -192,6 +192,44 @@ fn mc_like(th: f64, cose: f64) -> f64 {
     normalize_degrees(mc)
 }
 
+/// Porphyry (`'O'`) cusp fill — the universal polar-circle fallback target for the iterative
+/// systems (Placidus/Koch/Gauquelin, later sub-tasks) as well as a house system in its own
+/// right. Port of the `porphyry:` label body (swehouse.c:1310-1335). Re-asserts `cusps[1]`/
+/// `cusps[10]` unconditionally, repairing any partial writes from a failed iterative attempt.
+/// Returns the (possibly polar-swapped) ascendant.
+fn fill_porphyry(
+    cusps: &mut [f64; 37],
+    cusp_speeds: &mut [f64; 37],
+    mut ac: f64,
+    mc: f64,
+    ac_speed: f64,
+    mc_speed: f64,
+    do_speed: bool,
+) -> f64 {
+    let mut acmc = diff_degrees(ac, mc);
+    if acmc < 0.0 {
+        ac = normalize_degrees(ac + 180.0);
+        cusps[1] = ac;
+        acmc = diff_degrees(ac, mc);
+    }
+    cusps[1] = ac;
+    cusps[10] = mc;
+    cusps[2] = normalize_degrees(ac + (180.0 - acmc) / 3.0);
+    cusps[3] = normalize_degrees(ac + (180.0 - acmc) / 3.0 * 2.0);
+    cusps[11] = normalize_degrees(mc + acmc / 3.0);
+    cusps[12] = normalize_degrees(mc + acmc / 3.0 * 2.0);
+    if do_speed {
+        let q1_speed = ac_speed - mc_speed;
+        cusp_speeds[1] = ac_speed;
+        cusp_speeds[10] = mc_speed;
+        cusp_speeds[2] = ac_speed - q1_speed / 3.0;
+        cusp_speeds[3] = ac_speed - q1_speed / 3.0 * 2.0;
+        cusp_speeds[11] = ac_speed + q1_speed / 3.0;
+        cusp_speeds[12] = ac_speed + q1_speed / 3.0 * 2.0;
+    }
+    ac
+}
+
 // ---------------------------------------------------------------------------
 // CalcH — THE CORE (swehouse.c:892-2050)
 // ---------------------------------------------------------------------------
@@ -258,7 +296,7 @@ fn calc_h(
         cusp_speeds[10] = mc_speed;
     }
 
-    let do_interpol = false;
+    let mut do_interpol = false;
 
     match hsys {
         HouseSystem::Equal => {
@@ -335,6 +373,87 @@ fn calc_h(
                 cusps[i] = normalize_degrees(cusps[1] + (i as f64 - 1.0) * 30.0);
             }
             // No cusp_speed handling — see c-ref-houses.md §4.2(e).
+        }
+        HouseSystem::Porphyry => {
+            // O — Porphyry (swehouse.c:1310-1335, label `porphyry:`)
+            ac = fill_porphyry(
+                &mut cusps,
+                &mut cusp_speeds,
+                ac,
+                mc,
+                ac_speed,
+                mc_speed,
+                do_speed,
+            );
+        }
+        HouseSystem::Sripati => {
+            // S — Sripati (swehouse.c:1410-1431): Porphyry sector midpoints.
+            let mut acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                acmc = diff_degrees(ac, mc);
+            }
+            let q1 = 180.0 - acmc;
+            let s1 = q1 / 3.0;
+            let s4 = acmc / 3.0;
+            cusps[1] = normalize_degrees(ac - s4 * 0.5);
+            cusps[2] = normalize_degrees(ac + s1 * 0.5);
+            cusps[3] = normalize_degrees(ac + s1 * 1.5);
+            cusps[10] = normalize_degrees(mc - s1 * 0.5);
+            cusps[11] = normalize_degrees(mc + s4 * 0.5);
+            cusps[12] = normalize_degrees(mc + s4 * 1.5);
+            do_interpol = do_speed;
+        }
+        HouseSystem::Meridian => {
+            // X — Meridian / axial rotation (swehouse.c:1485-1516)
+            let mut a = th;
+            for i in 1..=12usize {
+                let mut j = i + 10;
+                if j > 12 {
+                    j -= 12;
+                }
+                a = normalize_degrees(a + 30.0);
+                cusps[j] = mc_like(a, cose);
+            }
+            let acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+            }
+            do_interpol = do_speed;
+        }
+        HouseSystem::Morinus => {
+            // M — Morinus (swehouse.c:1517-1540): same equatorial points as X, projected via
+            // a full cotrans (equatorial → ecliptic, +eps) instead of the tand/cose shortcut.
+            let mut a = th;
+            for i in 1..=12usize {
+                let mut j = i + 10;
+                if j > 12 {
+                    j -= 12;
+                }
+                a = normalize_degrees(a + 30.0);
+                let x = cotrans([a, 0.0, 1.0], eps);
+                cusps[j] = x[0];
+            }
+            let acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+            }
+            do_interpol = do_speed;
+        }
+        HouseSystem::Carter => {
+            // F — Carter "poli-equatorial" (swehouse.c:1541-1580)
+            let acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                cusps[1] = ac;
+            }
+            let x = cotrans([ac, 0.0, 1.0], -eps);
+            let a = x[0];
+            for i in [2usize, 3, 10, 11, 12] {
+                let ra = normalize_degrees(a + (i as f64 - 1.0) * 30.0);
+                cusps[i] = mc_like(ra, cose);
+            }
+            do_interpol = do_speed;
         }
         _ => {
             return Err(Error::CError(format!(

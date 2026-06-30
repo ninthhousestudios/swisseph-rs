@@ -25,6 +25,9 @@ static double epss[] = { 23.4392911 };
 static char equal_family_systems[] = { 'A', 'D', 'N', 'V', 'W' };
 #define N_EQUAL_FAMILY (sizeof(equal_family_systems) / sizeof(equal_family_systems[0]))
 
+static char quad_arith_systems[] = { 'O', 'S', 'X', 'M', 'F' };
+#define N_QUAD_ARITH (sizeof(quad_arith_systems) / sizeof(quad_arith_systems[0]))
+
 int main(void) {
     int ia, ig, ie, is;
     int first;
@@ -73,6 +76,47 @@ int main(void) {
     first = 1;
     for (is = 0; is < N_EQUAL_FAMILY; is++) {
         char hsys = equal_family_systems[is];
+        for (ia = 0; ia < N_ARMC; ia++) {
+            for (ig = 0; ig < N_GEOLAT; ig++) {
+                for (ie = 0; ie < N_EPS; ie++) {
+                    double armc = armcs[ia];
+                    double geolat = geolats[ig];
+                    double eps = epss[ie];
+                    int retc, i;
+
+                    memset(cusp, 0, sizeof(cusp));
+                    memset(cusp_speed, 0, sizeof(cusp_speed));
+                    memset(ascmc, 0, sizeof(ascmc));
+                    memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                    serr[0] = '\0';
+
+                    retc = swe_houses_armc_ex2(armc, geolat, eps, hsys, cusp, ascmc,
+                                                cusp_speed, ascmc_speed, serr);
+                    (void)retc;
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"hsys\": \"%c\", \"armc\": %.20e, \"geolat\": %.20e, \"eps\": %.20e, "
+                           "\"cusps\": [", hsys, armc, geolat, eps);
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                    }
+                    printf("], \"cusp_speed\": [");
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                    }
+                    printf("]}");
+                }
+            }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* --- quad_arith: cusps[1..12] + speeds for O/S/X/M/F --- */
+    printf("  \"quad_arith\": [\n");
+    first = 1;
+    for (is = 0; is < N_QUAD_ARITH; is++) {
+        char hsys = quad_arith_systems[is];
         for (ia = 0; ia < N_ARMC; ia++) {
             for (ig = 0; ig < N_GEOLAT; ig++) {
                 for (ie = 0; ie < N_EPS; ie++) {

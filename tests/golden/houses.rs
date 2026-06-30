@@ -22,9 +22,20 @@ struct EqualFamilyCase {
 }
 
 #[derive(Deserialize)]
+struct QuadArithCase {
+    hsys: String,
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    cusps: [f64; 12],
+    cusp_speed: [f64; 12],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     angles_special: Vec<AnglesSpecialCase>,
     equal_family: Vec<EqualFamilyCase>,
+    quad_arith: Vec<QuadArithCase>,
 }
 
 fn load() -> GoldenData {
@@ -66,6 +77,45 @@ fn angles_special() {
                 &format!("{label_base} ascmc_speed[{j}]"),
                 c.ascmc_speed[j],
                 actual_speed[j],
+            );
+        }
+    }
+}
+
+#[test]
+fn quad_arith() {
+    let data = load();
+    assert_eq!(
+        data.quad_arith.len(),
+        150,
+        "expected 150 golden cases (5 systems x 6 armc x 5 geolat x 1 eps)"
+    );
+    for (i, c) in data.quad_arith.iter().enumerate() {
+        let hsys = parse_hsys(&c.hsys);
+        let result = houses_armc(c.armc, c.geolat, c.eps, hsys, None)
+            .unwrap_or_else(|e| panic!("case {i} ({}): houses_armc failed: {e}", c.hsys));
+
+        // Porphyry cusp speeds are analytical (linear quadrant-rate interpolation);
+        // S/X/M/F use the driver-level finite-difference path, which is not
+        // bitwise-exact against C's central difference.
+        let speed_eps = if c.hsys == "O" { 1e-9 } else { 1e-7 };
+
+        let label_base = format!(
+            "case {i} ({} armc={:.6} geolat={:.6} eps={:.6})",
+            c.hsys, c.armc, c.geolat, c.eps
+        );
+        for h in 1..=12usize {
+            super::assert_f64_eps(
+                &format!("{label_base} cusp[{h}]"),
+                c.cusps[h - 1],
+                result.cusps[h],
+                1e-9,
+            );
+            super::assert_f64_eps(
+                &format!("{label_base} cusp_speed[{h}]"),
+                c.cusp_speed[h - 1],
+                result.cusp_speeds[h],
+                speed_eps,
             );
         }
     }
