@@ -27,6 +27,7 @@ pub mod sweph_file;
 pub use context::{CalcResult, Ephemeris, EphemerisConfig};
 pub use error::Error;
 pub use flags::CalcFlags;
+pub use houses::{AscMc, HouseResult};
 pub use stars::{Star, StarCatalog};
 pub use types::{
     AsteroidId, Body, CalendarType, CometId, DegreeParts, DeltaT, EphemerisSource, Epsilon,

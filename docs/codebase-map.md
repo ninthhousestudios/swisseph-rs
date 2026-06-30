@@ -43,7 +43,9 @@ src/
 │   ├── parse.rs        — binary format parser: Reader cursor, detect_byte_order, parse_file (header + per-planet metadata)
 │   ├── segment.rs      — Chebyshev coefficient unpacking from mmap'd bytes: 6 packing modes (4/3/2/1-byte, nibble, quarter-byte)
 │   └── evaluate.rs     — rot_back (orbital-plane→ecliptic/equatorial transform), evaluate_body (public API: file + body_id + jd → [x,y,z,vx,vy,vz])
-├── houses.rs           — EMPTY stub
+├── houses.rs           — AscMc, HouseResult (public types); houses_armc driver (swe_houses_armc_ex2 port);
+│                          calc_h (CalcH core, Equal-family systems A/D/N/V/W only — others stubbed Err);
+│                          Asc1/Asc2/AscDash core trig, fix_asc_polar, mc_like (shared MC/equasc projection)
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
 ├── heliacal.rs         — EMPTY stub
@@ -68,7 +70,9 @@ tests/
 │   ├── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
 │   ├── se1_header.rs  — golden tests for SE1 file parsing (11 planet metadata fields, byte-order detection on 84 files)
 │   ├── sweph_eval.rs  — golden tests for evaluate_body (80 cases: 10 bodies × 8 epochs, bitwise-exact positions + velocities)
-│   └── jpl_pleph.rs   — golden tests for jpl_pleph (84 cases: 11 bodies × 7 epochs barycentric + 7 geocentric Moon, 1e-9 eps)
+│   ├── jpl_pleph.rs   — golden tests for jpl_pleph (84 cases: 11 bodies × 7 epochs barycentric + 7 geocentric Moon, 1e-9 eps)
+│   └── houses.rs      — golden tests for houses_armc (angles_special: 30 cases system-independent special points;
+│                         equal_family: 150 cases, 5 systems A/D/N/V/W × 30 battery cases; bitwise-exact)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -86,7 +90,8 @@ tests/
 │   ├── se1_header.json — C-generated reference data for SE1 file headers (sepl_18, semo_18)
 │   ├── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
 │   ├── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
-│   └── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
+│   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
+│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -102,7 +107,8 @@ tests/
     ├── gen_sweph_eval.c — C harness to regenerate sweph_eval.json (raw SE1 Chebyshev eval via swed.pldat internals)
     ├── gen_se1_header.c — standalone binary parser, dumps header + planet metadata as JSON
     ├── gen_jpl_pleph.c  — C harness to regenerate jpl_pleph.json (swi_pleph direct calls against de441.eph)
-    └── gen_fixstar.c    — C harness to regenerate fixstar.json (swe_fixstar2: 7 stars × 4 epochs × 7 flags + 4 mag cases)
+    ├── gen_fixstar.c    — C harness to regenerate fixstar.json (swe_fixstar2: 7 stars × 4 epochs × 7 flags + 4 mag cases)
+    └── gen_houses.c     — C harness to regenerate houses.json (swe_houses_armc_ex2: angles_special + equal_family)
 ```
 
 ## Key Types in types.rs

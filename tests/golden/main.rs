@@ -8,6 +8,7 @@ mod date;
 mod deltat;
 mod fixstar;
 mod fixstar_ayanamsa;
+mod houses;
 mod jpl_header;
 mod jpl_pleph;
 mod math;
