@@ -306,7 +306,7 @@ pub(crate) const AYANAMSA: [AyaInit; 47] = [
 // ---------------------------------------------------------------------------
 // Fixed-star ayanamsa indices: require star catalog, deferred.
 // ---------------------------------------------------------------------------
-const FIXED_STAR_INDICES: [usize; 12] = [17, 27, 28, 29, 30, 31, 32, 33, 35, 36, 39, 40];
+pub(crate) const FIXED_STAR_INDICES: [usize; 12] = [17, 27, 28, 29, 30, 31, 32, 33, 35, 36, 39, 40];
 
 fn sidereal_index(config: &EphemerisConfig) -> usize {
     match config.sidereal_mode {

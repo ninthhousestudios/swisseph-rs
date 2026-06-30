@@ -369,6 +369,20 @@ pub fn poly_eval(coeffs: &[f64], x: f64) -> f64 {
     coeffs.iter().rev().fold(0.0, |acc, &c| acc * x + c)
 }
 
+/// Convert ARMC (RA of Midheaven, degrees) to MC ecliptic longitude (degrees).
+/// Port of `swi_armc_to_mc` (swehouse.c:872–888).
+pub fn armc_to_mc(armc_deg: f64, eps_deg: f64) -> f64 {
+    let armc_rad = armc_deg.to_radians();
+    let mut mc = armc_rad
+        .tan()
+        .atan2(eps_deg.to_radians().cos())
+        .to_degrees();
+    if armc_deg > 90.0 && armc_deg <= 270.0 {
+        mc += 180.0;
+    }
+    normalize_degrees(mc)
+}
+
 // ---------------------------------------------------------------------------
 // Owen 1990 shared utilities
 // ---------------------------------------------------------------------------

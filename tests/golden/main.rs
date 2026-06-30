@@ -7,6 +7,7 @@ mod corrections;
 mod date;
 mod deltat;
 mod fixstar;
+mod fixstar_ayanamsa;
 mod jpl_header;
 mod jpl_pleph;
 mod math;

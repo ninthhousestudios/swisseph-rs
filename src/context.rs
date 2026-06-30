@@ -208,6 +208,19 @@ impl Ephemeris {
 
     /// Ayanamsa at `jd_tt` (TT), with nutation added unless `NONUT` is set.
     pub fn get_ayanamsa_ex(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error> {
+        let idx = self
+            .config
+            .sidereal_mode
+            .map(|m| m as i32 as usize)
+            .unwrap_or(0);
+        if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
+            let (daya, _) = self.fixstar_ayanamsa(jd_tt, flags)?;
+            if !flags.contains(CalcFlags::NONUT) {
+                let dpsi = crate::nutation::nutation(jd_tt, flags, &self.config.astro_models).dpsi;
+                return Ok(daya + dpsi * crate::constants::RADTODEG);
+            }
+            return Ok(daya);
+        }
         crate::ayanamsa::get_ayanamsa_ex_nut(&self.config, jd_tt, flags, &self.config.astro_models)
     }
 
@@ -518,9 +531,19 @@ impl Ephemeris {
             // Leave equatorial [12..24] untouched (matches C Branch 2)
         } else {
             // Default branch: ayanamsa subtraction on ecliptic polar
-            let daya =
-                crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd_tt, flags, models)?;
-            crate::calc::apply_sidereal_default(xreturn, daya, has_speed);
+            let idx = self
+                .config
+                .sidereal_mode
+                .map(|m| m as i32 as usize)
+                .unwrap_or(0);
+            let (daya_val, daya_sp) = if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
+                self.fixstar_ayanamsa(jd_tt, flags)?
+            } else {
+                let a =
+                    crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd_tt, flags, models)?;
+                (a[0], a[1])
+            };
+            crate::calc::apply_sidereal_default(xreturn, [daya_val, daya_sp], has_speed);
         }
 
         Ok(())
@@ -802,10 +825,20 @@ impl Ephemeris {
             } else {
                 // Default: subtract ayanamsa from ecliptic (or equatorial) longitude.
                 x = cartesian_to_polar_with_speed(x);
-                let daya =
-                    crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd, iflag, models)?;
-                x[0] -= daya[0] * DEGTORAD;
-                x[3] -= daya[1] * DEGTORAD;
+                let idx = self
+                    .config
+                    .sidereal_mode
+                    .map(|m| m as i32 as usize)
+                    .unwrap_or(0);
+                let (daya_val, daya_sp) = if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
+                    self.fixstar_ayanamsa(jd, iflag)?
+                } else {
+                    let a =
+                        crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd, iflag, models)?;
+                    (a[0], a[1])
+                };
+                x[0] -= daya_val * DEGTORAD;
+                x[3] -= daya_sp * DEGTORAD;
                 x = polar_to_cartesian_with_speed(x);
             }
         }
@@ -831,6 +864,109 @@ impl Ephemeris {
         }
 
         Ok(x)
+    }
+
+    // -----------------------------------------------------------------------
+    // Fixed-star ayanamsa (port of swi_get_ayanamsa_ex fixed-star branches)
+    // -----------------------------------------------------------------------
+
+    /// Ayanamsa value (degrees) for one of the 12 fixed-star modes at `jd_tt`.
+    /// Mirrors C's early-return block in `swi_get_ayanamsa_ex` (sweph.c:3049–3142).
+    /// Does NOT add nutation; caller adds it when appropriate.
+    fn fixstar_ayanamsa_single(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error> {
+        use crate::math::{armc_to_mc, normalize_degrees};
+
+        // Flag construction mirrors C's swi_get_ayanamsa_ex entry (sweph.c:3007–3028).
+        let ephmask = CalcFlags::JPLEPH | CalcFlags::SWIEPH | CalcFlags::MOSEPH;
+        let epheflag = flags & ephmask;
+        let iflag_base = epheflag | CalcFlags::NONUT;
+        let iflag_galequ = iflag_base | CalcFlags::TRUEPOS;
+        let mut iflag_true = iflag_base;
+        if flags.contains(CalcFlags::TRUEPOS) {
+            iflag_true |= CalcFlags::TRUEPOS;
+        }
+        if flags.contains(CalcFlags::NOABERR) {
+            iflag_true |= CalcFlags::NOABERR;
+        }
+        if flags.contains(CalcFlags::NOGDEFL) {
+            iflag_true |= CalcFlags::NOGDEFL;
+        }
+
+        let idx = self
+            .config
+            .sidereal_mode
+            .map(|m| m as i32 as usize)
+            .unwrap_or(0);
+
+        let daya = match idx {
+            17 => {
+                let (_, r) = self.fixstar2(",SgrA*", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 240.0)
+            }
+            27 => {
+                let (_, r) = self.fixstar2("Spica", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 180.0)
+            }
+            28 => {
+                let (_, r) = self.fixstar2(",zePsc", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 359.833_333_333_3)
+            }
+            29 => {
+                let (_, r) = self.fixstar2(",deCnc", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 106.0)
+            }
+            30 => {
+                let (_, r) = self.fixstar2(",SgrA*", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 210.0 - 90.0 * 0.381_966_011_3)
+            }
+            31 => {
+                let (_, r) = self.fixstar2(",GP1958", jd_tt, iflag_galequ)?;
+                normalize_degrees(r.data[0] - 150.0)
+            }
+            32 => {
+                let (_, r) = self.fixstar2(",GPol", jd_tt, iflag_galequ)?;
+                normalize_degrees(r.data[0] - 150.0)
+            }
+            33 => {
+                let (_, r) = self.fixstar2(",GPol", jd_tt, iflag_galequ)?;
+                normalize_degrees(r.data[0] - 150.0 - 6.666_666_666_7)
+            }
+            35 => {
+                let (_, r) = self.fixstar2(",laSco", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 240.0)
+            }
+            36 => {
+                // GALCENT_MULA_WILHELM: SgrA* in equatorial, project RA → MC longitude.
+                // obliquity uses iflag_base (= ephe|NONUT), matching C's `iflag` at that point.
+                let (_, r) = self.fixstar2(",SgrA*", jd_tt, iflag_true | CalcFlags::EQUATORIAL)?;
+                let ra = r.data[0];
+                let eps_deg =
+                    crate::obliquity::obliquity(jd_tt, iflag_base, &self.config.astro_models)
+                        .eps
+                        .to_degrees();
+                normalize_degrees(armc_to_mc(ra, eps_deg) - 246.666_666_666_7)
+            }
+            39 => {
+                let (_, r) = self.fixstar2(",deCnc", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 103.492_642_216_25)
+            }
+            40 => {
+                let (_, r) = self.fixstar2(",SgrA*", jd_tt, iflag_true)?;
+                normalize_degrees(r.data[0] - 270.0)
+            }
+            _ => unreachable!("fixstar_ayanamsa_single: non-fixed-star index {idx}"),
+        };
+
+        Ok(daya)
+    }
+
+    /// Returns `(ayanamsa_deg, speed_deg_per_day)` for fixed-star ayanamsa modes.
+    /// Speed via two-point derivative (matches C's `swi_get_ayanamsa_with_speed` pattern).
+    fn fixstar_ayanamsa(&self, jd_tt: f64, flags: CalcFlags) -> Result<(f64, f64), Error> {
+        const TINTV: f64 = 0.001;
+        let d0 = self.fixstar_ayanamsa_single(jd_tt, flags)?;
+        let d2 = self.fixstar_ayanamsa_single(jd_tt - TINTV, flags)?;
+        Ok((d0, (d0 - d2) / TINTV))
     }
 
     fn build_leap_seconds(config: &EphemerisConfig) -> crate::Result<Vec<i32>> {

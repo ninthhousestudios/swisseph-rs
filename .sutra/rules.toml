@@ -183,53 +183,53 @@ provenance = "checkpoint:swisseph-rs/8"
 # severity = "blocking"
 # provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:stars→moshier"
-# from = "src/stars.rs"
-# to = "src/moshier/**"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:stars→moshier"
+from = "src/stars.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:stars→jpl"
-# from = "src/stars.rs"
-# to = "src/jpl.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:stars→jpl"
+from = "src/stars.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:stars→sweph"
-# from = "src/stars.rs"
-# to = "src/sweph_file.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:stars→sweph"
+from = "src/stars.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:ayanamsa→moshier"
-# from = "src/ayanamsa.rs"
-# to = "src/moshier/**"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:ayanamsa→moshier"
+from = "src/ayanamsa.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:ayanamsa→jpl"
-# from = "src/ayanamsa.rs"
-# to = "src/jpl.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:ayanamsa→jpl"
+from = "src/ayanamsa.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:ayanamsa→sweph"
-# from = "src/ayanamsa.rs"
-# to = "src/sweph_file.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:ayanamsa→sweph"
+from = "src/ayanamsa.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
 # TRIGGER: at Phase 8+ (first application module implementation)
 # Application modules are independent of each other
