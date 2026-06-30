@@ -12,11 +12,11 @@ src/
 ├── corrections.rs      — relativistic corrections: meff (lookup), aberr_light (Lorentz), deflect_light (GR bending)
 ├── flags.rs            — bitflags! structs: CalcFlags, SiderealBits, etc. (146 lines)
 ├── error.rs            — Error enum
-├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body), EphemerisConfig, CalcResult
+├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_ut, fixstar2_mag, calc_fixstar), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
 ├── math.rs             — pure math functions: normalize, chebyshev, cartpol, cotrans, poly_eval
 ├── date.rs             — Julian Day ↔ calendar conversion, delta-T, UTC
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
-├── bias.rs             — swi_bias port: GCRS↔J2000 frame rotation
+├── bias.rs             — swi_bias port: GCRS↔J2000 frame rotation; icrs2fk5 (RB matrix), fk4_fk5 (B1950 RA correction)
 ├── precession.rs       — swi_precess port: 3 algorithm families, 11 models, JPLHOR paths
 ├── deltat/
 │   ├── mod.rs          — calc_deltat dispatcher, 5 historical models, Bessel interpolation, future extrapolation, tidal correction
@@ -48,7 +48,7 @@ src/
 ├── ayanamsa.rs         — EMPTY stub
 ├── heliacal.rs         — EMPTY stub
 ├── phenomena.rs        — EMPTY stub
-└── stars.rs            — EMPTY stub
+└── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
 
 tests/
 ├── golden/
@@ -85,7 +85,8 @@ tests/
 │   ├── moshier_planet.json — C-generated reference data for moshplan2
 │   ├── se1_header.json — C-generated reference data for SE1 file headers (sepl_18, semo_18)
 │   ├── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
-│   └── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
+│   ├── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
+│   └── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -100,7 +101,8 @@ tests/
     ├── gen_moshier_planet.c — C harness to regenerate moshier_planet.json
     ├── gen_sweph_eval.c — C harness to regenerate sweph_eval.json (raw SE1 Chebyshev eval via swed.pldat internals)
     ├── gen_se1_header.c — standalone binary parser, dumps header + planet metadata as JSON
-    └── gen_jpl_pleph.c  — C harness to regenerate jpl_pleph.json (swi_pleph direct calls against de441.eph)
+    ├── gen_jpl_pleph.c  — C harness to regenerate jpl_pleph.json (swi_pleph direct calls against de441.eph)
+    └── gen_fixstar.c    — C harness to regenerate fixstar.json (swe_fixstar2: 7 stars × 4 epochs × 7 flags + 4 mag cases)
 ```
 
 ## Key Types in types.rs
