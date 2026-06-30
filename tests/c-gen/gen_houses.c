@@ -37,6 +37,14 @@ static char iterative_systems[] = { 'P', 'K' };
 static char closed_form_misc_systems[] = { 'U', 'Y', 'L', 'Q' };
 #define N_CLOSED_FORM_MISC (sizeof(closed_form_misc_systems) / sizeof(closed_form_misc_systems[0]))
 
+static char sunshine_systems[] = { 'I', 'i' };
+#define N_SUNSHINE (sizeof(sunshine_systems) / sizeof(sunshine_systems[0]))
+
+/* Sun declinations spanning the year, one assigned per (armc, geolat) case (rotated) rather
+ * than full cross-product, to bound case count to N_SUNSHINE * N_ARMC * N_GEOLAT = 60. */
+static double sundecs[] = { -23.0, -10.0, 0.0, 10.0, 23.0 };
+#define N_SUNDEC (sizeof(sundecs) / sizeof(sundecs[0]))
+
 /* Polar-circle geolats, added to this task's battery only, to exercise the Placidus/Koch/
  * Gauquelin Porphyry fallback (|fi| >= 90-eps, eps=23.4392911 => cutoff ~66.56 deg). */
 static double polar_geolats[] = { 51.5, -33.87, 0.0, 64.0, -64.0, 78.0, -78.0 };
@@ -323,6 +331,49 @@ int main(void) {
                     }
                     printf("]}");
                 }
+            }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* --- sunshine: cusps[1..12] + speeds for I/i, across a battery of Sun declinations.
+     * ascmc[9] must be set BEFORE calling swe_houses_armc_ex2 -- that is how the ARMC-based
+     * entry point receives Sun declination (c-ref-houses.md S11). */
+    printf("  \"sunshine\": [\n");
+    first = 1;
+    for (is = 0; is < N_SUNSHINE; is++) {
+        char hsys = sunshine_systems[is];
+        for (ia = 0; ia < N_ARMC; ia++) {
+            for (ig = 0; ig < N_GEOLAT; ig++) {
+                double armc = armcs[ia];
+                double geolat = geolats[ig];
+                double eps = epss[0];
+                double sundec = sundecs[(ia * N_GEOLAT + ig) % N_SUNDEC];
+                int retc, i;
+
+                memset(cusp, 0, sizeof(cusp));
+                memset(cusp_speed, 0, sizeof(cusp_speed));
+                memset(ascmc, 0, sizeof(ascmc));
+                memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                serr[0] = '\0';
+                ascmc[9] = sundec;
+
+                retc = swe_houses_armc_ex2(armc, geolat, eps, hsys, cusp, ascmc,
+                                            cusp_speed, ascmc_speed, serr);
+                (void)retc;
+
+                if (!first) printf(",\n");
+                first = 0;
+                printf("    {\"hsys\": \"%c\", \"armc\": %.20e, \"geolat\": %.20e, \"eps\": %.20e, "
+                       "\"sundec\": %.20e, \"cusps\": [", hsys, armc, geolat, eps, sundec);
+                for (i = 1; i <= 12; i++) {
+                    printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                }
+                printf("], \"cusp_speed\": [");
+                for (i = 1; i <= 12; i++) {
+                    printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                }
+                printf("]}");
             }
         }
     }

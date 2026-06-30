@@ -72,6 +72,17 @@ struct ClosedFormMiscCase {
 }
 
 #[derive(Deserialize)]
+struct SunshineCase {
+    hsys: String,
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    sundec: f64,
+    cusps: [f64; 12],
+    cusp_speed: [f64; 12],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     angles_special: Vec<AnglesSpecialCase>,
     equal_family: Vec<EqualFamilyCase>,
@@ -80,6 +91,7 @@ struct GoldenData {
     iterative: Vec<IterativeCase>,
     gauquelin36: Vec<Gauquelin36Case>,
     closed_form_misc: Vec<ClosedFormMiscCase>,
+    sunshine: Vec<SunshineCase>,
 }
 
 fn load() -> GoldenData {
@@ -333,4 +345,49 @@ fn closed_form_misc() {
             );
         }
     }
+}
+
+#[test]
+fn sunshine() {
+    let data = load();
+    assert_eq!(
+        data.sunshine.len(),
+        60,
+        "expected 60 golden cases (2 systems x 6 armc x 5 geolat, 1 sundec per case)"
+    );
+    for (i, c) in data.sunshine.iter().enumerate() {
+        let hsys = parse_hsys(&c.hsys);
+        let result = houses_armc(c.armc, c.geolat, c.eps, hsys, Some(c.sundec))
+            .unwrap_or_else(|e| panic!("case {i} ({}): houses_armc failed: {e}", c.hsys));
+
+        let label_base = format!(
+            "case {i} ({} armc={:.6} geolat={:.6} eps={:.6} sundec={:.6})",
+            c.hsys, c.armc, c.geolat, c.eps, c.sundec
+        );
+        // Sunshine is closed-form per house (Treindl directly, Makransky via a quadrant case
+        // split); Makransky's case split may need the looser tolerance.
+        let cusp_eps = if c.hsys == "i" { 1e-8 } else { 1e-9 };
+        for h in 1..=12usize {
+            super::assert_f64_eps(
+                &format!("{label_base} cusp[{h}]"),
+                c.cusps[h - 1],
+                result.cusps[h],
+                cusp_eps,
+            );
+            // I/i use the driver-level finite-difference cusp speed path (do_interpol).
+            super::assert_f64_eps(
+                &format!("{label_base} cusp_speed[{h}]"),
+                c.cusp_speed[h - 1],
+                result.cusp_speeds[h],
+                1e-7,
+            );
+        }
+    }
+}
+
+#[test]
+fn sunshine_requires_sundec() {
+    let err = houses_armc(0.0, 51.5, 23.4392911, HouseSystem::Sunshine, None)
+        .expect_err("Sunshine without sundec must error");
+    assert!(matches!(err, swisseph::error::Error::CError(_)));
 }

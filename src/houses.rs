@@ -41,6 +41,10 @@ fn asind(x: f64) -> f64 {
     x.asin() * crate::constants::RADTODEG
 }
 
+fn acosd(x: f64) -> f64 {
+    x.acos() * crate::constants::RADTODEG
+}
+
 // ---------------------------------------------------------------------------
 // Public output types
 // ---------------------------------------------------------------------------
@@ -342,6 +346,216 @@ fn placidus_newton_cusp(
     NewtonCusp::NonConverged
 }
 
+/// Ascensional-difference setup shared by both Sunshine solutions. Port of `sunshine_init`
+/// (swehouse.c:2878-2904). `xh[1,4,7,10]` (cardinal cusps) are left at `0.0` — those are filled
+/// separately by the I/i dispatcher. Returns `(xh, ok)`; `ok=false` means the Sun is exactly
+/// circumpolar at this lat/dec (`|arg|>=1`).
+fn sunshine_init(lat: f64, dec: f64) -> ([f64; 13], bool) {
+    let arg = tand(dec) * tand(lat);
+    let ad = if arg >= 1.0 {
+        90.0 - VERY_SMALL
+    } else if arg <= -1.0 {
+        -90.0 + VERY_SMALL
+    } else {
+        asind(arg)
+    };
+    let nsa = 90.0 - ad;
+    let dsa = 90.0 + ad;
+    let mut xh = [0.0; 13];
+    xh[2] = -2.0 * nsa / 3.0;
+    xh[3] = -nsa / 3.0;
+    xh[5] = nsa / 3.0;
+    xh[6] = 2.0 * nsa / 3.0;
+    xh[8] = -2.0 * dsa / 3.0;
+    xh[9] = -dsa / 3.0;
+    xh[11] = dsa / 3.0;
+    xh[12] = 2.0 * dsa / 3.0;
+    (xh, arg.abs() < 1.0)
+}
+
+/// Sunshine houses, Makransky solution (`'i'`). Port of `sunshine_solution_makransky`
+/// (swehouse.c:2906-3046) — read directly from C, not from the ref doc abstraction, per the
+/// sub-task's escape hatch: this is the most structurally intricate function in the file. The
+/// 4-to-8-way case split on the quadrant of `w` and the sign of `z-90` is ported verbatim,
+/// including the C author's own uncertainty about the `z>90` remap (their comment is preserved
+/// below). Returns `false` (ERR) if the Sun is exactly circumpolar at this lat/dec.
+fn sunshine_solution_makransky(
+    th: f64,
+    fi: f64,
+    ekl: f64,
+    dec: f64,
+    cusps: &mut [f64; 37],
+) -> bool {
+    let (xh, ok) = sunshine_init(fi, dec);
+    if !ok {
+        return false;
+    }
+    let sinlat = sind(fi);
+    let coslat = cosd(fi);
+    let tanlat = tand(fi);
+    let tandec = tand(dec);
+    let sinecl = sind(ekl);
+
+    for ih in 1..=12usize {
+        if (ih - 1) % 3 == 0 {
+            continue; // skip 1, 4, 7, 10
+        }
+        let md = xh[ih].abs();
+        let mut rah = if ih <= 6 {
+            normalize_degrees(th + 180.0 + xh[ih])
+        } else {
+            normalize_degrees(th + xh[ih])
+        };
+        if fi < 0.0 {
+            // Makransky deals with southern latitude this way.
+            rah = normalize_degrees(180.0 + rah);
+        }
+        let zd = if md == 90.0 {
+            90.0 - atand(sinlat * tandec)
+        } else {
+            let a = if md < 90.0 {
+                atand(coslat * tand(md))
+            } else {
+                atand(tand(md - 90.0) / coslat)
+            };
+            let b = atand(tanlat * cosd(md));
+            let c = if ih <= 6 { b + dec } else { b - dec };
+            let f = atand(sinlat * sind(md) * tand(c));
+            a + f
+        };
+        let pole = asind(sind(zd) * sinlat);
+        let q = asind(tandec * tand(pole));
+        let in_dc_quadrant = ih <= 3 || ih >= 11;
+        let w = if in_dc_quadrant {
+            normalize_degrees(rah - q)
+        } else {
+            normalize_degrees(rah + q)
+        };
+
+        let cu = if w == 90.0 {
+            let r = atand(sind(ekl) * tand(pole));
+            if in_dc_quadrant { 90.0 + r } else { 90.0 - r }
+        } else if w == 270.0 {
+            let r = atand(sinecl * tand(pole));
+            if in_dc_quadrant { 270.0 - r } else { 270.0 + r }
+        } else {
+            let m = atand((tand(pole) / cosd(w)).abs());
+            let z = if in_dc_quadrant {
+                if w > 90.0 && w < 270.0 {
+                    m - ekl
+                } else {
+                    m + ekl
+                }
+            } else if w > 90.0 && w < 270.0 {
+                m + ekl
+            } else {
+                m - ekl
+            };
+            let mut r = 0.0;
+            let mut cu = if z == 90.0 {
+                if w < 180.0 { 90.0 } else { 270.0 }
+            } else {
+                r = atand((cosd(m) * tand(w) / cosd(z)).abs());
+                if w < 90.0 {
+                    r
+                } else if w > 90.0 && w < 180.0 {
+                    180.0 - r
+                } else if w > 180.0 && w < 270.0 {
+                    180.0 + r
+                } else {
+                    360.0 - r
+                }
+            };
+            if z > 90.0 {
+                // "I am not sure if I understood the remark 'value will fall away from
+                // cancer..' on page 146 correctly." — C author's comment, swehouse.c:3037.
+                // Replicated verbatim, not "fixed".
+                cu = if w < 90.0 {
+                    180.0 - r
+                } else if w > 90.0 && w < 180.0 {
+                    r
+                } else if w > 180.0 && w < 270.0 {
+                    360.0 - r
+                } else {
+                    180.0 + r
+                };
+            }
+            if fi < 0.0 {
+                // Makransky deals with southern latitude this way. Note: unlike the rah
+                // adjustment above, this only applies in the general (w != 90, 270) branch.
+                cu = normalize_degrees(cu + 180.0);
+            }
+            cu
+        };
+        cusps[ih] = cu;
+    }
+    true
+}
+
+/// Sunshine houses, Treindl solution (`'I'`). Port of `sunshine_solution_treindl`
+/// (swehouse.c:3048-3143). `SUNSHINE_KEEP_MC_SOUTH` is `#define`d to `0` in C (a compile-time
+/// switch always built with the `0` branch) — only that behavior (MC kept north) is ported; the
+/// dead `1` branch (negating `xh[2..12]`) is omitted. `sunshine_init`'s `ok=false` return is
+/// ignored here (unlike Makransky, which short-circuits on it) — Treindl proceeds with the
+/// clamped `±(90-VERY_SMALL)` ascensional difference even when the Sun is exactly circumpolar.
+/// Returns `false` if any house hit the `c<1e-6` degeneracy; cusps are still filled in that case
+/// (the C loop does not early-return) but the caller discards them and falls back to Porphyry,
+/// matching the shared `retc==ERR` check in the `'I'`/`'i'` dispatcher (swehouse.c:1176-1180).
+fn sunshine_solution_treindl(th: f64, fi: f64, ekl: f64, dec: f64, cusps: &mut [f64; 37]) -> bool {
+    let (xh, _) = sunshine_init(fi, dec);
+    let sinlat = sind(fi);
+    let coslat = cosd(fi);
+    let cosdec = cosd(dec);
+    let tandec = tand(dec);
+    let sinecl = sind(ekl);
+    let cosecl = cosd(ekl);
+
+    let mcdec = atand(sind(th) * tand(ekl));
+    let mc_under_horizon = (fi - mcdec).abs() > 90.0;
+
+    let mut ok = true;
+    for ih in 1..=12usize {
+        if (ih - 1) % 3 == 0 {
+            continue; // skip 1, 4, 7, 10
+        }
+        let xhs = 2.0 * asind(cosdec * sind(xh[ih] / 2.0));
+        let cosa = tandec * tand(xhs / 2.0);
+        let alph = acosd(cosa);
+        let (alpha2, b) = if ih > 7 {
+            (180.0 - alph, 90.0 - fi + dec) // diurnal side
+        } else {
+            (alph, 90.0 - fi - dec) // nocturnal side
+        };
+        let cosc = cosd(xhs) * cosd(b) + sind(xhs) * sind(b) * cosd(alpha2);
+        let c = acosd(cosc);
+        if c < 1e-6 {
+            ok = false;
+        }
+        let sinzd = sind(xhs) * sind(alpha2) / sind(c);
+        let zd = asind(sinzd);
+        let rax = atand(coslat * tand(zd));
+        let mut pole = asind(sinzd * sinlat);
+        let a = if ih <= 6 {
+            pole = -pole;
+            normalize_degrees(rax + th + 180.0)
+        } else {
+            normalize_degrees(th + rax)
+        };
+        cusps[ih] = asc1(a, pole, sinecl, cosecl);
+    }
+    // `mc_under_horizon && !SUNSHINE_KEEP_MC_SOUTH` simplifies to `mc_under_horizon`, since the
+    // compile-time constant is always 0 in C.
+    if mc_under_horizon {
+        for (ih, cs) in cusps.iter_mut().enumerate().take(13).skip(1) {
+            if (ih - 1) % 3 == 0 {
+                continue;
+            }
+            *cs = normalize_degrees(*cs + 180.0);
+        }
+    }
+    ok
+}
+
 // ---------------------------------------------------------------------------
 // CalcH — THE CORE (swehouse.c:892-2050)
 // ---------------------------------------------------------------------------
@@ -362,9 +576,6 @@ fn calc_h(
     sundec: Option<f64>,
     do_speed: bool,
 ) -> Result<CalcH, Error> {
-    // Consumed by the Sunshine ('I'/'i') branch, added in a later sub-task.
-    let _ = sundec;
-
     let th = armc;
     let cose = cosd(eps);
     let sine = sind(eps);
@@ -1052,6 +1263,55 @@ fn calc_h(
             // Y fills all 12 cusps itself via independent geometry — excluded from the
             // post-switch opposite-cusp mirror (swehouse.c:1985-2000, §3 step 3).
             skip_mirror = true;
+        }
+        HouseSystem::Sunshine | HouseSystem::SunshineAlt => {
+            // I / i — Sunshine houses, Treindl / Makransky (swehouse.c:1156-1181). Stateless:
+            // sundec is a required explicit parameter, not the C `static saved_sundec` cache
+            // (c-ref-houses.md §11) — no global state, no `ascmc[9]==99` sentinel.
+            let dec = match sundec {
+                Some(d) if (-24.0..=24.0).contains(&d) => d,
+                _ => {
+                    return Err(Error::CError(
+                        "House system Sunshine needs valid Sun declination".into(),
+                    ));
+                }
+            };
+            let acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                cusps[1] = ac;
+                if hsys == HouseSystem::Sunshine {
+                    mc = normalize_degrees(mc + 180.0);
+                    cusps[10] = mc;
+                }
+            }
+            cusps[4] = normalize_degrees(cusps[10] + 180.0);
+            cusps[7] = normalize_degrees(cusps[1] + 180.0);
+            let ok = if hsys == HouseSystem::Sunshine {
+                sunshine_solution_treindl(th, geolat, eps, dec, &mut cusps)
+            } else {
+                sunshine_solution_makransky(th, geolat, eps, dec, &mut cusps)
+            };
+            if ok {
+                do_interpol = do_speed;
+                // I/i fill all 12 cusps themselves via independent geometry — excluded from
+                // the post-switch opposite-cusp mirror (swehouse.c:1985-2000, §3 step 3).
+                skip_mirror = true;
+            } else {
+                // retc==ERR (c-1e-6 degeneracy for Treindl, circumpolar Sun for Makransky):
+                // fall back to Porphyry. `hsy` becomes 'O' in C, so the post-switch mirror
+                // DOES run on this path (skip_mirror stays false) — fill_porphyry only fills
+                // cusps[1,2,3,10,11,12]; the mirror fills [4,5,6,7,8,9].
+                ac = fill_porphyry(
+                    &mut cusps,
+                    &mut cusp_speeds,
+                    ac,
+                    mc,
+                    ac_speed,
+                    mc_speed,
+                    do_speed,
+                );
+            }
         }
         _ => {
             return Err(Error::CError(format!(
