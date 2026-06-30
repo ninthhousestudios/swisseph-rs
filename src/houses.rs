@@ -473,21 +473,26 @@ pub fn houses_armc(
     if h.do_interpol {
         let dt = 1.0 / 86400.0;
         let darmc = dt * ARMCS;
-        let hm = calc_h(armc - darmc, geolat, eps, hsys, sundec, false)?;
-        let hp = calc_h(armc + darmc, geolat, eps, hsys, sundec, false)?;
+        let hm = calc_h(armc - darmc, geolat, eps, hsys, sundec, false);
+        let hp = calc_h(armc + darmc, geolat, eps, hsys, sundec, false);
 
-        let mut dt = dt;
-        let mut hm_cusps = hm.cusps;
-        let mut hp_cusps = hp.cusps;
-        if diff_degrees(hp.ascmc.ascendant, h.ascmc.ascendant).abs() > 90.0 {
-            hp_cusps = h.cusps;
-            dt /= 2.0;
-        } else if diff_degrees(hm.ascmc.ascendant, h.ascmc.ascendant).abs() > 90.0 {
-            hm_cusps = h.cusps;
-            dt /= 2.0;
-        }
-        for i in 1..=12usize {
-            cusp_speeds[i] = diff_degrees(hp_cusps[i], hm_cusps[i]) / 2.0 / dt;
+        // Matches swe_houses_armc_ex2 (swehouse.c:704-716): if either side probe
+        // fails to converge, keep the already-computed main cusp_speeds instead
+        // of propagating the error.
+        if let (Ok(hm), Ok(hp)) = (hm, hp) {
+            let mut dt = dt;
+            let mut hm_cusps = hm.cusps;
+            let mut hp_cusps = hp.cusps;
+            if diff_degrees(hp.ascmc.ascendant, h.ascmc.ascendant).abs() > 90.0 {
+                hp_cusps = h.cusps;
+                dt /= 2.0;
+            } else if diff_degrees(hm.ascmc.ascendant, h.ascmc.ascendant).abs() > 90.0 {
+                hm_cusps = h.cusps;
+                dt /= 2.0;
+            }
+            for i in 1..=12usize {
+                cusp_speeds[i] = diff_degrees(hp_cusps[i], hm_cusps[i]) / 2.0 / dt;
+            }
         }
     }
 
