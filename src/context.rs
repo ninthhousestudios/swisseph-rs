@@ -602,14 +602,139 @@ impl Ephemeris {
         Ok((name, resolved.mag))
     }
 
-    /// Core fixed-star position pipeline (port of `fixstar_calc_from_struct`).
-    /// Always computes speed internally; zeros it in the output if the caller
-    /// did not request `SPEED`.
+    /// Dispatcher: routes fixed-star computation to the correct backend.
     fn calc_fixstar(
         &self,
         star: &crate::stars::Star,
         jd: f64,
         flags: CalcFlags,
+    ) -> Result<[f64; 6], Error> {
+        match self.config.ephemeris_source {
+            crate::types::EphemerisSource::Swiss => self.calc_fixstar_sweph(star, jd, flags),
+            crate::types::EphemerisSource::Jpl => self.calc_fixstar_jpl(star, jd, flags),
+            crate::types::EphemerisSource::Moshier => self.calc_fixstar_moshier(star, jd, flags),
+        }
+    }
+
+    /// Moshier backend: computes heliocentric Earth via Moshier pipeline.
+    fn calc_fixstar_moshier(
+        &self,
+        star: &crate::stars::Star,
+        jd: f64,
+        flags: CalcFlags,
+    ) -> Result<[f64; 6], Error> {
+        use crate::constants::{FIXSTAR_DT, J2000};
+        use crate::obliquity::obliquity;
+
+        let models = &self.config.astro_models;
+        // Moshier returns heliocentric Earth, matching C's xearth for MOSEPH.
+        let eps_j2000 = obliquity(J2000, CalcFlags::empty(), models);
+        let pp =
+            crate::moshier::backend::compute_pipeline(jd, crate::types::Body::Sun, &eps_j2000)?;
+        let xobs = pp.earth_helio;
+        let pp_dt = crate::moshier::backend::compute_pipeline(
+            jd - FIXSTAR_DT,
+            crate::types::Body::Sun,
+            &eps_j2000,
+        )?;
+        let xobs_dt = pp_dt.earth_helio;
+        // Moshier is heliocentric; Sun is at the origin, so sun_bary = 0.
+        let sun_bary = [0.0f64; 6];
+        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
+    }
+
+    /// SWIEPH backend: barycentric Earth for parallax/aberration, sun_bary for deflection.
+    fn calc_fixstar_sweph(
+        &self,
+        star: &crate::stars::Star,
+        jd: f64,
+        flags: CalcFlags,
+    ) -> Result<[f64; 6], Error> {
+        use crate::calc::{find_file_or_nearest, sweph_positions};
+        use crate::constants::FIXSTAR_DT;
+        use crate::sweph_file::types::{SEI_EMB, SEI_MOON};
+
+        let planet_file = find_file_or_nearest(&self.planet_files, SEI_EMB, jd).ok_or(
+            Error::BeyondEphemerisLimits {
+                jd_tt: jd,
+                start: 0.0,
+                end: 0.0,
+            },
+        )?;
+        let moon_file = find_file_or_nearest(&self.moon_files, SEI_MOON, jd).ok_or(
+            Error::BeyondEphemerisLimits {
+                jd_tt: jd,
+                start: 0.0,
+                end: 0.0,
+            },
+        )?;
+        let pp = sweph_positions(planet_file, moon_file, SEI_EMB, jd, true)?;
+        // C uses barycentric Earth (xearth) for parallax and aberration.
+        let xobs = pp.earth_bary;
+        let sun_bary = pp.sun_bary;
+
+        let jd_dt = jd - FIXSTAR_DT;
+        let planet_file_dt = find_file_or_nearest(&self.planet_files, SEI_EMB, jd_dt).ok_or(
+            Error::BeyondEphemerisLimits {
+                jd_tt: jd_dt,
+                start: 0.0,
+                end: 0.0,
+            },
+        )?;
+        let moon_file_dt = find_file_or_nearest(&self.moon_files, SEI_MOON, jd_dt).ok_or(
+            Error::BeyondEphemerisLimits {
+                jd_tt: jd_dt,
+                start: 0.0,
+                end: 0.0,
+            },
+        )?;
+        let pp_dt = sweph_positions(planet_file_dt, moon_file_dt, SEI_EMB, jd_dt, true)?;
+        let xobs_dt = pp_dt.earth_bary;
+
+        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
+    }
+
+    /// JPL backend: barycentric Earth for parallax/aberration, sun_bary for deflection.
+    fn calc_fixstar_jpl(
+        &self,
+        star: &crate::stars::Star,
+        jd: f64,
+        flags: CalcFlags,
+    ) -> Result<[f64; 6], Error> {
+        use crate::constants::FIXSTAR_DT;
+        use crate::jpl::{J_EARTH, J_SBARY, J_SUN, jpl_pleph};
+
+        let file = self.jpl_file.as_ref().ok_or(Error::EphemerisNotAvailable {
+            body: crate::types::Body::Sun,
+            source: crate::types::EphemerisSource::Jpl,
+        })?;
+
+        // C uses barycentric Earth for parallax/aberration; deflection uses earth_helio
+        // computed inside swi_deflect_light as earth_bary - sun_bary.
+        let xobs = jpl_pleph(file, jd, J_EARTH, J_SBARY, true)?;
+        let sun_bary = jpl_pleph(file, jd, J_SUN, J_SBARY, true)?;
+        let xobs_dt = jpl_pleph(file, jd - FIXSTAR_DT, J_EARTH, J_SBARY, true)?;
+
+        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
+    }
+
+    /// Core fixed-star position pipeline (port of `fixstar_calc_from_struct`).
+    /// Steps 1–4 (catalog→Cartesian) and 7–18 (corrections→output).
+    ///
+    /// `xobs`/`xobs_dt`: Earth position for parallax (step 7) and aberration velocity (step 9).
+    ///   Moshier: heliocentric Earth. SWIEPH/JPL: barycentric Earth (matching C's xearth).
+    /// `sun_bary`: Sun's barycentric position at `jd` (all 6 components including velocity).
+    ///   Moshier passes zero (Sun at origin). SWIEPH/JPL pass the actual barycentric Sun.
+    ///   Used to compute earth_helio = xobs - sun_bary for step 8 (deflection), replicating
+    ///   C's swi_deflect_light which internally computes e = earth_bary - sun_bary.
+    fn calc_fixstar_inner(
+        &self,
+        star: &crate::stars::Star,
+        jd: f64,
+        flags: CalcFlags,
+        xobs: [f64; 6],
+        xobs_dt: [f64; 6],
+        sun_bary: [f64; 6],
     ) -> Result<[f64; 6], Error> {
         use crate::bias::{fk4_fk5, frame_bias, icrs2fk5};
         use crate::calc::{nutate, precess_speed};
@@ -682,8 +807,8 @@ impl Ephemeris {
         if star.epoch != 0.0 {
             // FK5 → ICRS.
             icrs2fk5(&mut x, true, true);
-            // ICRS → J2000 frame bias. C's swi_get_denum returns 403 for Moshier,
-            // so this is applied unconditionally here (403 >= 403 is always true).
+            // ICRS → J2000 frame bias. Applied unconditionally (denum >= 403 for all
+            // modern backends: Moshier returns 403, SWIEPH/JPL use DE430+).
             frame_bias(
                 &mut x,
                 J2000,
@@ -693,14 +818,9 @@ impl Ephemeris {
             );
         }
 
-        // Steps 5–6: Earth heliocentric position for parallax / deflection /
-        // aberration. Moshier returns heliocentric, matching C's xearth for MOSEPH.
-        let eps_j2000 = obliquity(J2000, CalcFlags::empty(), models);
-        let pp =
-            crate::moshier::backend::compute_pipeline(jd, crate::types::Body::Sun, &eps_j2000)?;
-        let xobs = pp.earth_helio; // heliocentric Earth = geocenter reference
-
-        // Step 7: Proper motion + parallax (geocentric).
+        // Step 7: Proper motion + parallax.
+        // xobs is the Earth's position in the backend's native frame
+        // (heliocentric for Moshier, barycentric for SWIEPH/JPL).
         for i in 0..3 {
             x[i] += t * x[i + 3]; // proper motion over elapsed days
             x[i] -= xobs[i]; // subtract observer (parallax)
@@ -708,13 +828,21 @@ impl Ephemeris {
         }
 
         // Step 8: Gravitational deflection (dt=0 for stars, matching C).
+        // C's swi_deflect_light internally computes e = earth_bary - sun_bary = earth_helio,
+        // regardless of what frame xobs is in. Replicate that: use earth_helio for deflection.
+        // For Moshier sun_bary=[0;6] so earth_helio = xobs (already heliocentric).
         if !iflag.contains(CalcFlags::TRUEPOS) && !iflag.contains(CalcFlags::NOGDEFL) {
-            let mut planet_helio = [0.0f64; 6];
-            for i in 0..3 {
-                planet_helio[i] = x[i] + xobs[i]; // heliocentric star direction
-                planet_helio[i + 3] = x[i + 3];
+            let mut earth_helio_defl = [0.0f64; 6];
+            for i in 0..6 {
+                earth_helio_defl[i] = xobs[i] - sun_bary[i];
             }
-            deflect_light(&mut x, &xobs, &planet_helio, true);
+            let mut planet_ref = [0.0f64; 6];
+            for i in 0..3 {
+                // x = star - xobs (geocentric); x + earth_helio = star - sun_bary = heliocentric star
+                planet_ref[i] = x[i] + earth_helio_defl[i];
+                planet_ref[i + 3] = x[i + 3];
+            }
+            deflect_light(&mut x, &earth_helio_defl, &planet_ref, true);
         }
 
         // Step 9: Annual aberration — swi_aberr_light_ex pattern.
@@ -725,13 +853,6 @@ impl Ephemeris {
             let orig_vel = [x[3], x[4], x[5]];
             let ev: [f64; 3] = [xobs[3], xobs[4], xobs[5]];
             aberr_light(&mut x, &ev, false);
-            // Earth state at t-dt for speed via finite difference.
-            let pp_dt = crate::moshier::backend::compute_pipeline(
-                jd - FIXSTAR_DT,
-                crate::types::Body::Sun,
-                &eps_j2000,
-            )?;
-            let xobs_dt = pp_dt.earth_helio;
             let ev_dt: [f64; 3] = [xobs_dt[3], xobs_dt[4], xobs_dt[5]];
             let mut xx2: [f64; 6] = [
                 orig[0] - FIXSTAR_DT * orig_vel[0],
@@ -749,7 +870,7 @@ impl Ephemeris {
 
         // Step 10: ICRS → J2000 frame bias.
         // C condition: !(iflag & SEFLG_ICRS) && (denum >= 403 || BARYCTR).
-        // Moshier: swi_get_denum returns 403, so this is always applied.
+        // Applied unconditionally for all modern backends (denum >= 403 always true).
         if !iflag.contains(CalcFlags::ICRS) {
             frame_bias(&mut x, jd, iflag, models, FrameTransform::GcrsToJ2000);
         }

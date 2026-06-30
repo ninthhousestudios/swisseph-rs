@@ -44,8 +44,16 @@ static struct flag_combo flag_combos[] = {
     { SEFLG_MOSEPH | SEFLG_J2000,             "J2000" },
     { SEFLG_MOSEPH | SEFLG_NONUT,             "NONUT" },
     { SEFLG_MOSEPH | SEFLG_XYZ,              "XYZ" },
+    /* SWIEPH cases */
+    { SEFLG_SWIEPH,                           "swieph_base" },
+    { SEFLG_SWIEPH | SEFLG_SPEED,            "swieph_SPEED" },
+    { SEFLG_SWIEPH | SEFLG_EQUATORIAL,       "swieph_EQUATORIAL" },
+    /* JPL cases */
+    { SEFLG_JPLEPH,                           "jpl_base" },
+    { SEFLG_JPLEPH | SEFLG_SPEED,            "jpl_SPEED" },
+    { SEFLG_JPLEPH | SEFLG_EQUATORIAL,       "jpl_EQUATORIAL" },
 };
-#define NFLAGS 7
+#define NFLAGS 13
 
 int main(void) {
     double xx[6];
@@ -56,6 +64,7 @@ int main(void) {
     int first;
 
     swe_set_ephe_path("../../../swisseph/ephe");
+    swe_set_jpl_file("de441.eph");
 
     printf("{\n");
 

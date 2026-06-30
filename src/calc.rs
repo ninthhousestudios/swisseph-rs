@@ -760,7 +760,7 @@ pub(crate) struct SwephPositions {
     pub(crate) sun_bary: [f64; 6],
 }
 
-fn sweph_positions(
+pub(crate) fn sweph_positions(
     planet_file: &SwissEphFile,
     moon_file: &SwissEphFile,
     body_id: i32,
@@ -831,7 +831,11 @@ const BOUNDARY_SLOP: f64 = 0.3;
 /// the absolute earliest ephemeris boundary, C extrapolates the cached segment
 /// rather than erroring. Genuine out-of-range epochs (more than a light-time off)
 /// still return `None`, preserving the `BeyondEphemerisLimits` contract.
-fn find_file_or_nearest(files: &[SwissEphFile], body_id: i32, jd: f64) -> Option<&SwissEphFile> {
+pub(crate) fn find_file_or_nearest(
+    files: &[SwissEphFile],
+    body_id: i32,
+    jd: f64,
+) -> Option<&SwissEphFile> {
     if let Some(f) = find_file_for_jd(files, body_id, jd) {
         return Some(f);
     }
