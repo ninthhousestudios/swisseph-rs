@@ -45,10 +45,12 @@ src/
 │   └── evaluate.rs     — rot_back (orbital-plane→ecliptic/equatorial transform), evaluate_body (public API: file + body_id + jd → [x,y,z,vx,vy,vz])
 ├── houses.rs           — AscMc, HouseResult (public types); houses_armc driver (swe_houses_armc_ex2 port);
 │                          calc_h (CalcH core; systems implemented: A/D/N/V/W equal-family,
-│                          O/S/X/M/F quadrant-arithmetic, R/C/T/H/J great-circle/pole-height —
-│                          B/G/I/i/K/L/Q/U/Y still stubbed Err);
+│                          O/S/X/M/F quadrant-arithmetic, R/C/T/H/J great-circle/pole-height,
+│                          P/K/G Newton-iteration (Placidus/Koch/Gauquelin-36) —
+│                          B/I/i/L/Q/U/Y still stubbed Err);
 │                          Asc1/Asc2/AscDash core trig, fix_asc_polar, mc_like (shared MC/equasc
-│                          projection), polar_shift_subset (shared C/H/J/R polar-circle 180° flip)
+│                          projection), polar_shift_subset (shared C/H/J/R polar-circle 180° flip),
+│                          NewtonCusp/placidus_newton_cusp (shared P/G Newton-iteration skeleton)
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
 ├── heliacal.rs         — EMPTY stub
@@ -77,7 +79,10 @@ tests/
 │   └── houses.rs      — golden tests for houses_armc (angles_special: 30 cases system-independent special points;
 │                         equal_family: 150 cases, 5 systems A/D/N/V/W × 30 battery cases, bitwise-exact;
 │                         quad_arith: 150 cases, 5 systems O/S/X/M/F × 30 battery cases, eps 1e-9/1e-7;
-│                         great_circle: 150 cases, 5 systems R/C/T/H/J × 30 battery cases, eps 1e-9)
+│                         great_circle: 150 cases, 5 systems R/C/T/H/J × 30 battery cases, eps 1e-9;
+│                         iterative: 84 cases, 2 systems P/K × 6 armc × 7 geolat (incl. ±78 polar) ×
+│                         1 eps, eps 1e-9 cusps/1e-7 speeds; gauquelin36: 42 cases, G × 6 armc × 7 geolat
+│                         × 1 eps, cusps[1..36], same eps)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -96,7 +101,7 @@ tests/
 │   ├── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
 │   ├── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
 │   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
-│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks)
+│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -114,7 +119,7 @@ tests/
     ├── gen_jpl_pleph.c  — C harness to regenerate jpl_pleph.json (swi_pleph direct calls against de441.eph)
     ├── gen_fixstar.c    — C harness to regenerate fixstar.json (swe_fixstar2: 7 stars × 4 epochs × 7 flags + 4 mag cases)
     └── gen_houses.c     — C harness to regenerate houses.json (swe_houses_armc_ex2: angles_special,
-                            equal_family, quad_arith, great_circle)
+                            equal_family, quad_arith, great_circle, iterative, gauquelin36)
 ```
 
 ## Key Types in types.rs

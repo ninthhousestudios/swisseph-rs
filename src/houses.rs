@@ -10,13 +10,11 @@ use crate::types::HouseSystem;
 // ---------------------------------------------------------------------------
 
 const VERY_SMALL: f64 = 1e-10;
-#[allow(dead_code)] // used by Placidus/Gauquelin Newton iteration (later sub-tasks)
 const VERY_SMALL_PLAC_ITER: f64 = 1.0 / 360000.0;
 #[allow(dead_code)] // used by swe_house_pos (later sub-tasks)
 const MILLIARCSEC: f64 = 1.0 / 3600000.0;
 const SOLAR_YEAR: f64 = 365.242_198_93;
 const ARMCS: f64 = (SOLAR_YEAR + 1.0) / SOLAR_YEAR * 360.0;
-#[allow(dead_code)] // used by Placidus/Gauquelin Newton iteration (later sub-tasks)
 const NITER_MAX: i32 = 100;
 
 // ---------------------------------------------------------------------------
@@ -250,6 +248,55 @@ fn polar_shift_subset(cusps: &mut [f64; 37], ac: &mut f64, mc: &mut f64, lat: f6
     }
 }
 
+/// Outcome of one Placidus/Gauquelin Newton-iteration cusp solve. Both house systems share an
+/// identical per-cusp iteration skeleton (swehouse.c:1623-1730 "G", 1830-1983 default) — only
+/// the pole-height seed and fractional divisor differ.
+enum NewtonCusp {
+    /// Converged; `f` is the pole height AT the converged cusp, required for the analytical
+    /// `AscDash` speed call (speed is evaluated at the converged point, not finite-differenced).
+    Converged { cusp: f64, f: f64 },
+    /// `|tant| < VERY_SMALL`: the cusp coincides with the AC/DC axis. Caller uses `rectasc` as
+    /// the cusp and `ARMCS` as the speed.
+    DegenerateAxis,
+    /// Hit `NITER_MAX` without converging. Caller falls back to Porphyry for the whole system.
+    NonConverged,
+}
+
+/// Shared Newton-iteration skeleton for Placidus (§5 "Default") and Gauquelin (§5 "G") cusps.
+/// `rectasc`/`fh_init`/`divisor` are precomputed per-cusp by the caller (Placidus's fixed `3`/
+/// `1.5` divisors, Gauquelin's `9/ih2`); `tane`/`geolat` feed only into that precomputation, not
+/// the loop itself, so they aren't parameters here.
+fn placidus_newton_cusp(
+    rectasc: f64,
+    fh_init: f64,
+    divisor: f64,
+    sine: f64,
+    cose: f64,
+    tanfi: f64,
+) -> NewtonCusp {
+    let seed = asc1(rectasc, fh_init, sine, cose);
+    let mut tant = tand(asind(sine * sind(seed)));
+    if tant.abs() < VERY_SMALL {
+        return NewtonCusp::DegenerateAxis;
+    }
+    let mut f = atand(sind(asind(tanfi * tant) / divisor) / tant);
+    let mut cusp = asc1(rectasc, f, sine, cose);
+    let mut cuspsv = 0.0;
+    for i in 1..=NITER_MAX {
+        tant = tand(asind(sine * sind(cusp)));
+        if tant.abs() < VERY_SMALL {
+            return NewtonCusp::DegenerateAxis;
+        }
+        f = atand(sind(asind(tanfi * tant) / divisor) / tant);
+        cusp = asc1(rectasc, f, sine, cose);
+        if i > 1 && diff_degrees(cusp, cuspsv).abs() < VERY_SMALL_PLAC_ITER {
+            return NewtonCusp::Converged { cusp, f };
+        }
+        cuspsv = cusp;
+    }
+    NewtonCusp::NonConverged
+}
+
 // ---------------------------------------------------------------------------
 // CalcH — THE CORE (swehouse.c:892-2050)
 // ---------------------------------------------------------------------------
@@ -276,8 +323,7 @@ fn calc_h(
     let th = armc;
     let cose = cosd(eps);
     let sine = sind(eps);
-    // Used by the iterative house systems (Placidus, Koch, Gauquelin, ...) added later.
-    let _tane = tand(eps);
+    let tane = tand(eps);
 
     let mut geolat = geolat;
     if (geolat.abs() - 90.0).abs() < VERY_SMALL {
@@ -317,6 +363,10 @@ fn calc_h(
     }
 
     let mut do_interpol = false;
+    // Set only by a fully-converged Gauquelin (36 independently-filled cusps) — the one system
+    // excluded, along with 'Y'/'I'/'i' (not yet ported), from the post-switch opposite-cusp
+    // mirror (swehouse.c:1985-2000, c-ref-houses.md §3 step 3).
+    let mut skip_mirror = false;
 
     match hsys {
         HouseSystem::Equal => {
@@ -631,6 +681,206 @@ fn calc_h(
             }
             polar_shift_subset(&mut cusps, &mut ac, &mut mc, geolat, eps);
         }
+        HouseSystem::Koch => {
+            // K — Koch (swehouse.c:1250-1272): closed-form, no iteration. Fails outright (no
+            // Newton attempt) in the polar circle, unlike the great-circle quadrant systems.
+            if geolat.abs() >= 90.0 - eps {
+                ac = fill_porphyry(
+                    &mut cusps,
+                    &mut cusp_speeds,
+                    ac,
+                    mc,
+                    ac_speed,
+                    mc_speed,
+                    do_speed,
+                );
+            } else {
+                let sina = (sind(mc) * sine / cosd(geolat)).clamp(-1.0, 1.0);
+                let cosa = (1.0 - sina * sina).sqrt();
+                let c = atand(tanfi / cosa);
+                let ad3 = asind(sind(c) * sina) / 3.0;
+                let x11 = th + 30.0 - 2.0 * ad3;
+                let x12 = th + 60.0 - ad3;
+                let x2 = th + 120.0 + ad3;
+                let x3 = th + 150.0 + 2.0 * ad3;
+                cusps[11] = asc1(x11, geolat, sine, cose);
+                cusps[12] = asc1(x12, geolat, sine, cose);
+                cusps[2] = asc1(x2, geolat, sine, cose);
+                cusps[3] = asc1(x3, geolat, sine, cose);
+                if do_speed {
+                    cusp_speeds[11] = asc_dash(x11, geolat, sine, cose);
+                    cusp_speeds[12] = asc_dash(x12, geolat, sine, cose);
+                    cusp_speeds[2] = asc_dash(x2, geolat, sine, cose);
+                    cusp_speeds[3] = asc_dash(x3, geolat, sine, cose);
+                }
+            }
+        }
+        HouseSystem::Placidus => {
+            // Default — Placidus (swehouse.c:1830-1983): four independent Newton loops (cusps
+            // 11, 12, 2, 3), each the same skeleton as a single Gauquelin sector but with fixed
+            // fractional divisors instead of `ih2/9`.
+            if geolat.abs() >= 90.0 - eps {
+                ac = fill_porphyry(
+                    &mut cusps,
+                    &mut cusp_speeds,
+                    ac,
+                    mc,
+                    ac_speed,
+                    mc_speed,
+                    do_speed,
+                );
+            } else {
+                let a = asind(tanfi * tane);
+                let fh1 = atand(sind(a / 3.0) / tane);
+                let fh2 = atand(sind(a * 2.0 / 3.0) / tane);
+                let specs = [
+                    (11usize, fh1, normalize_degrees(30.0 + th), 3.0),
+                    (12usize, fh2, normalize_degrees(60.0 + th), 1.5),
+                    (2usize, fh2, normalize_degrees(120.0 + th), 1.5),
+                    (3usize, fh1, normalize_degrees(150.0 + th), 3.0),
+                ];
+                let mut fell_back = false;
+                for (idx, fh_init, rectasc, divisor) in specs {
+                    match placidus_newton_cusp(rectasc, fh_init, divisor, sine, cose, tanfi) {
+                        NewtonCusp::Converged { cusp, f } => {
+                            cusps[idx] = cusp;
+                            if do_speed {
+                                cusp_speeds[idx] = asc_dash(rectasc, f, sine, cose);
+                            }
+                        }
+                        NewtonCusp::DegenerateAxis => {
+                            cusps[idx] = rectasc;
+                            if do_speed {
+                                cusp_speeds[idx] = ARMCS;
+                            }
+                        }
+                        NewtonCusp::NonConverged => {
+                            fell_back = true;
+                            break;
+                        }
+                    }
+                }
+                if fell_back {
+                    ac = fill_porphyry(
+                        &mut cusps,
+                        &mut cusp_speeds,
+                        ac,
+                        mc,
+                        ac_speed,
+                        mc_speed,
+                        do_speed,
+                    );
+                }
+            }
+        }
+        HouseSystem::Gauquelin => {
+            // G — 36 Gauquelin sectors (swehouse.c:1623-1730): two mirrored Newton-iteration
+            // loops (4th/2nd quarter, then 1st/3rd quarter), each filling 8 sectors plus their
+            // 180°-opposite partners. Counted clockwise. Excluded from the post-switch mirror —
+            // it fills all 36 cusps itself.
+            if geolat.abs() >= 90.0 - eps {
+                ac = fill_porphyry(
+                    &mut cusps,
+                    &mut cusp_speeds,
+                    ac,
+                    mc,
+                    ac_speed,
+                    mc_speed,
+                    do_speed,
+                );
+            } else {
+                let a = asind(tanfi * tane);
+                let mut fell_back = false;
+
+                // 4th/2nd quarter: ih = 2..9, ih2 = 10-ih.
+                for ih in 2..=9usize {
+                    let ih2 = (10 - ih) as f64;
+                    let fh_init = atand(sind(a * ih2 / 9.0) / tane);
+                    let rectasc = normalize_degrees(90.0 / 9.0 * ih2 + th);
+                    let divisor = 9.0 / ih2;
+                    match placidus_newton_cusp(rectasc, fh_init, divisor, sine, cose, tanfi) {
+                        NewtonCusp::Converged { cusp, f } => {
+                            cusps[ih] = cusp;
+                            cusps[ih + 18] = normalize_degrees(cusp + 180.0);
+                            if do_speed {
+                                let sp = asc_dash(rectasc, f, sine, cose);
+                                cusp_speeds[ih] = sp;
+                                cusp_speeds[ih + 18] = sp;
+                            }
+                        }
+                        NewtonCusp::DegenerateAxis => {
+                            cusps[ih] = rectasc;
+                            cusps[ih + 18] = normalize_degrees(rectasc + 180.0);
+                            if do_speed {
+                                cusp_speeds[ih] = ARMCS;
+                                cusp_speeds[ih + 18] = ARMCS;
+                            }
+                        }
+                        NewtonCusp::NonConverged => {
+                            fell_back = true;
+                            break;
+                        }
+                    }
+                }
+
+                // 1st/3rd quarter: ih = 29..36, ih2 = ih-28 — mirror-image formulas.
+                if !fell_back {
+                    for ih in 29..=36usize {
+                        let ih2 = (ih - 28) as f64;
+                        let fh_init = atand(sind(a * ih2 / 9.0) / tane);
+                        let rectasc = normalize_degrees(180.0 - ih2 * 90.0 / 9.0 + th);
+                        let divisor = 9.0 / ih2;
+                        match placidus_newton_cusp(rectasc, fh_init, divisor, sine, cose, tanfi) {
+                            NewtonCusp::Converged { cusp, f } => {
+                                cusps[ih] = cusp;
+                                cusps[ih - 18] = normalize_degrees(cusp + 180.0);
+                                if do_speed {
+                                    let sp = asc_dash(rectasc, f, sine, cose);
+                                    cusp_speeds[ih] = sp;
+                                    cusp_speeds[ih - 18] = sp;
+                                }
+                            }
+                            NewtonCusp::DegenerateAxis => {
+                                cusps[ih] = rectasc;
+                                cusps[ih - 18] = normalize_degrees(rectasc + 180.0);
+                                if do_speed {
+                                    cusp_speeds[ih] = ARMCS;
+                                    cusp_speeds[ih - 18] = ARMCS;
+                                }
+                            }
+                            NewtonCusp::NonConverged => {
+                                fell_back = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if fell_back {
+                    ac = fill_porphyry(
+                        &mut cusps,
+                        &mut cusp_speeds,
+                        ac,
+                        mc,
+                        ac_speed,
+                        mc_speed,
+                        do_speed,
+                    );
+                } else {
+                    cusps[1] = ac;
+                    cusps[10] = mc;
+                    cusps[19] = normalize_degrees(ac + 180.0);
+                    cusps[28] = normalize_degrees(mc + 180.0);
+                    if do_speed {
+                        cusp_speeds[1] = ac_speed;
+                        cusp_speeds[10] = mc_speed;
+                        cusp_speeds[19] = ac_speed;
+                        cusp_speeds[28] = mc_speed;
+                    }
+                    skip_mirror = true;
+                }
+            }
+        }
         _ => {
             return Err(Error::CError(format!(
                 "house system {hsys:?} not yet implemented"
@@ -638,21 +888,23 @@ fn calc_h(
         }
     }
 
-    // Post-switch opposite-cusp mirror (swehouse.c:1985-2000) — skipped only for G/Y/I,
-    // none of which are reachable here yet.
-    cusps[4] = normalize_degrees(cusps[10] + 180.0);
-    cusps[5] = normalize_degrees(cusps[11] + 180.0);
-    cusps[6] = normalize_degrees(cusps[12] + 180.0);
-    cusps[7] = normalize_degrees(cusps[1] + 180.0);
-    cusps[8] = normalize_degrees(cusps[2] + 180.0);
-    cusps[9] = normalize_degrees(cusps[3] + 180.0);
-    if do_speed && !do_interpol {
-        cusp_speeds[4] = cusp_speeds[10];
-        cusp_speeds[5] = cusp_speeds[11];
-        cusp_speeds[6] = cusp_speeds[12];
-        cusp_speeds[7] = cusp_speeds[1];
-        cusp_speeds[8] = cusp_speeds[2];
-        cusp_speeds[9] = cusp_speeds[3];
+    // Post-switch opposite-cusp mirror (swehouse.c:1985-2000) — skipped for G (fills all 36
+    // cusps itself) on a fully-converged path, and (not yet reachable) Y/I/i.
+    if !skip_mirror {
+        cusps[4] = normalize_degrees(cusps[10] + 180.0);
+        cusps[5] = normalize_degrees(cusps[11] + 180.0);
+        cusps[6] = normalize_degrees(cusps[12] + 180.0);
+        cusps[7] = normalize_degrees(cusps[1] + 180.0);
+        cusps[8] = normalize_degrees(cusps[2] + 180.0);
+        cusps[9] = normalize_degrees(cusps[3] + 180.0);
+        if do_speed && !do_interpol {
+            cusp_speeds[4] = cusp_speeds[10];
+            cusp_speeds[5] = cusp_speeds[11];
+            cusp_speeds[6] = cusp_speeds[12];
+            cusp_speeds[7] = cusp_speeds[1];
+            cusp_speeds[8] = cusp_speeds[2];
+            cusp_speeds[9] = cusp_speeds[3];
+        }
     }
 
     // Special points (swehouse.c:2001-2049), always computed.

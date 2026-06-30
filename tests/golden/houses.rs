@@ -42,11 +42,33 @@ struct GreatCircleCase {
 }
 
 #[derive(Deserialize)]
+struct IterativeCase {
+    hsys: String,
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    cusps: [f64; 12],
+    cusp_speed: [f64; 12],
+}
+
+#[derive(Deserialize)]
+struct Gauquelin36Case {
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    // serde's array impl tops out at 32 elements; 36 cusps need a Vec.
+    cusps: Vec<f64>,
+    cusp_speed: Vec<f64>,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     angles_special: Vec<AnglesSpecialCase>,
     equal_family: Vec<EqualFamilyCase>,
     quad_arith: Vec<QuadArithCase>,
     great_circle: Vec<GreatCircleCase>,
+    iterative: Vec<IterativeCase>,
+    gauquelin36: Vec<Gauquelin36Case>,
 }
 
 fn load() -> GoldenData {
@@ -161,6 +183,73 @@ fn great_circle() {
                 c.cusp_speed[h - 1],
                 result.cusp_speeds[h],
                 1e-9,
+            );
+        }
+    }
+}
+
+#[test]
+fn iterative() {
+    let data = load();
+    assert_eq!(
+        data.iterative.len(),
+        84,
+        "expected 84 golden cases (2 systems x 6 armc x 7 geolat incl. polar x 1 eps)"
+    );
+    for (i, c) in data.iterative.iter().enumerate() {
+        let hsys = parse_hsys(&c.hsys);
+        let result = houses_armc(c.armc, c.geolat, c.eps, hsys, None)
+            .unwrap_or_else(|e| panic!("case {i} ({}): houses_armc failed: {e}", c.hsys));
+
+        let label_base = format!(
+            "case {i} ({} armc={:.6} geolat={:.6} eps={:.6})",
+            c.hsys, c.armc, c.geolat, c.eps
+        );
+        for h in 1..=12usize {
+            super::assert_f64_eps(
+                &format!("{label_base} cusp[{h}]"),
+                c.cusps[h - 1],
+                result.cusps[h],
+                1e-9,
+            );
+            super::assert_f64_eps(
+                &format!("{label_base} cusp_speed[{h}]"),
+                c.cusp_speed[h - 1],
+                result.cusp_speeds[h],
+                1e-7,
+            );
+        }
+    }
+}
+
+#[test]
+fn gauquelin36() {
+    let data = load();
+    assert_eq!(
+        data.gauquelin36.len(),
+        42,
+        "expected 42 golden cases (6 armc x 7 geolat incl. polar x 1 eps)"
+    );
+    for (i, c) in data.gauquelin36.iter().enumerate() {
+        let result = houses_armc(c.armc, c.geolat, c.eps, HouseSystem::Gauquelin, None)
+            .unwrap_or_else(|e| panic!("case {i}: houses_armc failed: {e}"));
+
+        let label_base = format!(
+            "case {i} (G armc={:.6} geolat={:.6} eps={:.6})",
+            c.armc, c.geolat, c.eps
+        );
+        for h in 1..=36usize {
+            super::assert_f64_eps(
+                &format!("{label_base} cusp[{h}]"),
+                c.cusps[h - 1],
+                result.cusps[h],
+                1e-9,
+            );
+            super::assert_f64_eps(
+                &format!("{label_base} cusp_speed[{h}]"),
+                c.cusp_speed[h - 1],
+                result.cusp_speeds[h],
+                1e-7,
             );
         }
     }
