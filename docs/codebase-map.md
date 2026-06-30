@@ -44,8 +44,11 @@ src/
 │   ├── segment.rs      — Chebyshev coefficient unpacking from mmap'd bytes: 6 packing modes (4/3/2/1-byte, nibble, quarter-byte)
 │   └── evaluate.rs     — rot_back (orbital-plane→ecliptic/equatorial transform), evaluate_body (public API: file + body_id + jd → [x,y,z,vx,vy,vz])
 ├── houses.rs           — AscMc, HouseResult (public types); houses_armc driver (swe_houses_armc_ex2 port);
-│                          calc_h (CalcH core, Equal-family systems A/D/N/V/W only — others stubbed Err);
-│                          Asc1/Asc2/AscDash core trig, fix_asc_polar, mc_like (shared MC/equasc projection)
+│                          calc_h (CalcH core; systems implemented: A/D/N/V/W equal-family,
+│                          O/S/X/M/F quadrant-arithmetic, R/C/T/H/J great-circle/pole-height —
+│                          B/G/I/i/K/L/Q/U/Y still stubbed Err);
+│                          Asc1/Asc2/AscDash core trig, fix_asc_polar, mc_like (shared MC/equasc
+│                          projection), polar_shift_subset (shared C/H/J/R polar-circle 180° flip)
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
 ├── heliacal.rs         — EMPTY stub
@@ -72,7 +75,9 @@ tests/
 │   ├── sweph_eval.rs  — golden tests for evaluate_body (80 cases: 10 bodies × 8 epochs, bitwise-exact positions + velocities)
 │   ├── jpl_pleph.rs   — golden tests for jpl_pleph (84 cases: 11 bodies × 7 epochs barycentric + 7 geocentric Moon, 1e-9 eps)
 │   └── houses.rs      — golden tests for houses_armc (angles_special: 30 cases system-independent special points;
-│                         equal_family: 150 cases, 5 systems A/D/N/V/W × 30 battery cases; bitwise-exact)
+│                         equal_family: 150 cases, 5 systems A/D/N/V/W × 30 battery cases, bitwise-exact;
+│                         quad_arith: 150 cases, 5 systems O/S/X/M/F × 30 battery cases, eps 1e-9/1e-7;
+│                         great_circle: 150 cases, 5 systems R/C/T/H/J × 30 battery cases, eps 1e-9)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -108,7 +113,8 @@ tests/
     ├── gen_se1_header.c — standalone binary parser, dumps header + planet metadata as JSON
     ├── gen_jpl_pleph.c  — C harness to regenerate jpl_pleph.json (swi_pleph direct calls against de441.eph)
     ├── gen_fixstar.c    — C harness to regenerate fixstar.json (swe_fixstar2: 7 stars × 4 epochs × 7 flags + 4 mag cases)
-    └── gen_houses.c     — C harness to regenerate houses.json (swe_houses_armc_ex2: angles_special + equal_family)
+    └── gen_houses.c     — C harness to regenerate houses.json (swe_houses_armc_ex2: angles_special,
+                            equal_family, quad_arith, great_circle)
 ```
 
 ## Key Types in types.rs

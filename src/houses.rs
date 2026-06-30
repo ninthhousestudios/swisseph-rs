@@ -39,6 +39,10 @@ fn atand(x: f64) -> f64 {
     x.atan() * crate::constants::RADTODEG
 }
 
+fn asind(x: f64) -> f64 {
+    x.asin() * crate::constants::RADTODEG
+}
+
 // ---------------------------------------------------------------------------
 // Public output types
 // ---------------------------------------------------------------------------
@@ -230,6 +234,22 @@ fn fill_porphyry(
     ac
 }
 
+/// Polar-circle 180° shift shared by the quadrant-trisection systems (Campanus, Horizon,
+/// Savard-A, Regiomontanus): when the (co-)latitude falls within the polar circle relative to
+/// the ecliptic obliquity and the ascendant has landed on the wrong side of the meridian, flip
+/// `ac`, `mc`, and the four cusps adjacent to them. Cusps 4-9 are filled later by the
+/// post-switch opposite-cusp mirror, so they're intentionally excluded here. Port of the shared
+/// polar-handling tail in the `'C'`/`'H'`/`'J'`/`'R'` switch cases (e.g. swehouse.c:1071-1081).
+fn polar_shift_subset(cusps: &mut [f64; 37], ac: &mut f64, mc: &mut f64, lat: f64, eps: f64) {
+    if lat.abs() >= 90.0 - eps && diff_degrees(*ac, *mc) < 0.0 {
+        *ac = normalize_degrees(*ac + 180.0);
+        *mc = normalize_degrees(*mc + 180.0);
+        for i in [1usize, 2, 3, 10, 11, 12] {
+            cusps[i] = normalize_degrees(cusps[i] + 180.0);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CalcH — THE CORE (swehouse.c:892-2050)
 // ---------------------------------------------------------------------------
@@ -267,9 +287,9 @@ fn calc_h(
             90.0 - VERY_SMALL
         };
     }
-    let _tanfi = tand(geolat);
+    let tanfi = tand(geolat);
 
-    let mc = mc_like(th, cose);
+    let mut mc = mc_like(th, cose);
     let mc_speed = if do_speed {
         asc_dash(th, 0.0, sine, cose)
     } else {
@@ -454,6 +474,162 @@ fn calc_h(
                 cusps[i] = mc_like(ra, cose);
             }
             do_interpol = do_speed;
+        }
+        HouseSystem::Regiomontanus => {
+            // R — Regiomontanus (swehouse.c:1381-1409)
+            let fh1 = atand(tanfi * 0.5);
+            let fh2 = atand(tanfi * cosd(30.0));
+            let (x11, x12, x2, x3) = (30.0 + th, 60.0 + th, 120.0 + th, 150.0 + th);
+            cusps[11] = asc1(x11, fh1, sine, cose);
+            cusps[12] = asc1(x12, fh2, sine, cose);
+            cusps[2] = asc1(x2, fh2, sine, cose);
+            cusps[3] = asc1(x3, fh1, sine, cose);
+            if do_speed {
+                cusp_speeds[11] = asc_dash(x11, fh1, sine, cose);
+                cusp_speeds[12] = asc_dash(x12, fh2, sine, cose);
+                cusp_speeds[2] = asc_dash(x2, fh2, sine, cose);
+                cusp_speeds[3] = asc_dash(x3, fh1, sine, cose);
+            }
+            polar_shift_subset(&mut cusps, &mut ac, &mut mc, geolat, eps);
+        }
+        HouseSystem::PolichPage => {
+            // T — Polich/Page "topocentric" (swehouse.c:1432-1458). Structurally identical to
+            // Regiomontanus, but with tanfi/3 and tanfi*2/3 pole heights.
+            let fh1 = atand(tanfi / 3.0);
+            let fh2 = atand(tanfi * 2.0 / 3.0);
+            let (x11, x12, x2, x3) = (30.0 + th, 60.0 + th, 120.0 + th, 150.0 + th);
+            cusps[11] = asc1(x11, fh1, sine, cose);
+            cusps[12] = asc1(x12, fh2, sine, cose);
+            cusps[2] = asc1(x2, fh2, sine, cose);
+            cusps[3] = asc1(x3, fh1, sine, cose);
+            if do_speed {
+                cusp_speeds[11] = asc_dash(x11, fh1, sine, cose);
+                cusp_speeds[12] = asc_dash(x12, fh2, sine, cose);
+                cusp_speeds[2] = asc_dash(x2, fh2, sine, cose);
+                cusp_speeds[3] = asc_dash(x3, fh1, sine, cose);
+            }
+            // Polar shift on ALL 12 cusps (not the {1,2,3,10,11,12}-only subset used by
+            // C/H/J/R) — cusps 4-9 aren't meaningfully set yet, so this is harmless but
+            // structurally different; replicate literally (swehouse.c §"T").
+            if geolat.abs() >= 90.0 - eps && diff_degrees(ac, mc) < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                mc = normalize_degrees(mc + 180.0);
+                for cs in cusps.iter_mut().take(13).skip(1) {
+                    *cs = normalize_degrees(*cs + 180.0);
+                }
+            }
+        }
+        HouseSystem::Campanus => {
+            // C — Campanus (swehouse.c:1028-1082)
+            let fh1 = asind(sind(geolat) / 2.0);
+            let fh2 = asind(3.0_f64.sqrt() / 2.0 * sind(geolat));
+            let cosfi = cosd(geolat);
+            let (xh1, xh2) = if cosfi == 0.0 {
+                let v = if geolat > 0.0 { 90.0 } else { 270.0 };
+                (v, v)
+            } else {
+                (
+                    atand(3.0_f64.sqrt() / cosfi),
+                    atand((1.0 / 3.0_f64.sqrt()) / cosfi),
+                )
+            };
+            cusps[11] = asc1(th + 90.0 - xh1, fh1, sine, cose);
+            cusps[12] = asc1(th + 90.0 - xh2, fh2, sine, cose);
+            cusps[2] = asc1(th + 90.0 + xh2, fh2, sine, cose);
+            cusps[3] = asc1(th + 90.0 + xh1, fh1, sine, cose);
+            if do_speed {
+                cusp_speeds[11] = asc_dash(th + 90.0 - xh1, fh1, sine, cose);
+                cusp_speeds[12] = asc_dash(th + 90.0 - xh2, fh2, sine, cose);
+                cusp_speeds[2] = asc_dash(th + 90.0 + xh2, fh2, sine, cose);
+                cusp_speeds[3] = asc_dash(th + 90.0 + xh1, fh1, sine, cose);
+            }
+            polar_shift_subset(&mut cusps, &mut ac, &mut mc, geolat, eps);
+        }
+        HouseSystem::Horizon => {
+            // H — Horizon/Azimuth (swehouse.c:1083-1155): Campanus-style trisection of the
+            // prime vertical, rotated 180° in th and with fi mapped to its co-latitude first.
+            let mut fi2 = if geolat > 0.0 {
+                90.0 - geolat
+            } else {
+                -90.0 - geolat
+            };
+            if (fi2.abs() - 90.0).abs() < VERY_SMALL {
+                fi2 = if fi2 < 0.0 {
+                    -90.0 + VERY_SMALL
+                } else {
+                    90.0 - VERY_SMALL
+                };
+            }
+            let th2 = normalize_degrees(th + 180.0);
+            let cosfi2 = cosd(fi2);
+            let fh1 = asind(sind(fi2) / 2.0);
+            let fh2 = asind(3.0_f64.sqrt() / 2.0 * sind(fi2));
+            let (xh1, xh2) = if cosfi2 == 0.0 {
+                let v = if fi2 > 0.0 { 90.0 } else { 270.0 };
+                (v, v)
+            } else {
+                (
+                    atand(3.0_f64.sqrt() / cosfi2),
+                    atand((1.0 / 3.0_f64.sqrt()) / cosfi2),
+                )
+            };
+            cusps[11] = asc1(th2 + 90.0 - xh1, fh1, sine, cose);
+            cusps[12] = asc1(th2 + 90.0 - xh2, fh2, sine, cose);
+            cusps[1] = asc1(th2 + 90.0, fi2, sine, cose);
+            cusps[2] = asc1(th2 + 90.0 + xh2, fh2, sine, cose);
+            cusps[3] = asc1(th2 + 90.0 + xh1, fh1, sine, cose);
+            if do_speed {
+                cusp_speeds[11] = asc_dash(th2 + 90.0 - xh1, fh1, sine, cose);
+                cusp_speeds[12] = asc_dash(th2 + 90.0 - xh2, fh2, sine, cose);
+                cusp_speeds[1] = asc_dash(th2 + 90.0, fi2, sine, cose);
+                cusp_speeds[2] = asc_dash(th2 + 90.0 + xh2, fh2, sine, cose);
+                cusp_speeds[3] = asc_dash(th2 + 90.0 + xh1, fh1, sine, cose);
+            }
+            // Polar-circle shift exactly as Campanus, evaluated against the co-latitude fi2.
+            polar_shift_subset(&mut cusps, &mut ac, &mut mc, fi2, eps);
+            // Unconditional re-orientation into ecliptic-house ordering (swehouse.c:1141-1144).
+            cusps[1] = normalize_degrees(cusps[1] + 180.0);
+            cusps[2] = normalize_degrees(cusps[2] + 180.0);
+            cusps[3] = normalize_degrees(cusps[3] + 180.0);
+            cusps[11] = normalize_degrees(cusps[11] + 180.0);
+            cusps[12] = normalize_degrees(cusps[12] + 180.0);
+            // Final AC/DC sanity check (without an MC shift this time).
+            let acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+            }
+        }
+        HouseSystem::SavardA => {
+            // J — Savard-A (swehouse.c:1182-1249)
+            let sinfi = sind(geolat);
+            let cosfi = cosd(geolat);
+            let (xs1, xs2) = if geolat.abs() < VERY_SMALL {
+                (asind(2.0 / 3.0), asind(1.0 / 3.0))
+            } else {
+                (
+                    asind(sind(2.0 * geolat / 3.0) / sinfi),
+                    asind(sind(geolat / 3.0) / sinfi),
+                )
+            };
+            let (xh1, xh2) = if cosfi == 0.0 {
+                let v = if geolat > 0.0 { 90.0 } else { 270.0 };
+                (v, v)
+            } else {
+                (atand(tand(xs1) / cosfi), atand(tand(xs2) / cosfi))
+            };
+            let fh1 = asind(sind(geolat) * sind(90.0 - xs1));
+            let fh2 = asind(sind(geolat) * sind(90.0 - xs2));
+            cusps[11] = asc1(th + 90.0 - xh1, fh1, sine, cose);
+            cusps[12] = asc1(th + 90.0 - xh2, fh2, sine, cose);
+            cusps[2] = asc1(th + 90.0 + xh2, fh2, sine, cose);
+            cusps[3] = asc1(th + 90.0 + xh1, fh1, sine, cose);
+            if do_speed {
+                cusp_speeds[11] = asc_dash(th + 90.0 - xh1, fh1, sine, cose);
+                cusp_speeds[12] = asc_dash(th + 90.0 - xh2, fh2, sine, cose);
+                cusp_speeds[2] = asc_dash(th + 90.0 + xh2, fh2, sine, cose);
+                cusp_speeds[3] = asc_dash(th + 90.0 + xh1, fh1, sine, cose);
+            }
+            polar_shift_subset(&mut cusps, &mut ac, &mut mc, geolat, eps);
         }
         _ => {
             return Err(Error::CError(format!(
