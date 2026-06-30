@@ -15,6 +15,7 @@ struct CalcCase {
     idx: i32,
     tjd: f64,
     lon: f64,
+    lon_speed: f64,
 }
 
 #[derive(Deserialize)]
@@ -110,14 +111,29 @@ fn golden_fixstar_ayanamsa_calc_sidereal() {
         let eph = make_eph(c.idx);
         let label = format!("calc case {i} idx={} tjd={:.1}", c.idx, c.tjd);
 
-        match eph.calc(c.tjd, Body::Sun, CalcFlags::MOSEPH | CalcFlags::SIDEREAL) {
+        match eph.calc(
+            c.tjd,
+            Body::Sun,
+            CalcFlags::MOSEPH | CalcFlags::SIDEREAL | CalcFlags::SPEED,
+        ) {
             Ok(result) => {
                 let lon = result.data[0];
                 let diff = (lon - c.lon).abs();
                 if diff > 1e-8 {
                     failures.push(format!(
-                        "{label}: expected {:.17e}, got {:.17e}, diff {diff:.3e}",
+                        "{label}: lon expected {:.17e}, got {:.17e}, diff {diff:.3e}",
                         c.lon, lon
+                    ));
+                }
+                // Longitude speed exercises the fixed-star ayanamsa speed path
+                // (daya speed feeding apply_sidereal). Finite-difference vs C, so
+                // a looser tolerance than position, matching the fixstar speed tol.
+                let lon_sp = result.data[3];
+                let sp_diff = (lon_sp - c.lon_speed).abs();
+                if sp_diff > 1e-6 {
+                    failures.push(format!(
+                        "{label}: lon_speed expected {:.17e}, got {:.17e}, diff {sp_diff:.3e}",
+                        c.lon_speed, lon_sp
                     ));
                 }
             }

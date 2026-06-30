@@ -208,11 +208,7 @@ impl Ephemeris {
 
     /// Ayanamsa at `jd_tt` (TT), with nutation added unless `NONUT` is set.
     pub fn get_ayanamsa_ex(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error> {
-        let idx = self
-            .config
-            .sidereal_mode
-            .map(|m| m as i32 as usize)
-            .unwrap_or(0);
+        let idx = crate::ayanamsa::sidereal_index(&self.config);
         if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
             let (daya, _) = self.fixstar_ayanamsa(jd_tt, flags)?;
             if !flags.contains(CalcFlags::NONUT) {
@@ -531,11 +527,7 @@ impl Ephemeris {
             // Leave equatorial [12..24] untouched (matches C Branch 2)
         } else {
             // Default branch: ayanamsa subtraction on ecliptic polar
-            let idx = self
-                .config
-                .sidereal_mode
-                .map(|m| m as i32 as usize)
-                .unwrap_or(0);
+            let idx = crate::ayanamsa::sidereal_index(&self.config);
             let (daya_val, daya_sp) = if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
                 self.fixstar_ayanamsa(jd_tt, flags)?
             } else {
@@ -897,12 +889,16 @@ impl Ephemeris {
             obliquity(J2000, iflag, models)
         };
 
-        // Step 13: Nutation.
-        let nut_val = nutation(jd, iflag, models);
-        let nutv = Some(nutation(jd - NUT_SPEED_INTV, iflag, models));
-        if !iflag.contains(CalcFlags::NONUT) {
-            nutate(&mut x, &eps_date, &nut_val, nutv.as_ref(), true);
-        }
+        // Step 13: Nutation. Only computed when NONUT is unset; the value is
+        // reused by step 14 (nutation-in-ecliptic rotation).
+        let nut_val = if !iflag.contains(CalcFlags::NONUT) {
+            let nv = nutation(jd, iflag, models);
+            let nutv = nutation(jd - NUT_SPEED_INTV, iflag, models);
+            nutate(&mut x, &eps_date, &nv, Some(&nutv), true);
+            Some(nv)
+        } else {
+            None
+        };
 
         // Step 14: Equatorial → ecliptic (skip when EQUATORIAL requested).
         if !iflag.contains(CalcFlags::EQUATORIAL) {
@@ -914,9 +910,9 @@ impl Ephemeris {
             x[3] = vel3[0];
             x[4] = vel3[1];
             x[5] = vel3[2];
-            if !iflag.contains(CalcFlags::NONUT) {
-                let snut = nut_val.deps.sin();
-                let cnut = nut_val.deps.cos();
+            if let Some(ref nv) = nut_val {
+                let snut = nv.deps.sin();
+                let cnut = nv.deps.cos();
                 let pos3 = rotate_x_sincos([x[0], x[1], x[2]], snut, cnut);
                 x[0] = pos3[0];
                 x[1] = pos3[1];
@@ -946,11 +942,7 @@ impl Ephemeris {
             } else {
                 // Default: subtract ayanamsa from ecliptic (or equatorial) longitude.
                 x = cartesian_to_polar_with_speed(x);
-                let idx = self
-                    .config
-                    .sidereal_mode
-                    .map(|m| m as i32 as usize)
-                    .unwrap_or(0);
+                let idx = crate::ayanamsa::sidereal_index(&self.config);
                 let (daya_val, daya_sp) = if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
                     self.fixstar_ayanamsa(jd, iflag)?
                 } else {
@@ -1013,11 +1005,7 @@ impl Ephemeris {
             iflag_true |= CalcFlags::NOGDEFL;
         }
 
-        let idx = self
-            .config
-            .sidereal_mode
-            .map(|m| m as i32 as usize)
-            .unwrap_or(0);
+        let idx = crate::ayanamsa::sidereal_index(&self.config);
 
         let daya = match idx {
             17 => {
@@ -1087,7 +1075,10 @@ impl Ephemeris {
         const TINTV: f64 = 0.001;
         let d0 = self.fixstar_ayanamsa_single(jd_tt, flags)?;
         let d2 = self.fixstar_ayanamsa_single(jd_tt - TINTV, flags)?;
-        Ok((d0, (d0 - d2) / TINTV))
+        // Both samples are independently normalized to [0,360); use the signed
+        // shortest difference so a 360° wrap between samples doesn't blow up the
+        // speed (~3.6e5 deg/day spike). diff_degrees returns a value in (-180,180].
+        Ok((d0, crate::math::diff_degrees(d0, d2) / TINTV))
     }
 
     fn build_leap_seconds(config: &EphemerisConfig) -> crate::Result<Vec<i32>> {

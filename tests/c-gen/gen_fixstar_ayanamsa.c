@@ -25,9 +25,11 @@ static double epochs[] = {
 };
 #define NEPOCHS 4
 
-/* Indices to also test via swe_calc with SEFLG_SIDEREAL */
-static int calc_indices[] = {17, 27};
-#define NCALC_INDICES 2
+/* Indices to also test via swe_calc with SEFLG_SIDEREAL | SEFLG_SPEED.
+ * All 12 modes are exercised so the fixed-star ayanamsa speed path
+ * (daya speed feeding apply_sidereal) is covered against C. */
+static int calc_indices[] = {17, 27, 28, 29, 30, 31, 32, 33, 35, 36, 39, 40};
+#define NCALC_INDICES 12
 
 int main(void) {
     double daya;
@@ -70,11 +72,11 @@ int main(void) {
             double tjd = epochs[j];
             memset(xx, 0, sizeof(xx));
             memset(serr, 0, sizeof(serr));
-            swe_calc(tjd, SE_SUN, SEFLG_MOSEPH | SEFLG_SIDEREAL, xx, serr);
+            swe_calc(tjd, SE_SUN, SEFLG_MOSEPH | SEFLG_SIDEREAL | SEFLG_SPEED, xx, serr);
             if (!first_outer) printf(",\n");
             first_outer = 0;
-            printf("    {\"idx\": %d, \"tjd\": %.1f, \"lon\": %.17g}",
-                   idx, tjd, xx[0]);
+            printf("    {\"idx\": %d, \"tjd\": %.1f, \"lon\": %.17g, \"lon_speed\": %.17g}",
+                   idx, tjd, xx[0], xx[3]);
         }
     }
     printf("\n  ]\n");

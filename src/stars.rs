@@ -92,7 +92,10 @@ impl StarCatalog {
     }
 }
 
-// Mimic C atof: "ICRS" → 0.0 (atof of non-numeric), "2000" → 2000.0, "1950" → 1950.0
+// Parse the epoch field: "ICRS" → 0.0, "2000" → 2000.0, "1950" → 1950.0.
+// sefstars.txt only ever holds these three clean tokens, so a strict full-string
+// parse suffices; this is NOT a faithful atof (which would scan a leading float
+// from e.g. "1950BESSEL"). Non-numeric → 0.0, matching atof on "ICRS".
 fn parse_epoch(s: &str) -> f64 {
     s.trim().parse::<f64>().unwrap_or(0.0)
 }
