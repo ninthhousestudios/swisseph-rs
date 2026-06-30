@@ -352,8 +352,13 @@ fn sunshine() {
     let data = load();
     assert_eq!(
         data.sunshine.len(),
-        60,
-        "expected 60 golden cases (2 systems x 6 armc x 5 geolat, 1 sundec per case)"
+        76,
+        "expected 76 golden cases (60: 2 systems x 6 armc x 5 geolat, 1 sundec per case; \
+         + 16: 2 systems x 2 armc x geolat in {{70,-70}} x sundec in {{23,-23}}, all four of \
+         which satisfy |tand(geolat)*tand(sundec)|>=1 -- circumpolar-Sun combinations that \
+         exercise Makransky's sunshine_init ERR -> Porphyry fallback (do_interpol stays false \
+         on that path; Treindl never short-circuits on it and is included at the same \
+         combinations for contrast)"
     );
     for (i, c) in data.sunshine.iter().enumerate() {
         let hsys = parse_hsys(&c.hsys);
@@ -364,9 +369,19 @@ fn sunshine() {
             "case {i} ({} armc={:.6} geolat={:.6} eps={:.6} sundec={:.6})",
             c.hsys, c.armc, c.geolat, c.eps, c.sundec
         );
+        // The polar-battery cases (|geolat|=70, outside the standard battery's max of 64) are
+        // the only ones that can trigger Makransky's circumpolar ERR; at those combinations 'i'
+        // falls back to fill_porphyry (closed-form, already bitwise-exact elsewhere — see
+        // quad_arith's 'O' cases) rather than the quadrant case-split, so it gets the tighter
+        // tolerance too.
+        let fallback = hsys == HouseSystem::SunshineAlt && c.geolat.abs() > 64.0;
         // Sunshine is closed-form per house (Treindl directly, Makransky via a quadrant case
         // split); Makransky's case split may need the looser tolerance.
-        let cusp_eps = if c.hsys == "i" { 1e-8 } else { 1e-9 };
+        let cusp_eps = if hsys == HouseSystem::SunshineAlt && !fallback {
+            1e-8
+        } else {
+            1e-9
+        };
         for h in 1..=12usize {
             super::assert_f64_eps(
                 &format!("{label_base} cusp[{h}]"),
@@ -374,12 +389,15 @@ fn sunshine() {
                 result.cusps[h],
                 cusp_eps,
             );
-            // I/i use the driver-level finite-difference cusp speed path (do_interpol).
+            // I/i use the driver-level finite-difference cusp speed path (do_interpol) --
+            // except the Porphyry-fallback cases, which use fill_porphyry's analytical speeds
+            // (do_interpol is never set on that path) and so get the tighter tolerance.
+            let speed_eps = if fallback { 1e-9 } else { 1e-7 };
             super::assert_f64_eps(
                 &format!("{label_base} cusp_speed[{h}]"),
                 c.cusp_speed[h - 1],
                 result.cusp_speeds[h],
-                1e-7,
+                speed_eps,
             );
         }
     }

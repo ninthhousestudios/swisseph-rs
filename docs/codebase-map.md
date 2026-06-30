@@ -89,10 +89,16 @@ tests/
 │                         × 1 eps, cusps[1..36], same eps; closed_form_misc: 120 cases, 4 systems
 │                         U/Y/L/Q × 30 battery cases, eps 1e-9 cusps/1e-7 speeds (U speeds eps 0 —
 │                         stale pre-switch values, asserted exactly per c-ref-houses.md §4.2e);
-│                         sunshine: 60 cases, 2 systems I/i × 6 armc × 5 geolat (1 sundec per case,
-│                         rotated through {-23,-10,0,10,23}), eps 1e-9 cusps (1e-8 for Makransky
-│                         'i')/1e-7 speeds (driver-level finite-diff); sunshine_requires_sundec:
-│                         negative test, Sunshine + sundec=None returns Err)
+│                         sunshine: 76 cases — 60: 2 systems I/i × 6 armc × 5 geolat (1 sundec per
+│                         case, rotated through {-23,-10,0,10,23}), eps 1e-9 cusps (1e-8 for
+│                         Makransky 'i')/1e-7 speeds (driver-level finite-diff); + 16: 2 systems ×
+│                         2 armc × geolat {70,-70} × sundec {23,-23} (all four combinations satisfy
+│                         |tand(geolat)·tand(sundec)|≥1, triggering Makransky's circumpolar ERR →
+│                         Porphyry fallback; Treindl never short-circuits on it, included at the
+│                         same combos for contrast), eps 1e-9 cusps/speeds for the 'i' fallback
+│                         subset (fill_porphyry is closed-form, bitwise-exact elsewhere);
+│                         sunshine_requires_sundec: negative test, Sunshine + sundec=None
+│                         returns Err)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -111,7 +117,7 @@ tests/
 │   ├── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
 │   ├── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
 │   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
-│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23})
+│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)

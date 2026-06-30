@@ -377,6 +377,53 @@ int main(void) {
             }
         }
     }
+    /* Circumpolar-Sun combinations (|tand(geolat)*tand(sundec)| >= 1): exercises Makransky's
+     * sunshine_init ERR -> Porphyry fallback (swehouse.c:1175-1180, c-ref-houses.md S5 "I/i").
+     * Treindl is included at the same combinations for contrast -- it never short-circuits on
+     * this condition (sunshine_init's ERR is ignored), so 'I' should compute normally here. */
+    {
+        double polar_lats[] = { 70.0, -70.0 };
+        double polar_decs[] = { 23.0, -23.0 };
+        double polar_armcs[] = { 0.0, 215.7 };
+        int ip, id, ipa;
+        for (is = 0; is < N_SUNSHINE; is++) {
+            char hsys = sunshine_systems[is];
+            for (ipa = 0; ipa < 2; ipa++) {
+                for (ip = 0; ip < 2; ip++) {
+                    for (id = 0; id < 2; id++) {
+                        double armc = polar_armcs[ipa];
+                        double geolat = polar_lats[ip];
+                        double eps = epss[0];
+                        double sundec = polar_decs[id];
+                        int retc, i;
+
+                        memset(cusp, 0, sizeof(cusp));
+                        memset(cusp_speed, 0, sizeof(cusp_speed));
+                        memset(ascmc, 0, sizeof(ascmc));
+                        memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                        serr[0] = '\0';
+                        ascmc[9] = sundec;
+
+                        retc = swe_houses_armc_ex2(armc, geolat, eps, hsys, cusp, ascmc,
+                                                    cusp_speed, ascmc_speed, serr);
+                        (void)retc;
+
+                        printf(",\n");
+                        printf("    {\"hsys\": \"%c\", \"armc\": %.20e, \"geolat\": %.20e, \"eps\": %.20e, "
+                               "\"sundec\": %.20e, \"cusps\": [", hsys, armc, geolat, eps, sundec);
+                        for (i = 1; i <= 12; i++) {
+                            printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                        }
+                        printf("], \"cusp_speed\": [");
+                        for (i = 1; i <= 12; i++) {
+                            printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                        }
+                        printf("]}");
+                    }
+                }
+            }
+        }
+    }
     printf("\n  ]\n");
 
     printf("}\n");
