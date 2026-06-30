@@ -62,6 +62,16 @@ struct Gauquelin36Case {
 }
 
 #[derive(Deserialize)]
+struct ClosedFormMiscCase {
+    hsys: String,
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    cusps: [f64; 12],
+    cusp_speed: [f64; 12],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     angles_special: Vec<AnglesSpecialCase>,
     equal_family: Vec<EqualFamilyCase>,
@@ -69,6 +79,7 @@ struct GoldenData {
     great_circle: Vec<GreatCircleCase>,
     iterative: Vec<IterativeCase>,
     gauquelin36: Vec<Gauquelin36Case>,
+    closed_form_misc: Vec<ClosedFormMiscCase>,
 }
 
 fn load() -> GoldenData {
@@ -282,6 +293,43 @@ fn equal_family() {
                 &format!("{label_base} cusp_speed[{h}]"),
                 c.cusp_speed[h - 1],
                 result.cusp_speeds[h],
+            );
+        }
+    }
+}
+
+#[test]
+fn closed_form_misc() {
+    let data = load();
+    assert_eq!(
+        data.closed_form_misc.len(),
+        120,
+        "expected 120 golden cases (4 systems x 6 armc x 5 geolat x 1 eps)"
+    );
+    for (i, c) in data.closed_form_misc.iter().enumerate() {
+        let hsys = parse_hsys(&c.hsys);
+        let result = houses_armc(c.armc, c.geolat, c.eps, hsys, None)
+            .unwrap_or_else(|e| panic!("case {i} ({}): houses_armc failed: {e}", c.hsys));
+
+        let label_base = format!(
+            "case {i} ({} armc={:.6} geolat={:.6} eps={:.6})",
+            c.hsys, c.armc, c.geolat, c.eps
+        );
+        for h in 1..=12usize {
+            super::assert_f64_eps(
+                &format!("{label_base} cusp[{h}]"),
+                c.cusps[h - 1],
+                result.cusps[h],
+                1e-9,
+            );
+            // U's cusp speeds are stale pre-switch values (not analytical or finite-diff,
+            // see c-ref-houses.md §4.2e) — assert them exactly as C produces, including zeros.
+            let speed_eps = if c.hsys == "U" { 0.0 } else { 1e-7 };
+            super::assert_f64_eps(
+                &format!("{label_base} cusp_speed[{h}]"),
+                c.cusp_speed[h - 1],
+                result.cusp_speeds[h],
+                speed_eps,
             );
         }
     }

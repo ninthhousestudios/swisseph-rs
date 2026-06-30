@@ -34,6 +34,9 @@ static char great_circle_systems[] = { 'R', 'C', 'T', 'H', 'J' };
 static char iterative_systems[] = { 'P', 'K' };
 #define N_ITERATIVE (sizeof(iterative_systems) / sizeof(iterative_systems[0]))
 
+static char closed_form_misc_systems[] = { 'U', 'Y', 'L', 'Q' };
+#define N_CLOSED_FORM_MISC (sizeof(closed_form_misc_systems) / sizeof(closed_form_misc_systems[0]))
+
 /* Polar-circle geolats, added to this task's battery only, to exercise the Placidus/Koch/
  * Gauquelin Porphyry fallback (|fi| >= 90-eps, eps=23.4392911 => cutoff ~66.56 deg). */
 static double polar_geolats[] = { 51.5, -33.87, 0.0, 64.0, -64.0, 78.0, -78.0 };
@@ -279,6 +282,47 @@ int main(void) {
                     printf("%.20e%s", cusp_speed[i], (i < 36) ? ", " : "");
                 }
                 printf("]}");
+            }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* --- closed_form_misc: cusps[1..12] + speeds for U/Y/L/Q --- */
+    printf("  \"closed_form_misc\": [\n");
+    first = 1;
+    for (is = 0; is < N_CLOSED_FORM_MISC; is++) {
+        char hsys = closed_form_misc_systems[is];
+        for (ia = 0; ia < N_ARMC; ia++) {
+            for (ig = 0; ig < N_GEOLAT; ig++) {
+                for (ie = 0; ie < N_EPS; ie++) {
+                    double armc = armcs[ia];
+                    double geolat = geolats[ig];
+                    double eps = epss[ie];
+                    int retc, i;
+
+                    memset(cusp, 0, sizeof(cusp));
+                    memset(cusp_speed, 0, sizeof(cusp_speed));
+                    memset(ascmc, 0, sizeof(ascmc));
+                    memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                    serr[0] = '\0';
+
+                    retc = swe_houses_armc_ex2(armc, geolat, eps, hsys, cusp, ascmc,
+                                                cusp_speed, ascmc_speed, serr);
+                    (void)retc;
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"hsys\": \"%c\", \"armc\": %.20e, \"geolat\": %.20e, \"eps\": %.20e, "
+                           "\"cusps\": [", hsys, armc, geolat, eps);
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                    }
+                    printf("], \"cusp_speed\": [");
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                    }
+                    printf("]}");
+                }
             }
         }
     }

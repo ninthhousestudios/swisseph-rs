@@ -2,7 +2,7 @@
 //! (`swe_houses_armc_ex2`). See `docs/c-ref-houses.md`.
 
 use crate::error::Error;
-use crate::math::{cotrans, diff_degrees, normalize_degrees};
+use crate::math::{cotrans, diff_degrees, normalize_degrees, normalize_radians};
 use crate::types::HouseSystem;
 
 // ---------------------------------------------------------------------------
@@ -157,6 +157,42 @@ fn asc_dash(x: f64, f: f64, sine: f64, cose: f64) -> f64 {
         0.0
     };
     dudt * ARMCS
+}
+
+/// `apc_sector(n, ph, e, az)` — radians in, degrees out. Port of the static `apc_sector` helper
+/// (swehouse.c:782-825) used by the `'Y'` (APC) house system. Works in radians throughout via
+/// plain `tan`/`atan`/`atan2`/`sin`/`cos`, unlike the degree-macro style used everywhere else in
+/// this module — see c-ref-houses.md §12.3. `ph`=geolat, `e`=obliquity, `az`=armc.
+fn apc_sector(n: i32, ph: f64, e: f64, az: f64) -> f64 {
+    let (kv, dasc) = if (ph * crate::constants::RADTODEG).abs() > 90.0 - VERY_SMALL {
+        (0.0, 0.0)
+    } else {
+        let kv = (ph.tan() * e.tan() * az.cos() / (1.0 + ph.tan() * e.tan() * az.sin())).atan();
+        let dasc = if (ph * crate::constants::RADTODEG).abs() < VERY_SMALL {
+            let d = (90.0 - VERY_SMALL) * crate::constants::DEGTORAD;
+            if ph < 0.0 { -d } else { d }
+        } else {
+            (kv.sin() / ph.tan()).atan()
+        };
+        (kv, dasc)
+    };
+    let is_below_hor = n < 8;
+    let k = if is_below_hor {
+        (n - 1) as f64
+    } else {
+        (n - 13) as f64
+    };
+    let a = if is_below_hor {
+        kv + az + std::f64::consts::FRAC_PI_2 + k * (std::f64::consts::FRAC_PI_2 - kv) / 3.0
+    } else {
+        kv + az + std::f64::consts::FRAC_PI_2 + k * (std::f64::consts::FRAC_PI_2 + kv) / 3.0
+    };
+    let a = normalize_radians(a);
+    let dret = (dasc.tan() * ph.tan() * az.sin() + a.sin()).atan2(
+        e.cos() * (dasc.tan() * ph.tan() * az.cos() + a.cos())
+            + e.sin() * ph.tan() * (az - a).sin(),
+    );
+    normalize_degrees(dret * crate::constants::RADTODEG)
 }
 
 /// Keeps the Ascendant on the eastern hemisphere near the poles. Port of `fix_asc_polar`
@@ -889,6 +925,133 @@ fn calc_h(
                     skip_mirror = true;
                 }
             }
+        }
+        HouseSystem::PullenSD => {
+            // L — Pullen SD "sinusoidal delta", ex Neo-Porphyry (swehouse.c:1273-1300)
+            let mut acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                cusps[1] = ac;
+                acmc = diff_degrees(ac, mc);
+            }
+            let q1 = 180.0 - acmc;
+            let mut d = (acmc - 90.0) / 4.0;
+            if acmc <= 30.0 {
+                cusps[11] = normalize_degrees(mc + acmc / 2.0);
+                cusps[12] = cusps[11];
+            } else {
+                cusps[11] = normalize_degrees(mc + 30.0 + d);
+                cusps[12] = normalize_degrees(mc + 60.0 + 3.0 * d);
+            }
+            d = (q1 - 90.0) / 4.0;
+            if q1 <= 30.0 {
+                cusps[2] = normalize_degrees(ac + q1 / 2.0);
+                cusps[3] = cusps[2];
+            } else {
+                cusps[2] = normalize_degrees(ac + 30.0 + d);
+                cusps[3] = normalize_degrees(ac + 60.0 + 3.0 * d);
+            }
+            do_interpol = do_speed;
+        }
+        HouseSystem::PullenSR => {
+            // Q — Pullen SR "sinusoidal ratio" (swehouse.c:1336-1380)
+            let third = 1.0 / 3.0;
+            let two23 = (2.0_f64 * 2.0).powf(third);
+            let mut acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                cusps[1] = ac;
+                acmc = diff_degrees(ac, mc);
+            }
+            let mut q = acmc;
+            if q > 90.0 {
+                q = 180.0 - q;
+            }
+            let (x, xr, xr3, xr4) = if q < 1e-30 {
+                (0.0, 0.0, 0.0, 180.0)
+            } else {
+                let c = (180.0 - q) / q;
+                let csq = c * c;
+                let ccr = (csq - c).powf(third);
+                let cqx = (two23 * ccr + 1.0).sqrt();
+                let r1 = 0.5 * cqx;
+                let r2 = 0.5 * (-2.0 * (1.0 - 2.0 * c) / cqx - two23 * ccr + 2.0).sqrt();
+                let r = r1 + r2 - 0.5;
+                let x = q / (2.0 * r + 1.0);
+                let xr = r * x;
+                let xr3 = xr * r * r;
+                let xr4 = xr3 * r;
+                (x, xr, xr3, xr4)
+            };
+            if acmc > 90.0 {
+                cusps[11] = normalize_degrees(mc + xr3);
+                cusps[12] = normalize_degrees(cusps[11] + xr4);
+                cusps[2] = normalize_degrees(ac + xr);
+                cusps[3] = normalize_degrees(cusps[2] + x);
+            } else {
+                cusps[11] = normalize_degrees(mc + xr);
+                cusps[12] = normalize_degrees(cusps[11] + x);
+                cusps[2] = normalize_degrees(ac + xr3);
+                cusps[3] = normalize_degrees(cusps[2] + xr4);
+            }
+            do_interpol = do_speed;
+        }
+        HouseSystem::KrusinskiPisaGoelzer => {
+            // U — Krusinski-Pisa (swehouse.c:1731-1805): great circle through Asc and zenith,
+            // divided into 12 equal 30° arcs, projected back onto the ecliptic via meridian
+            // circles. A sequence of `swe_cotrans` rotations, not a closed-form trig formula.
+            let acmc = diff_degrees(ac, mc);
+            if acmc < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+            }
+            // A0-A5: rotate the Asc into the asc-zenith house-circle frame.
+            let mut x = cotrans([ac, 0.0, 1.0], -eps); // A1: ecliptic -> equatorial
+            x[0] -= th - 90.0; // A2: rotate by RA of east point
+            x = cotrans(x, -(90.0 - geolat)); // A3: equatorial -> horizontal
+            let kr_horizon_lon = x[0];
+            x[0] -= x[0]; // A4: rotate to 0
+            x = cotrans(x, -90.0); // A5: horizontal -> asc-zenith house-circle frame
+            for i in 0..6usize {
+                let mut xi = [30.0 * i as f64, 0.0, x[2]];
+                xi = cotrans(xi, 90.0); // B1: house-circle -> horizontal
+                xi[0] += kr_horizon_lon; // B2: rotate back
+                xi = cotrans(xi, 90.0 - geolat); // B3: horizontal -> equatorial
+                xi[0] = normalize_degrees(xi[0] + (th - 90.0)); // B4: RA of house cusp
+                let mut cusp = atand(tand(xi[0]) / cosd(eps)); // B5: equatorial -> ecliptic
+                if xi[0] > 90.0 && xi[0] <= 270.0 {
+                    cusp = normalize_degrees(cusp + 180.0);
+                }
+                cusp = normalize_degrees(cusp);
+                cusps[i + 1] = cusp;
+                cusps[i + 7] = normalize_degrees(cusp + 180.0);
+            }
+            // No cusp_speed handling: 'U' is not in the do_interpol set — cusp_speed[1,4,7,10]
+            // carry the stale pre-switch ac_speed/mc_speed, the rest stay zero (§4.2e).
+        }
+        HouseSystem::APC => {
+            // Y — APC houses (swehouse.c:1806-1829), via the radians-domain `apc_sector` helper.
+            for (i, cs) in cusps.iter_mut().enumerate().take(13).skip(1) {
+                *cs = apc_sector(
+                    i as i32,
+                    geolat * crate::constants::DEGTORAD,
+                    eps * crate::constants::DEGTORAD,
+                    th * crate::constants::DEGTORAD,
+                );
+            }
+            // MC near latitude 90 from apc_sector() is not accurate; use the real MC instead.
+            cusps[10] = mc;
+            cusps[4] = normalize_degrees(mc + 180.0);
+            if geolat.abs() >= 90.0 - eps && diff_degrees(ac, mc) < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                mc = normalize_degrees(mc + 180.0);
+                for cs in cusps.iter_mut().take(13).skip(1) {
+                    *cs = normalize_degrees(*cs + 180.0);
+                }
+            }
+            do_interpol = do_speed;
+            // Y fills all 12 cusps itself via independent geometry — excluded from the
+            // post-switch opposite-cusp mirror (swehouse.c:1985-2000, §3 step 3).
+            skip_mirror = true;
         }
         _ => {
             return Err(Error::CError(format!(
