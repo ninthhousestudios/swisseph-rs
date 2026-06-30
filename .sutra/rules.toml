@@ -87,29 +87,37 @@ provenance = "checkpoint:swisseph-rs/8"
 # since Phase 5, but houses/eclipse/phenomena/heliacal/stars/ayanamsa are still
 # empty stubs (zero import edges). Binding now would produce 18 inert
 # dead_constraints; defer until the first app module has real code.
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:houses→moshier"
-# from = "src/houses.rs"
-# to = "src/moshier/**"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+#
+# ACTIVATED 2026-06-30 — houses (swisseph-rs/11 → /59–67): the houses port begins
+# this phase, so houses.rs gets real code. The three houses→backend constraints
+# below are now live. Target globs corrected from the original "src/jpl.rs" /
+# "src/sweph_file.rs" single-file form to the directory globs "src/jpl/**" /
+# "src/sweph_file/**" (both became directories at swisseph-rs/8/43), matching the
+# active stars/ayanamsa constraints. eclipse/phenomena/heliacal remain commented
+# below — still empty stubs, would be inert dead_constraints.
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:houses→moshier"
+from = "src/houses.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:houses→jpl"
-# from = "src/houses.rs"
-# to = "src/jpl.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:houses→jpl"
+from = "src/houses.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:houses→sweph"
-# from = "src/houses.rs"
-# to = "src/sweph_file.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:houses→sweph"
+from = "src/houses.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
 # [[constraint]]
 # kind = "forbidden_dep"
