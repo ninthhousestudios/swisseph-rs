@@ -258,7 +258,10 @@ enum NewtonCusp {
     /// `|tant| < VERY_SMALL`: the cusp coincides with the AC/DC axis. Caller uses `rectasc` as
     /// the cusp and `ARMCS` as the speed.
     DegenerateAxis,
-    /// Hit `NITER_MAX` without converging. Caller falls back to Porphyry for the whole system.
+    /// Hit `NITER_MAX` without converging, OR converged/degenerated exactly on the `NITER_MAX`th
+    /// iteration. C's post-loop check is `i >= niter_max` (swehouse.c:1667 et al.), which rejects
+    /// the cap iteration's result even if it satisfied the convergence/degeneracy test on that
+    /// exact step. Caller falls back to Porphyry for the whole system.
     NonConverged,
 }
 
@@ -285,11 +288,17 @@ fn placidus_newton_cusp(
     for i in 1..=NITER_MAX {
         tant = tand(asind(sine * sind(cusp)));
         if tant.abs() < VERY_SMALL {
+            if i >= NITER_MAX {
+                break;
+            }
             return NewtonCusp::DegenerateAxis;
         }
         f = atand(sind(asind(tanfi * tant) / divisor) / tant);
         cusp = asc1(rectasc, f, sine, cose);
         if i > 1 && diff_degrees(cusp, cuspsv).abs() < VERY_SMALL_PLAC_ITER {
+            if i >= NITER_MAX {
+                break;
+            }
             return NewtonCusp::Converged { cusp, f };
         }
         cuspsv = cusp;
