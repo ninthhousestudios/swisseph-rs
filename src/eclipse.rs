@@ -11,7 +11,7 @@ use crate::constants::{
 };
 use crate::context::{Ephemeris, EphemerisConfig, TopoPosition};
 use crate::error::Error;
-use crate::flags::{CalcFlags, EclipseFlags};
+use crate::flags::{CalcFlags, EclipseFlags, RiseSetFlags};
 use crate::math::{cartesian_to_polar, dot_prod_unit, normalize_degrees, polar_to_cartesian};
 use crate::types::Body;
 
@@ -1018,4 +1018,497 @@ pub(crate) fn sol_eclipse_when_glob(
             flags: retflag,
         });
     }
+}
+
+/// Local solar-eclipse search result: `tret[0..7]` per `swe_sol_eclipse_when_loc` +
+/// `eclipse_when_loc` (swecl.c:2019-2410, §6). **Index semantics differ from
+/// [`SolarEclipseGlobal`]'s `tret[]`** (§6.3) -- do not conflate the two.
+#[derive(Debug, Clone, Copy)]
+pub struct SolarEclipseLocal {
+    /// Time (UT) of maximum eclipse as seen from this location -- re-anchored to sunrise/sunset
+    /// if the true geocentric maximum wasn't visible here. `tret[0]`.
+    pub time_maximum: f64,
+    /// Time (UT) of first contact (penumbra ingress, i.e. visible eclipse begin here). `tret[1]`.
+    pub time_first_contact: f64,
+    /// Time (UT) of second contact (umbra/antumbra ingress -- totality/annularity begin here),
+    /// `0.0` if only a partial eclipse is visible from this location. `tret[2]`.
+    pub time_second_contact: f64,
+    /// Time (UT) of third contact (umbra/antumbra egress -- totality/annularity end here), `0.0`
+    /// if only a partial eclipse is visible from this location. `tret[3]`.
+    pub time_third_contact: f64,
+    /// Time (UT) of fourth contact (penumbra egress, i.e. visible eclipse end here). `tret[4]`.
+    pub time_fourth_contact: f64,
+    /// Time (UT) of sunrise between first and fourth contact, `0.0` if none (or circumpolar).
+    /// `tret[5]`.
+    pub time_sunrise: f64,
+    /// Time (UT) of sunset between first and fourth contact, `0.0` if none (or circumpolar).
+    /// `tret[6]`.
+    pub time_sunset: f64,
+    /// Local circumstances (`attr[]`) at whichever instant was written last: the moment of
+    /// maximum eclipse, unless a sunrise/sunset re-anchor (below) overwrote it. `core_diameter_km`
+    /// is filled in by [`sol_eclipse_when_loc`] from a geocentric `eclipse_where` call at
+    /// `time_maximum` (§6.1 step 4), same "geocentric, not observer-specific" caveat as
+    /// `sol_eclipse_how`.
+    pub attr: EclipseHow,
+    /// Eclipse-type classification (TOTAL/ANNULAR/PARTIAL) OR'd with VISIBLE and whichever of
+    /// MAX/1ST/2ND/3RD/4TH_VISIBLE applied at some contact; `NONCENTRAL` merged in by
+    /// [`sol_eclipse_when_loc`]. The search loop retries internally until a visible eclipse is
+    /// found -- never empty.
+    pub flags: EclipseFlags,
+}
+
+/// Overlap-gap sample used throughout [`eclipse_when_loc`]'s convergence/contact refinement:
+/// `acos(dot_prod_unit(xs/|xs|, xm/|xm|)) * RADTODEG`, i.e. the angular separation between the
+/// (already-topocentric) cartesian Sun/Moon position vectors `xs`/`xm`. Distances are computed
+/// manually via `sqrt(sum of squares)` rather than reusing a polar-array distance component,
+/// matching the C source's own `/*ls[2]*/`/`/*lm[2]*/` comments flagging this as deliberate
+/// (§6.2.1) -- port literally, do not "simplify" to a polar re-fetch.
+fn topo_angular_separation(xs: [f64; 3], xm: [f64; 3]) -> f64 {
+    let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+    let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+    let x1 = [xs[0] / ds, xs[1] / ds, xs[2] / ds];
+    let x2 = [xm[0] / dm, xm[1] / dm, xm[2] / dm];
+    dot_prod_unit(x1, x2).acos() * RADTODEG
+}
+
+/// Local eclipse search: find the next (or, if `backward`, previous) solar eclipse **visible
+/// from** `geopos` (topocentric, unlike [`sol_eclipse_when_glob`]'s purely geocentric search).
+/// Port of `eclipse_when_loc` (swecl.c:2100-2410, §6.2). `geopos` = [longitude, latitude, height
+/// above sea (m)], degrees/degrees/meters.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn eclipse_when_loc(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ifl: CalcFlags,
+    geopos: [f64; 3],
+    backward: bool,
+) -> Result<SolarEclipseLocal, Error> {
+    let config = eph.config();
+    let direction = if backward { -1.0 } else { 1.0 };
+
+    let topo_config = {
+        let mut c = config.clone();
+        c.topographic = Some(TopoPosition {
+            longitude: geopos[0],
+            latitude: geopos[1],
+            altitude: geopos[2],
+        });
+        c
+    };
+
+    // Computed once, reused unchanged for the whole function (main loop, contacts 2/3, contacts
+    // 1/4) except the visibility-scan/sunrise-sunset `eclipse_how` calls, which build their own
+    // topocentric flags internally from raw `ifl` (§6.2, swecl.c:2126-2127).
+    let iflag = CalcFlags::EQUATORIAL | CalcFlags::TOPOCTR | ifl;
+    let iflag_cart = iflag | CalcFlags::XYZ;
+    let iflag_cart_speed = iflag_cart | CalcFlags::SPEED;
+
+    let mut k = ((tjd_start - J2000) / 365.2425 * 12.3685).trunc();
+    k -= direction;
+
+    'next_try: loop {
+        let mut tjd = match meeus_new_moon_estimate(k) {
+            Some(tjd) => tjd,
+            None => {
+                k += direction;
+                continue 'next_try;
+            }
+        };
+
+        // §6.2.1 main convergence loop: refine `tjd` (still ET/TT) to the instant of minimum
+        // topocentric Sun-Moon angular separation. `dtstart`/`dt<=1e-5` boundary and the
+        // 2-then-3 `dtdiv` schedule are intentionally different constants than §5.2's global
+        // search -- do not unify.
+        let mut dtdiv = 2.0;
+        let dtstart = if (1_900_000.0..=2_500_000.0).contains(&tjd) {
+            0.5
+        } else {
+            2.0
+        };
+        let mut dt = dtstart;
+        while dt > 0.00001 {
+            if dt < 0.1 {
+                dtdiv = 3.0;
+            }
+            let mut dc = [0.0f64; 3];
+            let mut t = tjd - dt;
+            for dc_i in dc.iter_mut() {
+                let xs = eph
+                    .calc_with_config(t, Body::Sun, iflag_cart, &topo_config)?
+                    .data;
+                let xm = eph
+                    .calc_with_config(t, Body::Moon, iflag_cart, &topo_config)?
+                    .data;
+                *dc_i = topo_angular_separation([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]);
+                t += dt;
+            }
+            let (dtint, _) = crate::math::find_maximum(dc[0], dc[1], dc[2], dt);
+            tjd += dtint + dt;
+            dt /= dtdiv;
+        }
+
+        // §6.2.2 post-convergence confirmation: a fresh set of calc calls at the converged
+        // `tjd`, not a reuse of the loop's last sample.
+        let xs = eph
+            .calc_with_config(tjd, Body::Sun, iflag_cart, &topo_config)?
+            .data;
+        let ls = eph
+            .calc_with_config(tjd, Body::Sun, iflag, &topo_config)?
+            .data;
+        let xm = eph
+            .calc_with_config(tjd, Body::Moon, iflag_cart, &topo_config)?
+            .data;
+        let lm = eph
+            .calc_with_config(tjd, Body::Moon, iflag, &topo_config)?
+            .data;
+        let dctr = dot_prod_unit([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]).acos() * RADTODEG;
+        let rmoon = (RMOON / lm[2]).asin() * RADTODEG;
+        let rsun = (RSUN / ls[2]).asin() * RADTODEG;
+        let rsplusrm = rsun + rmoon;
+        let rsminusrm = rsun - rmoon;
+        if dctr > rsplusrm {
+            k += direction;
+            continue 'next_try;
+        }
+
+        let mut tret = [0.0f64; 7];
+        // 2-pass fixed-point ET->UT conversion (fewer passes than §5.3's 3-pass global-search
+        // version).
+        let t0_pass1 = tjd - crate::deltat::calc_deltat(tjd, config);
+        tret[0] = tjd - crate::deltat::calc_deltat(t0_pass1, config);
+        if (backward && tret[0] >= tjd_start - 0.0001)
+            || (!backward && tret[0] <= tjd_start + 0.0001)
+        {
+            k += direction;
+            continue 'next_try;
+        }
+
+        // Phase classification (swecl.c:2235-2240): mirrors §4.4's thresholds, but the partial
+        // branch tests `dctr <= rsplusrm` (not strict `<` like `eclipse_how`) -- preserve the
+        // exact operator (measure-zero difference given the rejection guard above).
+        let mut retflag = if dctr < rsminusrm {
+            EclipseFlags::ANNULAR
+        } else if dctr < rsminusrm.abs() {
+            EclipseFlags::TOTAL
+        } else if dctr <= rsplusrm {
+            EclipseFlags::PARTIAL
+        } else {
+            EclipseFlags::empty()
+        };
+        let dctrmin = dctr;
+
+        // Contacts 2/3 (swecl.c:2242-2300): skipped (tret[2]=tret[3]=0) if only a partial
+        // eclipse is visible from this location (umbra never reaches here).
+        if dctrmin <= rsminusrm.abs() {
+            let twomin = 2.0 / 24.0 / 60.0;
+            let mut dc = [0.0f64; 3];
+            dc[1] = rsminusrm.abs() - dctrmin;
+            for &(i, t) in &[(0usize, tjd - twomin), (2usize, tjd + twomin)] {
+                let xs = eph
+                    .calc_with_config(t, Body::Sun, iflag_cart, &topo_config)?
+                    .data;
+                let xm = eph
+                    .calc_with_config(t, Body::Moon, iflag_cart, &topo_config)?
+                    .data;
+                let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                let mut rmoon = (RMOON / dm).asin() * RADTODEG;
+                rmoon *= 0.99916; // "gives better accuracy for 2nd/3rd contacts" (swecl.c)
+                let rsun = (RSUN / ds).asin() * RADTODEG;
+                let dctr_i = topo_angular_separation([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]);
+                dc[i] = (rsun - rmoon).abs() - dctr_i;
+            }
+            if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], twomin) {
+                tret[2] = tjd + dt1 + twomin;
+                tret[3] = tjd + dt2 + twomin;
+                let tensec = 10.0 / 24.0 / 60.0 / 60.0;
+                let mut dt = tensec;
+                for _ in 0..2 {
+                    for &j in &[2usize, 3usize] {
+                        let mut xs = eph
+                            .calc_with_config(tret[j], Body::Sun, iflag_cart_speed, &topo_config)?
+                            .data;
+                        let mut xm = eph
+                            .calc_with_config(tret[j], Body::Moon, iflag_cart_speed, &topo_config)?
+                            .data;
+                        let mut dc2 = [0.0f64; 2];
+                        for (i2, dc2_i) in dc2.iter_mut().enumerate() {
+                            if i2 == 1 {
+                                for k in 0..3 {
+                                    xs[k] -= xs[k + 3] * dt;
+                                    xm[k] -= xm[k + 3] * dt;
+                                }
+                            }
+                            let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                            let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                            let mut rmoon = (RMOON / dm).asin() * RADTODEG;
+                            rmoon *= 0.99916;
+                            let rsun = (RSUN / ds).asin() * RADTODEG;
+                            let dctr_i = topo_angular_separation(
+                                [xs[0], xs[1], xs[2]],
+                                [xm[0], xm[1], xm[2]],
+                            );
+                            *dc2_i = (rsun - rmoon).abs() - dctr_i;
+                        }
+                        let dt1 = -dc2[0] / ((dc2[0] - dc2[1]) / dt);
+                        tret[j] += dt1;
+                    }
+                    dt /= 10.0;
+                }
+                tret[2] -= crate::deltat::calc_deltat(tret[2], config);
+                tret[3] -= crate::deltat::calc_deltat(tret[3], config);
+            }
+        }
+
+        // Contacts 1/4 (swecl.c:2301-2353): structurally identical to contacts 2/3 but always
+        // computed (every eclipse, even partial, has a 1st/4th contact), no `0.99916`
+        // correction, uses `rsplusrm` (outer penumbra boundary) instead of `fabs(rsminusrm)`,
+        // and the secant-refinement `dc` formula takes `fabs(rsplusrm)` even though `rsplusrm`
+        // is never negative -- an asymmetry vs. the initial-sample formula (no `fabs` there);
+        // preserve both exactly.
+        {
+            let twohr = 2.0 / 24.0;
+            let mut dc = [0.0f64; 3];
+            dc[1] = rsplusrm - dctrmin;
+            for &(i, t) in &[(0usize, tjd - twohr), (2usize, tjd + twohr)] {
+                let xs = eph
+                    .calc_with_config(t, Body::Sun, iflag_cart, &topo_config)?
+                    .data;
+                let xm = eph
+                    .calc_with_config(t, Body::Moon, iflag_cart, &topo_config)?
+                    .data;
+                let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                let rmoon = (RMOON / dm).asin() * RADTODEG;
+                let rsun = (RSUN / ds).asin() * RADTODEG;
+                let dctr_i = topo_angular_separation([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]);
+                dc[i] = (rsun + rmoon) - dctr_i;
+            }
+            if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], twohr) {
+                tret[1] = tjd + dt1 + twohr;
+                tret[4] = tjd + dt2 + twohr;
+                let tenmin = 10.0 / 24.0 / 60.0;
+                let mut dt = tenmin;
+                for _ in 0..3 {
+                    for &j in &[1usize, 4usize] {
+                        let mut xs = eph
+                            .calc_with_config(tret[j], Body::Sun, iflag_cart_speed, &topo_config)?
+                            .data;
+                        let mut xm = eph
+                            .calc_with_config(tret[j], Body::Moon, iflag_cart_speed, &topo_config)?
+                            .data;
+                        let mut dc2 = [0.0f64; 2];
+                        for (i2, dc2_i) in dc2.iter_mut().enumerate() {
+                            if i2 == 1 {
+                                for k in 0..3 {
+                                    xs[k] -= xs[k + 3] * dt;
+                                    xm[k] -= xm[k + 3] * dt;
+                                }
+                            }
+                            let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                            let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                            let rmoon = (RMOON / dm).asin() * RADTODEG;
+                            let rsun = (RSUN / ds).asin() * RADTODEG;
+                            let dctr_i = topo_angular_separation(
+                                [xs[0], xs[1], xs[2]],
+                                [xm[0], xm[1], xm[2]],
+                            );
+                            *dc2_i = (rsun + rmoon).abs() - dctr_i;
+                        }
+                        let dt1 = -dc2[0] / ((dc2[0] - dc2[1]) / dt);
+                        tret[j] += dt1;
+                    }
+                    dt /= 10.0;
+                }
+                tret[1] -= crate::deltat::calc_deltat(tret[1], config);
+                tret[4] -= crate::deltat::calc_deltat(tret[4], config);
+            }
+        }
+
+        // Visibility scan (swecl.c:2354-2384): DESCENDING order so the i=0 (max) write survives
+        // last in `how`, matching C's shared-`attr[]`-clobbering behavior. Every non-skipped
+        // call in this scan uses the raw `ifl` (not `iflag`/`iflag_cart`), since `eclipse_how`
+        // adds its own EQUATORIAL|TOPOCTR internally.
+        let mut how: Option<EclipseHow> = None;
+        for i in (0..=4).rev() {
+            if tret[i] == 0.0 {
+                continue;
+            }
+            let h = eclipse_how(
+                eph,
+                tret[i],
+                Body::Sun,
+                None,
+                ifl,
+                geopos[0],
+                geopos[1],
+                geopos[2],
+            )?;
+            if h.apparent_altitude > 0.0 {
+                retflag |= EclipseFlags::VISIBLE;
+                retflag |= match i {
+                    0 => EclipseFlags::MAX_VISIBLE,
+                    1 => EclipseFlags::PARTBEG_VISIBLE,
+                    2 => EclipseFlags::TOTBEG_VISIBLE,
+                    3 => EclipseFlags::TOTEND_VISIBLE,
+                    4 => EclipseFlags::PARTEND_VISIBLE,
+                    _ => unreachable!(),
+                };
+            }
+            how = Some(h);
+        }
+        if !retflag.contains(EclipseFlags::VISIBLE) {
+            k += direction;
+            continue 'next_try;
+        }
+        let mut how = how.expect("tret[0] is always set, so the i=0 scan iteration always runs");
+
+        // Sunrise/sunset interaction (swecl.c:2385-2420). Literal quirk: both `swe_rise_trans`
+        // calls pass `iflag` (the TOPOCTR-augmented, function-top value), unlike every
+        // `eclipse_how` call in this function which uses raw `ifl` -- an inconsistency in the
+        // original C, preserved here rather than "normalized" to `ifl`.
+        let rise = eph.rise_trans(
+            tret[1] - 0.001,
+            Body::Sun,
+            None,
+            iflag,
+            RiseSetFlags::RISE | RiseSetFlags::DISC_BOTTOM,
+            geopos,
+            0.0,
+            0.0,
+        );
+        let tjdr = match rise {
+            Ok(r) => r.time,
+            Err(Error::CircumpolarBody) => {
+                return Ok(SolarEclipseLocal {
+                    time_maximum: tret[0],
+                    time_first_contact: tret[1],
+                    time_second_contact: tret[2],
+                    time_third_contact: tret[3],
+                    time_fourth_contact: tret[4],
+                    time_sunrise: tret[5],
+                    time_sunset: tret[6],
+                    attr: how,
+                    flags: retflag,
+                });
+            }
+            Err(e) => return Err(e),
+        };
+        let set = eph.rise_trans(
+            tret[1] - 0.001,
+            Body::Sun,
+            None,
+            iflag,
+            RiseSetFlags::SET | RiseSetFlags::DISC_BOTTOM,
+            geopos,
+            0.0,
+            0.0,
+        );
+        let tjds = match set {
+            Ok(r) => r.time,
+            Err(Error::CircumpolarBody) => {
+                return Ok(SolarEclipseLocal {
+                    time_maximum: tret[0],
+                    time_first_contact: tret[1],
+                    time_second_contact: tret[2],
+                    time_third_contact: tret[3],
+                    time_fourth_contact: tret[4],
+                    time_sunrise: tret[5],
+                    time_sunset: tret[6],
+                    attr: how,
+                    flags: retflag,
+                });
+            }
+            Err(e) => return Err(e),
+        };
+
+        if tjds < tret[1] || (tjds > tjdr && tjdr > tret[4]) {
+            k += direction;
+            continue 'next_try;
+        }
+        if tjdr > tret[1] && tjdr < tret[4] {
+            tret[5] = tjdr;
+            if !retflag.contains(EclipseFlags::MAX_VISIBLE) {
+                tret[0] = tjdr;
+                let h = eclipse_how(
+                    eph,
+                    tret[5],
+                    Body::Sun,
+                    None,
+                    ifl,
+                    geopos[0],
+                    geopos[1],
+                    geopos[2],
+                )?;
+                retflag.remove(EclipseFlags::TOTAL | EclipseFlags::ANNULAR | EclipseFlags::PARTIAL);
+                retflag |=
+                    h.flags & (EclipseFlags::TOTAL | EclipseFlags::ANNULAR | EclipseFlags::PARTIAL);
+                how = h;
+            }
+        }
+        if tjds > tret[1] && tjds < tret[4] {
+            tret[6] = tjds;
+            if !retflag.contains(EclipseFlags::MAX_VISIBLE) {
+                tret[0] = tjds;
+                let h = eclipse_how(
+                    eph,
+                    tret[6],
+                    Body::Sun,
+                    None,
+                    ifl,
+                    geopos[0],
+                    geopos[1],
+                    geopos[2],
+                )?;
+                retflag.remove(EclipseFlags::TOTAL | EclipseFlags::ANNULAR | EclipseFlags::PARTIAL);
+                retflag |=
+                    h.flags & (EclipseFlags::TOTAL | EclipseFlags::ANNULAR | EclipseFlags::PARTIAL);
+                how = h;
+            }
+        }
+
+        return Ok(SolarEclipseLocal {
+            time_maximum: tret[0],
+            time_first_contact: tret[1],
+            time_second_contact: tret[2],
+            time_third_contact: tret[3],
+            time_fourth_contact: tret[4],
+            time_sunrise: tret[5],
+            time_sunset: tret[6],
+            attr: how,
+            flags: retflag,
+        });
+    }
+}
+
+/// Public wrapper (`swe_sol_eclipse_when_loc`, swecl.c:2019-2041, §6.1). `geopos` = [longitude,
+/// latitude, height above sea (m)], degrees/degrees/meters.
+///
+/// Unlike [`sol_eclipse_how`], only the `NONCENTRAL` bit (not `CENTRAL`) is merged in from the
+/// geocentric `eclipse_where` call at `time_maximum` -- a genuine literal difference between the
+/// two wrappers, preserved exactly (§6.1 step 4).
+pub(crate) fn sol_eclipse_when_loc(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ifl: CalcFlags,
+    geopos: [f64; 3],
+    backward: bool,
+) -> Result<SolarEclipseLocal, Error> {
+    if !(crate::constants::RISE_SET_GEOALT_MIN..=crate::constants::RISE_SET_GEOALT_MAX)
+        .contains(&geopos[2])
+    {
+        return Err(Error::CError(format!(
+            "location for eclipses must be between {:.0} and {:.0} m above sea",
+            crate::constants::RISE_SET_GEOALT_MIN,
+            crate::constants::RISE_SET_GEOALT_MAX
+        )));
+    }
+    let ifl = ifl & crate::calc::EPHMASK;
+
+    let mut result = eclipse_when_loc(eph, tjd_start, ifl, geopos, backward)?;
+    let where_result = eclipse_where(eph, result.time_maximum, Body::Sun, None, ifl)?;
+    result.flags |= where_result.flags & EclipseFlags::NONCENTRAL;
+    result.attr.core_diameter_km = where_result.core_diameter_km;
+
+    Ok(result)
 }

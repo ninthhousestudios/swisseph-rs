@@ -28,10 +28,21 @@ struct SolWhenGlobCase {
 }
 
 #[derive(Deserialize)]
+struct SolWhenLocCase {
+    geopos: [f64; 3],
+    tjd_start: f64,
+    backward: bool,
+    retval: i32,
+    tret: [f64; 10],
+    attr: [f64; 11],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
     sol_how: Vec<SolHowCase>,
     sol_when_glob: Vec<SolWhenGlobCase>,
+    sol_when_loc: Vec<SolWhenLocCase>,
 }
 
 fn load() -> GoldenData {
@@ -297,6 +308,143 @@ fn sol_when_glob() {
             &format!("{label}.tret[7] (time_centerline_end)"),
             c.tret[7],
             result.time_centerline_end,
+            1e-5,
+        );
+    }
+}
+
+/// `swe_sol_eclipse_when_loc` (`Ephemeris::sol_eclipse_when_loc`): local next/previous solar
+/// eclipse search, visible-from-`geopos` (topocentric, unlike `sol_when_glob`'s geocentric
+/// search). `tret[]` index semantics differ from `sol_when_glob`'s: `tret[1]/[4]` = 1st/4th
+/// (penumbra) contact, `tret[2]/[3]` = 2nd/3rd (umbra) contact -- see `SolarEclipseLocal`'s doc
+/// comments. Two observers (near-central for the sol_where set; Chile, near the 2019/2020
+/// tracks) x 2 start epochs x 2 search directions.
+#[test]
+fn sol_when_loc() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.sol_when_loc.iter().enumerate() {
+        let label = format!(
+            "sol_when_loc[{i}][geopos={:?},tjd_start={},backward={}]",
+            c.geopos, c.tjd_start, c.backward
+        );
+        let result = ephe
+            .sol_eclipse_when_loc(c.tjd_start, CalcFlags::MOSEPH, c.geopos, c.backward)
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[0] (time_maximum)"),
+            c.tret[0],
+            result.time_maximum,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[1] (time_first_contact)"),
+            c.tret[1],
+            result.time_first_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[2] (time_second_contact)"),
+            c.tret[2],
+            result.time_second_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[3] (time_third_contact)"),
+            c.tret[3],
+            result.time_third_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[4] (time_fourth_contact)"),
+            c.tret[4],
+            result.time_fourth_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[5] (time_sunrise)"),
+            c.tret[5],
+            result.time_sunrise,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[6] (time_sunset)"),
+            c.tret[6],
+            result.time_sunset,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.magnitude"),
+            c.attr[0],
+            result.attr.magnitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.diameter_ratio"),
+            c.attr[1],
+            result.attr.diameter_ratio,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.obscuration"),
+            c.attr[2],
+            result.attr.obscuration,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.core_diameter_km"),
+            c.attr[3],
+            result.attr.core_diameter_km,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.azimuth"),
+            c.attr[4],
+            result.attr.azimuth,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.true_altitude"),
+            c.attr[5],
+            result.attr.true_altitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.apparent_altitude"),
+            c.attr[6],
+            result.attr.apparent_altitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.elongation"),
+            c.attr[7],
+            result.attr.elongation,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.nasa_magnitude"),
+            c.attr[8],
+            result.attr.nasa_magnitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.saros_series"),
+            c.attr[9],
+            result.attr.saros_series,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.saros_member"),
+            c.attr[10],
+            result.attr.saros_member,
             1e-5,
         );
     }

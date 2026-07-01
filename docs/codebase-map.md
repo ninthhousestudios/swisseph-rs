@@ -145,6 +145,40 @@ src/
 │                          find_zero leaves tret[i1]/tret[i2] at 0.0 instead of C's stale-value
 │                          carryover — unreachable for well-conditioned real eclipses). Ephemeris::
 │                          sol_eclipse_when_glob in context.rs delegates.
+│                          meeus_new_moon_estimate (swisseph-rs/75: the Meeus lunation-estimate +
+│                          F-argument filter factored out of sol_eclipse_when_glob's inline block
+│                          and reused by eclipse_when_loc, per the C ref doc's "factor this into
+│                          one shared function" porting note — no behavior change to
+│                          sol_eclipse_when_glob). SolarEclipseLocal (tret[0..7]: time_maximum,
+│                          time_first_contact..time_fourth_contact (1st/4th = penumbra, 2nd/3rd =
+│                          umbra — DIFFERENT tret[] index semantics than SolarEclipseGlobal, see
+│                          c-ref-eclipse-solar.md §6.3), time_sunrise/time_sunset, attr:
+│                          EclipseHow, flags); eclipse_when_loc (swe_sol_eclipse_when_loc's worker
+│                          port, swisseph-rs/75: topocentric main convergence loop with a 2-then-3
+│                          dtdiv step-size schedule (distinct dtstart/dt-floor constants from the
+│                          glob search — do not unify); topo_angular_separation (shared
+│                          overlap-gap sample helper, manually re-normalizes cartesian distance
+│                          via sqrt-of-squares rather than reusing a polar distance component,
+│                          matching the C source's own dead-polar-fetch pattern); contacts 2/3
+│                          (umbra ingress/egress) apply an asymmetric 0.99916 rmoon correction
+│                          (flanking samples corrected, the reused center dc[1] is not) and a
+│                          SEFLG_SPEED-based secant refinement that linearly extrapolates a
+│                          second sample from one calc call's velocity components rather than
+│                          calling calc twice; contacts 1/4 (penumbra ingress/egress) mirror that
+│                          shape with no 0.99916 correction and an asymmetric fabs(rsplusrm) (only
+│                          in the secant refinement, not the initial sample); visibility scan
+│                          (descending i=4..=0 so the i=0/max eclipse_how write survives last,
+│                          matching C's shared-attr[]-clobbering behavior) computed via raw ifl
+│                          (not the topocentric iflag); sunrise/sunset re-anchor via
+│                          Ephemeris::rise_trans (Error::CircumpolarBody short-circuits the
+│                          function, matching C's retc==-2 early return) called with the
+│                          topocentric iflag — a literal C inconsistency vs. every eclipse_how
+│                          call in the same function using raw ifl, preserved not "fixed".
+│                          sol_eclipse_when_loc (public wrapper: geopos[2] altitude-range
+│                          validation matching sol_eclipse_how, merges only NONCENTRAL — not
+│                          CENTRAL — from a geocentric eclipse_where call at time_maximum, unlike
+│                          sol_eclipse_how's CENTRAL|NONCENTRAL merge). Ephemeris::
+│                          sol_eclipse_when_loc in context.rs delegates.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -219,7 +253,15 @@ tests/
 │                          sol_when_glob: 4 cases — 2 tjd_start (2000/2020) × 2 backward,
 │                          ifltype=0 (all types), asserts tret[0..7] (time_maximum,
 │                          time_ra_conjunction, time_begin/end, time_totality_begin/end,
-│                          time_centerline_begin/end) eps 1e-5 day + exact retval flags bitmask)
+│                          time_centerline_begin/end) eps 1e-5 day + exact retval flags bitmask;
+│                          sol_when_loc: 8 cases — 2 geopos (8.55,47.37,500 near-central for the
+│                          sol_where set; -71.0,-33.0,500 Chile, near the 2019/2020 tracks) × 2
+│                          tjd_start (2000/2019) × 2 backward, asserts tret[0..7] (time_maximum,
+│                          time_first_contact..time_fourth_contact, time_sunrise, time_sunset —
+│                          DIFFERENT tret[] index semantics than sol_when_glob, see
+│                          c-ref-eclipse-solar.md §6.3) + all 11 attr[] fields eps 1e-5 day/eps +
+│                          exact retval flags bitmask; passed on the first implementation attempt,
+│                          no escape-hatch escalation needed)
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -289,9 +331,9 @@ tests/
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
 │   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key),
-│                          swe_sol_eclipse_how (sol_how key), and swe_sol_eclipse_when_glob
-│                          (sol_when_glob key); later RSE tasks 8-12 add more keys to this same
-│                          file
+│                          swe_sol_eclipse_how (sol_how key), swe_sol_eclipse_when_glob
+│                          (sol_when_glob key), and swe_sol_eclipse_when_loc (sol_when_loc key);
+│                          later RSE tasks 9-12 add more keys to this same file
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -316,7 +358,8 @@ tests/
     │                       away by swe_sol_eclipse_where's own `ifl &= SEFLG_EPHMASK`;
     │                       swe_sol_eclipse_how: the same 4 epochs × 2 observers (near-central
     │                       and off-track); swe_sol_eclipse_when_glob: 2 tjd_start × 2 backward,
-    │                       ifltype=0)
+    │                       ifltype=0; swe_sol_eclipse_when_loc: 2 geopos (near-central; Chile) ×
+    │                       2 tjd_start × 2 backward)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

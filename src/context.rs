@@ -589,6 +589,20 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_when_glob(self, tjd_start, ifl, ifltype, backward)
     }
 
+    /// Local eclipse search: next/previous solar eclipse *visible from* `geopos` (topocentric),
+    /// with local contact times C1-C4 and full local circumstances. Port of
+    /// `swe_sol_eclipse_when_loc` (swecl.c:2019-2041, 2100-2410). `geopos` = [longitude,
+    /// latitude, height above sea (m)], degrees/degrees/meters.
+    pub fn sol_eclipse_when_loc(
+        &self,
+        tjd_start: f64,
+        ifl: CalcFlags,
+        geopos: [f64; 3],
+        backward: bool,
+    ) -> Result<crate::eclipse::SolarEclipseLocal, Error> {
+        crate::eclipse::sol_eclipse_when_loc(self, tjd_start, ifl, geopos, backward)
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`

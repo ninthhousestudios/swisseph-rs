@@ -1,8 +1,8 @@
 /*
  * Generates golden reference data for the eclipse module: swe_sol_eclipse_where
- * (RSE 5, swisseph-rs/72), swe_sol_eclipse_how (RSE 6, swisseph-rs/73), and
- * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74). Later RSE tasks (8-12) add more keys to
- * this same file.
+ * (RSE 5, swisseph-rs/72), swe_sol_eclipse_how (RSE 6, swisseph-rs/73),
+ * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74), and swe_sol_eclipse_when_loc
+ * (RSE 8, swisseph-rs/75). Later RSE tasks (9-12) add more keys to this same file.
  *
  * The "dcore" field in each sol_where case comes from swi_test_eclipse_where_dcore, a
  * non-static test-only hook added to ../swisseph/swecl.c (right after calc_planet_star) that
@@ -132,6 +132,42 @@ int main(void) {
                    tjd_start, backward ? "true" : "false", retval);
             for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
             printf("]}");
+        }
+    }
+    printf("\n  ],\n");
+
+    /* === sol_when_loc === */
+    static double loc_geopos[][3] = {
+        { 8.55, 47.37, 500.0 },     /* near-central for the 1999/2021/2024 tracks (sol_where set) */
+        { -71.0, -33.0, 500.0 },    /* Chile: near the 2019/2020 total/annular tracks */
+    };
+    #define N_LOC_GEOPOS (sizeof(loc_geopos) / sizeof(loc_geopos[0]))
+    static double loc_tjd_starts[] = { 2451545.0, 2458800.5 };
+    #define N_LOC_START (sizeof(loc_tjd_starts) / sizeof(loc_tjd_starts[0]))
+    printf("  \"sol_when_loc\": [\n");
+    first = 1;
+    for (size_t g = 0; g < N_LOC_GEOPOS; g++) {
+        for (size_t i = 0; i < N_LOC_START; i++) {
+            for (int backward = 0; backward <= 1; backward++) {
+                double geopos[3] = { loc_geopos[g][0], loc_geopos[g][1], loc_geopos[g][2] };
+                double tjd_start = loc_tjd_starts[i];
+                double tret[10] = { 0 };
+                double attr[20] = { 0 };
+                char serr[256] = { 0 };
+                int32 retval = swe_sol_eclipse_when_loc(tjd_start, SEFLG_MOSEPH, geopos, tret,
+                                                          attr, backward, serr);
+
+                if (!first) printf(",\n");
+                first = 0;
+                printf("    {\"geopos\": [%.17g, %.17g, %.17g], \"tjd_start\": %.17g, "
+                       "\"backward\": %s, \"retval\": %d, \"tret\": [",
+                       geopos[0], geopos[1], geopos[2], tjd_start, backward ? "true" : "false",
+                       retval);
+                for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+                printf("], \"attr\": [");
+                for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
+                printf("]}");
+            }
         }
     }
     printf("\n  ]\n");

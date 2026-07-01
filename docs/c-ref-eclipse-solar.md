@@ -746,95 +746,361 @@ next_try:
   ... Ff filter: if (backward) K--; else K++; goto next_try;   // in-loop advance (opposite sign of pre-loop offset)
 ```
 
-`swe_set_topo(geopos[0], geopos[1], geopos[2])` called once before the loop (swecl.c:2117) and
-again inside the loop body (swecl.c:2162) — idempotent since `geopos` is fixed for the whole
-search, but called on every retry.
+`iflag = SEFLG_EQUATORIAL|SEFLG_TOPOCTR|ifl` and `iflagcart = iflag|SEFLG_XYZ` are computed
+**once**, at swecl.c:2126–2127, before `swe_set_topo`/`K` are even set up — they are reused
+unchanged for the *entire* function (main loop, contacts 2/3, contacts 1/4, everything except the
+final `eclipse_how` visibility-scan calls, which build their own topocentric flags internally).
 
-**Refinement window differs from §5.3**: `dtstart = 0.5` days (or `2` if `tjd` outside
-`[1900000, 2500000]` — **a different JD boundary than `swe_sol_eclipse_when_glob`'s
-`[2000000,2500000]`**, flag this as an intentional-but-inconsistent-looking constant, port
-per-function, do not unify). `dtdiv` starts at `2`, then switches to `3` once `dt < 0.1` (a
-two-stage step-size schedule, unlike §5.3's constant `/4`). Uses **topocentric** cartesian/polar
-Sun & Moon (`SEFLG_EQUATORIAL|SEFLG_TOPOCTR|ifl`, `|SEFLG_XYZ` variant) throughout, and — same as
-§5.3 — treats the Meeus `tjd` as ET/TT directly inside the `swe_calc` calls, converting to UT only
-once at the end (but here via a **2-pass** fixed point, not 3):
+`swe_set_topo(geopos[0], geopos[1], geopos[2])` is called **twice**: once at swecl.c:2128 (before
+`K` is even computed, i.e. once per invocation of `eclipse_when_loc`), and again at swecl.c:2173
+(immediately after the Meeus periodic-correction `tjd` is finalized, i.e. **inside** the
+`next_try:` loop body — every retry re-issues it). Both calls pass identical arguments; idempotent
+since `geopos` never changes, but port both call sites faithfully (harmless duplication, not a
+bug).
+
+### 6.2.1 Main convergence loop (swecl.c:2174–2204)
+
 ```c
-tret[0] = tjd - swe_deltat_ex(tjd, ifl, serr);
-tret[0] = tjd - swe_deltat_ex(tret[0], ifl, serr);
+dtdiv = 2;
+dtstart = 0.5;
+if (tjd < 1900000 || tjd > 2500000)   /* because above formula is not good (delta t?) */
+  dtstart = 2;
+for (dt = dtstart; dt > 0.00001; dt /= dtdiv) {
+  if (dt < 0.1)
+    dtdiv = 3;
+  for (i = 0, t = tjd - dt; i <= 2; i++, t += dt) {
+    /* this takes some time, but is necessary to avoid missing an eclipse */
+    if (swe_calc(t, SE_SUN, iflagcart, xs, serr) == ERR) return ERR;
+    if (swe_calc(t, SE_SUN, iflag,     ls, serr) == ERR) return ERR;
+    if (swe_calc(t, SE_MOON, iflagcart, xm, serr) == ERR) return ERR;
+    if (swe_calc(t, SE_MOON, iflag,     lm, serr) == ERR) return ERR;
+    dm = sqrt(square_sum(xm));
+    ds = sqrt(square_sum(xs));
+    for (k = 0; k < 3; k++) {
+      x1[k] = xs[k] / ds;   /*ls[2]*/
+      x2[k] = xm[k] / dm;   /*lm[2]*/
+    }
+    dc[i] = acos(swi_dot_prod_unit(x1, x2)) * RADTODEG;
+  }
+  find_maximum(dc[0], dc[1], dc[2], dt, &dtint, &dctr);
+  tjd += dtint + dt;
+}
 ```
+`dtstart = 0.5` days normally, `2` days if `tjd` (the Meeus first-guess instant) falls outside
+`[1900000, 2500000]` — **a different JD boundary than `swe_sol_eclipse_when_glob`'s
+`[2000000,2500000]`** (§5.3); flag this as intentional-but-inconsistent, port per-function, do not
+unify. The convergence loop terminates at `dt <= 0.00001` day (~0.86 s) — a tighter threshold than
+§5.3's `dt <= 0.0001`. `dtdiv` starts at `2` and switches to `3` **the moment `dt` first drops
+below `0.1`** (tested at the *top* of each outer-loop pass, so the very iteration whose `dt < 0.1`
+already divides by 3 to produce the *next* `dt`) — a two-stage step-size schedule, unlike §5.3's
+constant `/4`.
 
-After convergence, final `dctr`/`rmoon`/`rsun`/phase classification (identical thresholds to §4.4)
-using **hardcoded `RSUN`/`RMOON`** constants directly — unlike `eclipse_where`/`eclipse_how`,
-this function is Sun/Moon-specific (its sibling `occult_when_loc`, out of scope, generalizes to
-arbitrary bodies/stars). Reject candidate (advance K, retry) if `dctr > rsplusrm` (no eclipse) or
-if `tret[0]` isn't strictly beyond `tjd_start` in the search direction (same `±0.0001` day guard
-as §5.4).
+Sample point stepping is `t = tjd-dt, tjd, tjd+dt` for `i=0,1,2`, and `t` is passed straight to
+`swe_calc` — same as §5.3, the Meeus `tjd` is treated as an ET/TT instant throughout this loop
+(UT conversion only happens once, after convergence — see below), **not** UT.
 
-`dctrmin = dctr` is saved — reused below to avoid resampling exactly at `tjd` (the already-found
-minimum) when locating each contact pair.
+**Four `swe_calc` calls per sample** (cartesian+polar × Sun+Moon), but only the cartesian pair
+(`xs`, `xm`) is actually used to build `dc[i]` inside the loop — the polar results `ls`/`lm` are
+computed and then **discarded** on every iteration of the inner loop (they get overwritten by the
+next `i`, and the last-iteration values are never read before being clobbered by the fresh
+post-loop calc immediately below). This is dead work inside the loop itself, not a correctness
+issue — but do not assume `ls`/`lm` inside the loop carry forward any meaning; only the outer
+scope's post-convergence `ls`/`lm` (below) matter.
+
+**FP-fidelity note**: `ds`/`dm` are computed manually via `sqrt(square_sum(xs))`/`sqrt(square_sum(xm))`
+rather than reused from `ls[2]`/`lm[2]` (the C source's own inline comments `/*ls[2]*/`/`/*lm[2]*/`
+flag this explicitly — the polar distance would be algebraically identical but is not what's coded).
+`x1`/`x2` are then pre-normalized by this manually-computed `ds`/`dm` before being passed to
+`swi_dot_prod_unit`, which re-normalizes internally — the same redundant-double-division pattern
+flagged generically in §0. Port literally.
+
+### 6.2.2 Post-convergence confirmation, ET→UT, rejection (swecl.c:2205–2241)
+
+```c
+if (swe_calc(tjd, SE_SUN, iflagcart, xs, serr) == ERR) return ERR;
+if (swe_calc(tjd, SE_SUN, iflag,     ls, serr) == ERR) return ERR;
+if (swe_calc(tjd, SE_MOON, iflagcart, xm, serr) == ERR) return ERR;
+if (swe_calc(tjd, SE_MOON, iflag,     lm, serr) == ERR) return ERR;
+dctr = acos(swi_dot_prod_unit(xs, xm)) * RADTODEG;
+rmoon = asin(RMOON / lm[2]) * RADTODEG;
+rsun  = asin(RSUN  / ls[2]) * RADTODEG;
+rsplusrm  = rsun + rmoon;
+rsminusrm = rsun - rmoon;
+if (dctr > rsplusrm) {
+  if (backward) K--; else K++;
+  goto next_try;
+}
+tret[0] = tjd - swe_deltat_ex(tjd, ifl, serr);
+tret[0] = tjd - swe_deltat_ex(tret[0], ifl, serr); /* these two lines are an iteration! */
+if ((backward && tret[0] >= tjd_start - 0.0001)
+  || (!backward && tret[0] <= tjd_start + 0.0001)) {
+  if (backward) K--; else K++;
+  goto next_try;
+}
+if (dctr < rsminusrm)
+  retflag = SE_ECL_ANNULAR;
+else if (dctr < fabs(rsminusrm))
+  retflag = SE_ECL_TOTAL;
+else if (dctr <= rsplusrm)
+  retflag = SE_ECL_PARTIAL;
+dctrmin = dctr;
+```
+This is a **fresh, fifth set** of `swe_calc` calls at the exact converged `tjd` — it does **not**
+reuse the loop's last sample (`t = tjd+dt` from the final `i==2` pass), even though that sample is
+numerically close. `dctr` here is computed by passing the **raw, non-pre-normalized** `xs`/`xm`
+straight into `swi_dot_prod_unit` (unlike the loop's `dc[i]`, which pre-normalizes into `x1`/`x2`
+first) — mathematically equivalent (the function normalizes internally regardless) but a distinct
+rounding path; port both call shapes exactly as written, do not unify them into one helper that
+always pre-normalizes.
+
+This is also the **only** place in the loop/convergence portion where the polar `ls[2]`/`lm[2]`
+(topocentric distance) values are actually consumed — via `rmoon`/`rsun`, using **hardcoded
+`RSUN`/`RMOON`** constants directly (unlike `eclipse_where`/`eclipse_how`, which resolve body
+radius generically via the §0 lookup table) — consistent with this function being Sun/Moon-only
+(its sibling `occult_when_loc`, out of scope, generalizes to arbitrary bodies/stars).
+
+ET→UT for `tret[0]` is a **2-pass fixed point** (`tjd - deltaT(tjd)`, then `tjd - deltaT(that)`) —
+fewer passes than §5.3's 3-pass version for the global search's `tjd`.
+
+**Rejection/retry points**, both advancing `K` in the search direction and `goto next_try`:
+1. `dctr > rsplusrm` — centers too far apart even at closest approach, no eclipse visible from
+   this location for this lunation.
+2. `tret[0]` not strictly beyond `tjd_start` in the search direction (`±0.0001` day guard,
+   textually identical to §5.4's global-search guard).
+
+**Phase classification** (swecl.c:2235–2240) mirrors §4.4's thresholds (`ANNULAR` / `TOTAL` /
+`PARTIAL` via `rsminusrm`/`fabs(rsminusrm)`/`rsplusrm`) with **one literal difference**: the
+partial-eclipse branch here tests `dctr <= rsplusrm` (`<=`), whereas `eclipse_how`'s §4.4 tests
+`dctr < rsplusrm` (strict `<`). Since rejection point 1 above already guarantees `dctr <=
+rsplusrm` by this point, the `<=` vs `<` only matters in the boundary case `dctr == rsplusrm`
+exactly (measure-zero in practice, but preserve the exact operator when porting — do not silently
+"normalize" it to match §4.4).
+
+`dctrmin = dctr` is saved — reused below (in Contacts 2/3 and Contacts 1/4) to avoid resampling
+exactly at `tjd` (the already-found minimum) when locating each contact pair.
 
 #### Contacts 2/3 (2nd/3rd contact — umbra/antumbra ingress/egress, i.e. totality or annularity
-begin/end **at this location**) (swecl.c:2231–2289):
+begin/end **at this location**) (swecl.c:2242–2300)
 Skipped (`tret[2]=tret[3]=0`) if `dctr > fabs(rsminusrm)` (only a partial eclipse is visible
 here — umbra never reaches this location). Otherwise:
 ```c
-dc[1] = fabs(rsminusrm) - dctrmin;                 // reuse min-separation instead of resampling at tjd
-sample dc[0] at t = tjd - twomin, dc[2] at t = tjd + twomin   (twomin = 2/24/60 day)
-  // rmoon here gets an extra empirical correction: rmoon *= 0.99916  ("gives better accuracy for 2nd/3rd contacts")
-find_zero(dc[0],dc[1],dc[2], twomin, &dt1, &dt2);
-tret[2] = tjd+dt1+twomin;  tret[3] = tjd+dt2+twomin;
-// secant refinement, 2 passes, dt = tensec (10/24/60/60 day), tensec/10:
-//   sample "now" (i=0) and a LINEARLY-EXTRAPOLATED-BACKWARD sample (i=1, via SEFLG_SPEED
-//   velocity components: xs[k] -= xs[k+3]*dt) instead of a fresh swe_calc call
-tret[2] -= swe_deltat_ex(tret[2], ifl, serr);    // single-pass ET->UT (NOT fixed-point iterated)
-tret[3] -= swe_deltat_ex(tret[3], ifl, serr);
-```
-
-#### Contacts 1/4 (1st/4th contact — penumbra ingress/egress, i.e. visible eclipse begin/end at
-this location) (swecl.c:2290–2342): structurally identical to contacts 2/3 but:
-- window `twohr = 2/24` day (not `twomin`),
-- **no** `0.99916` correction factor on `rmoon`,
-- `dc[1] = rsplusrm - dctrmin` (uses the sum, not the difference, of angular radii),
-- 3 refinement passes with `dt = tenmin (10/24/60), tenmin/10, tenmin/100`,
-- final ET→UT conversion also single-pass (`tret[1] -= deltaT(tret[1])`, `tret[4] -= deltaT(tret[4])`).
-
-#### Visibility scan (swecl.c:2343–2373)
-```c
-for (i = 4; i >= 0; i--) {                 // DESCENDING order — i=0 (max) evaluated LAST
-  if (tret[i] == 0) continue;
-  eclipse_how(tret[i], SE_SUN, NULL, ifl, geopos[0], geopos[1], geopos[2], attr, serr);
-  if (attr[6] > 0) {                        // apparent altitude > 0 at this contact instant
-    retflag |= SE_ECL_VISIBLE;
-    retflag |= { 0:MAX_VISIBLE, 1:1ST_VISIBLE, 2:2ND_VISIBLE, 3:3RD_VISIBLE, 4:4TH_VISIBLE }[i];
+dc[1] = fabs(rsminusrm) - dctrmin;      // REUSED as-is from §6.2.2 — NOT resampled, NOT 0.99916-corrected
+for (i = 0, t = tjd - twomin; i <= 2; i += 2, t = tjd + twomin) {
+  swe_calc(t, SE_SUN, iflagcart, xs, serr);
+  swe_calc(t, SE_MOON, iflagcart, xm, serr);        // cartesian only — no separate polar ls/lm fetch here
+  dm = sqrt(square_sum(xm));  ds = sqrt(square_sum(xs));
+  rmoon = asin(RMOON / dm) * RADTODEG;
+  rmoon *= 0.99916;                     /* gives better accuracy for 2nd/3rd contacts */
+  rsun = asin(RSUN / ds) * RADTODEG;
+  rsminusrm = rsun - rmoon;
+  x1[k] = xs[k]/ds /*ls[2]*/;  x2[k] = xm[k]/dm /*lm[2]*/;
+  dctr = acos(swi_dot_prod_unit(x1, x2)) * RADTODEG;
+  dc[i] = fabs(rsminusrm) - dctr;       // i = 0, 2 only — dc[1] set once, above, before this loop
+}
+find_zero(dc[0], dc[1], dc[2], twomin, &dt1, &dt2);
+tret[2] = tjd + dt1 + twomin;
+tret[3] = tjd + dt2 + twomin;
+for (m = 0, dt = tensec; m < 2; m++, dt /= 10) {          // 2 passes: dt = tensec, tensec/10
+  for (j = 2; j <= 3; j++) {
+    swe_calc(tret[j], SE_SUN,  iflagcart | SEFLG_SPEED, xs, serr);   // ONE calc call per body per pass
+    swe_calc(tret[j], SE_MOON, iflagcart | SEFLG_SPEED, xm, serr);
+    for (i = 0; i < 2; i++) {
+      if (i == 1) {                                        // i=1: extrapolate BACKWARD by dt using velocity,
+        for (k = 0; k < 3; k++) {                           //      NOT a fresh swe_calc — reuses i=0's arrays in place
+          xs[k] -= xs[k+3] * dt;
+          xm[k] -= xm[k+3] * dt;
+        }
+      }
+      dm = sqrt(square_sum(xm));  ds = sqrt(square_sum(xs));
+      rmoon = asin(RMOON / dm) * RADTODEG;
+      rmoon *= 0.99916;           /* gives better accuracy for 2nd/3rd contacts */
+      rsun = asin(RSUN / ds) * RADTODEG;
+      rsminusrm = rsun - rmoon;
+      x1[k] = xs[k]/ds /*ls[2]*/;  x2[k] = xm[k]/dm /*lm[2]*/;
+      dctr = acos(swi_dot_prod_unit(x1, x2)) * RADTODEG;
+      dc[i] = fabs(rsminusrm) - dctr;
+    }
+    dt1 = -dc[0] / ((dc[0] - dc[1]) / dt);    // secant step: dc[0] at t=tret[j] (real), dc[1] at t≈tret[j]-dt (extrapolated)
+    tret[j] += dt1;
   }
 }
-if (!(retflag & SE_ECL_VISIBLE)) { K += direction; goto next_try; }   // whole event invisible -> retry
+tret[2] -= swe_deltat_ex(tret[2], ifl, serr);   // single-pass ET->UT (NOT fixed-point iterated, unlike tret[0])
+tret[3] -= swe_deltat_ex(tret[3], ifl, serr);
 ```
+`iflag`/`iflagcart` used here are the same function-top values (§6.2, no `SEFLG_SPEED` in the
+initial 3-point sample loop; `SEFLG_SPEED` is added **only** at the two `swe_calc` sites inside
+the secant-refinement loop, freshly ORed in at each call site — not hoisted into a shared
+variable).
+
+**FP-fidelity / literal-quirk hazard — asymmetric `0.99916` correction**: every place in this
+subsection where `rmoon` is freshly computed (`rmoon = asin(RMOON/dm)*RADTODEG`) is immediately
+followed by `rmoon *= 0.99916` — in **both** the initial 3-point sample loop (`i=0,2`) **and**
+both samples (`i=0,1`) of every secant-refinement pass. The **one** exception is `dc[1]`, which is
+not resampled here at all — it is copied from `fabs(rsminusrm) - dctrmin` where `rsminusrm` was
+computed back in §6.2.2 using the **uncorrected** `rmoon`. So the parabola/secant fits in this
+subsection combine one uncorrected center value with corrected flanking values. This looks like it
+could be an oversight in the original C, but the golden test data reflects exactly this — port
+literally, do not "fix" it to apply `0.99916` uniformly.
+
+**Secant mechanic**: the `i==1` sample is **not** a second `swe_calc` call. `xs`/`xm` (with their
+appended velocity components `xs[3..6]`/`xm[3..6]` from `SEFLG_SPEED`) are fetched once at
+`t = tret[j]`, used as-is for `i=0`, then linearly extrapolated backward by `dt` in place
+(`xs[k] -= xs[k+3]*dt`) to approximate the position at `t = tret[j] - dt` for `i=1` — cheaper than
+a second ephemeris evaluation, at the cost of first-order-only accuracy in the extrapolation (fine
+given `dt` shrinks to `tensec/10 ≈ 1 s` by the final pass).
+
+#### Contacts 1/4 (1st/4th contact — penumbra ingress/egress, i.e. visible eclipse begin/end at
+this location) (swecl.c:2301–2353)
+```c
+dc[1] = rsplusrm - dctrmin;             // REUSED from §6.2.2, same pattern as contacts 2/3's dc[1]
+for (i = 0, t = tjd - twohr; i <= 2; i += 2, t = tjd + twohr) {
+  swe_calc(t, SE_SUN, iflagcart, xs, serr);
+  swe_calc(t, SE_MOON, iflagcart, xm, serr);
+  dm = sqrt(square_sum(xm));  ds = sqrt(square_sum(xs));
+  rmoon = asin(RMOON / dm) * RADTODEG;              // NO 0.99916 correction anywhere in this subsection
+  rsun = asin(RSUN / ds) * RADTODEG;
+  rsplusrm = rsun + rmoon;
+  x1[k] = xs[k]/ds /*ls[2]*/;  x2[k] = xm[k]/dm /*lm[2]*/;
+  dctr = acos(swi_dot_prod_unit(x1, x2)) * RADTODEG;
+  dc[i] = rsplusrm - dctr;
+}
+find_zero(dc[0], dc[1], dc[2], twohr, &dt1, &dt2);
+tret[1] = tjd + dt1 + twohr;
+tret[4] = tjd + dt2 + twohr;
+for (m = 0, dt = tenmin; m < 3; m++, dt /= 10) {         // 3 passes: dt = tenmin, tenmin/10, tenmin/100
+  for (j = 1; j <= 4; j += 3) {                          // j = 1, then j = 4 (step 3 skips 2,3)
+    swe_calc(tret[j], SE_SUN,  iflagcart | SEFLG_SPEED, xs, serr);
+    swe_calc(tret[j], SE_MOON, iflagcart | SEFLG_SPEED, xm, serr);
+    for (i = 0; i < 2; i++) {
+      if (i == 1) {
+        for (k = 0; k < 3; k++) { xs[k] -= xs[k+3]*dt; xm[k] -= xm[k+3]*dt; }
+      }
+      dm = sqrt(square_sum(xm));  ds = sqrt(square_sum(xs));
+      rmoon = asin(RMOON / dm) * RADTODEG;
+      rsun = asin(RSUN / ds) * RADTODEG;
+      rsplusrm = rsun + rmoon;
+      x1[k] = xs[k]/ds /*ls[2]*/;  x2[k] = xm[k]/dm /*lm[2]*/;
+      dctr = acos(swi_dot_prod_unit(x1, x2)) * RADTODEG;
+      dc[i] = fabs(rsplusrm) - dctr;      // note: fabs() here even though rsplusrm is never negative
+    }
+    dt1 = -dc[0] / ((dc[0] - dc[1]) / dt);
+    tret[j] += dt1;
+  }
+}
+tret[1] -= swe_deltat_ex(tret[1], ifl, serr);   // single-pass ET->UT, same convention as contacts 2/3
+tret[4] -= swe_deltat_ex(tret[4], ifl, serr);
+```
+Structurally identical mechanics to Contacts 2/3 (reused uncorrected `dc[1]`, one-`swe_calc`-plus-
+velocity-extrapolation secant refinement, single-pass ET→UT) but: window `twohr = 2/24` day (not
+`twomin`); **no** `0.99916` correction anywhere; `dc[1]/dc[i]` use `rsplusrm` (sum of radii — outer
+penumbra boundary) instead of `fabs(rsminusrm)` (umbra boundary); 3 refinement passes instead of 2;
+inner loop touches `j=1` and `j=4` (step `+=3`) instead of `j=2,3` (step `+=1`).
+
+#### Visibility scan (swecl.c:2354–2384)
+```c
+for (i = 4; i >= 0; i--) {          /* attr for i = 0 must be kept !!! */
+  if (tret[i] == 0)
+    continue;
+  if (eclipse_how(tret[i], SE_SUN, NULL, ifl, geopos[0], geopos[1], geopos[2], attr, serr) == ERR)
+    return ERR;
+  /*if (retflag2 & SE_ECL_VISIBLE) { could be wrong for 1st/4th contact */
+  if (attr[6] > 0) {                /* this is safe, sun above horizon, using app. alt. */
+    retflag |= SE_ECL_VISIBLE;
+    switch(i) {
+    case 0: retflag |= SE_ECL_MAX_VISIBLE; break;
+    case 1: retflag |= SE_ECL_1ST_VISIBLE; break;
+    case 2: retflag |= SE_ECL_2ND_VISIBLE; break;
+    case 3: retflag |= SE_ECL_3RD_VISIBLE; break;
+    case 4: retflag |= SE_ECL_4TH_VISIBLE; break;
+    default: break;
+    }
+  }
+}
+#if 1
+if (!(retflag & SE_ECL_VISIBLE)) {
+  if (backward) K--; else K++;
+  goto next_try;
+}
+#endif
+```
+`eclipse_how` is called with the **raw** `ifl` (the ephemeris-selector parameter passed into
+`eclipse_when_loc`), **not** `iflag`/`iflagcart` (which already carry `SEFLG_EQUATORIAL|
+SEFLG_TOPOCTR`) — correct, since `eclipse_how` (§4.1) ORs in its own `SEFLG_EQUATORIAL|
+SEFLG_TOPOCTR` internally; passing the pre-augmented `iflag` here would be redundant (harmless,
+since re-OR-ing the same bits is a no-op) but the C code uses plain `ifl`, and every `eclipse_how`
+call site in this function (here and in the sunrise/sunset block below) does the same — contrast
+with the `swe_rise_trans` calls just below, which do **not** follow this convention (see next
+subsection). `attr[6]` is the apparent (refracted) altitude, §4.9 index 6.
+
 **The descending loop order is deliberate** (C comment: `/* attr for i = 0 must be kept !!! */`)
 — `attr[]` is a single shared output array overwritten by each `eclipse_how` call; processing
 `i=4,3,2,1,0` ensures the **last** write (at `i=0`, the moment of maximum eclipse) is what
-remains in `attr[]` when the function returns. Port this ordering exactly.
+remains in `attr[]` when the function returns. Port this ordering exactly. The commented-out
+`/*if (retflag2 & SE_ECL_VISIBLE) {...*/` line is dead code preserved from an earlier
+implementation attempt — ignore it, but its presence confirms the current `attr[6] > 0` test was a
+deliberate simplification over checking `eclipse_how`'s own return flag.
 
-#### Sunrise/sunset interaction (swecl.c:2374–2409)
+#### Sunrise/sunset interaction (swecl.c:2385–2420)
 ```c
-swe_rise_trans(tret[1]-0.001, SE_SUN, NULL, iflag, SE_CALC_RISE|SE_BIT_DISC_BOTTOM, geopos, ...) -> tjdr;
-swe_rise_trans(tret[1]-0.001, SE_SUN, NULL, iflag, SE_CALC_SET |SE_BIT_DISC_BOTTOM, geopos, ...) -> tjds;
-if (retc == -2) return retflag;    // circumpolar sun -> can't determine rise/set, leave tret[5]/[6] unset
-if (tjds < tret[1] || (tjds > tjdr && tjdr > tret[4])) { K += direction; goto next_try; }  // whole window is nighttime
+if ((retc = swe_rise_trans(tret[1] - 0.001, SE_SUN, NULL, iflag,
+              SE_CALC_RISE | SE_BIT_DISC_BOTTOM, geopos, 0, 0, &tjdr, serr)) == ERR)
+  return ERR;
+if (retc == -2)                       /* circumpolar sun */
+  return retflag;                     // short-circuits BEFORE the SET call; tret[5]/[6] left untouched
+if ((retc = swe_rise_trans(tret[1] - 0.001, SE_SUN, NULL, iflag,
+              SE_CALC_SET | SE_BIT_DISC_BOTTOM, geopos, 0, 0, &tjds, serr)) == ERR)
+  return ERR;
+if (retc == -2)                       /* circumpolar sun */
+  return retflag;                     // independent short-circuit; tret[6] (and [5] if not yet set) untouched
+if (tjds < tret[1] || (tjds > tjdr && tjdr > tret[4])) {
+  if (backward) K--; else K++;
+  goto next_try;                      // whole [1st,4th]-contact window is nighttime -> retry
+}
 if (tjdr > tret[1] && tjdr < tret[4]) {
-  tret[5] = tjdr;                                 // sunrise occurs during the eclipse
-  if (!(retflag & SE_ECL_MAX_VISIBLE)) {           // max itself wasn't visible -> re-anchor on sunrise
+  tret[5] = tjdr;
+  if (!(retflag & SE_ECL_MAX_VISIBLE)) {
     tret[0] = tjdr;
-    eclipse_how(tret[5], ...) -> attr;             // recompute circumstances at sunrise
-    retflag = (retflag & ~(TOTAL|ANNULAR|PARTIAL)) | (retc_new & (TOTAL|ANNULAR|PARTIAL));
+    if ((retc = eclipse_how(tret[5], SE_SUN, NULL, ifl, geopos[0], geopos[1], geopos[2], attr, serr)) == ERR)
+      return ERR;
+    retflag &= ~(SE_ECL_TOTAL | SE_ECL_ANNULAR | SE_ECL_PARTIAL);
+    retflag |= (retc & (SE_ECL_TOTAL | SE_ECL_ANNULAR | SE_ECL_PARTIAL));
   }
 }
-if (tjds > tret[1] && tjds < tret[4]) {            // symmetric handling for sunset
+if (tjds > tret[1] && tjds < tret[4]) {
   tret[6] = tjds;
-  if (!(retflag & SE_ECL_MAX_VISIBLE)) { tret[0] = tjds; eclipse_how(tret[6], ...) -> attr; retflag = ...; }
+  if (!(retflag & SE_ECL_MAX_VISIBLE)) {
+    tret[0] = tjds;
+    if ((retc = eclipse_how(tret[6], SE_SUN, NULL, ifl, geopos[0], geopos[1], geopos[2], attr, serr)) == ERR)
+      return ERR;
+    retflag &= ~(SE_ECL_TOTAL | SE_ECL_ANNULAR | SE_ECL_PARTIAL);
+    retflag |= (retc & (SE_ECL_TOTAL | SE_ECL_ANNULAR | SE_ECL_PARTIAL));
+  }
 }
 return retflag;
 ```
+**Literal-quirk hazard**: both `swe_rise_trans` calls pass `iflag` — the function-top
+`SEFLG_EQUATORIAL|SEFLG_TOPOCTR|ifl` value (§6.2) — as the ephemeris-flag argument, **not** the
+raw `ifl` that every `eclipse_how` call in this function (including the two re-evaluation calls
+a few lines below, in this same block) uses. `swe_rise_trans` internally derives its own
+topocentric/equatorial handling from the explicit `geopos` argument, so the extra
+`SEFLG_EQUATORIAL|SEFLG_TOPOCTR` bits riding along in `iflag` are presumed harmless — but this is
+an inconsistency in the original C (the only `swe_rise_trans` call site in this function uses the
+augmented flag while every other call site uses the plain one); port the exact bit pattern passed,
+do not "normalize" it to `ifl`.
+
+Both calls anchor the search at the same instant, `tret[1] - 0.001` (1st contact, already UT by
+this point, backed off by ~86 s) — used for **both** the RISE and the SET search, not
+`tret[1]`/`tret[4]` respectively. `atpress`/`atemp`-equivalent trailing args are literal `0, 0`
+(auto-estimate / defaults, positionally the 7th/8th parameters of `swe_rise_trans` before the
+output pointer).
+
+`retc == -2` (circumpolar — sun does not rise/set within the search range) short-circuits the
+**entire function**, returning `retflag` as accumulated so far, **without** setting `tret[5]`/
+`tret[6]` (they retain whatever the caller pre-initialized, typically `0`) and without touching
+`attr[]` further. This is a distinct non-error control path — the Rust port's equivalent should
+be a normal early return (e.g. an `Option`/enum branch, not a `Result::Err`), matching the
+"circumpolar body" case documented for `swe_rise_trans` itself, not a failure.
+
 `SE_BIT_DISC_BOTTOM` = rise/set convention using the bottom limb touching the horizon. **Both
 the sunrise and sunset blocks can fire** for a single very-long high-latitude event; if so, the
 sunset block (evaluated second) wins the final `tret[0]`/`attr` overwrite — a sequential-overwrite
