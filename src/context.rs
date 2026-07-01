@@ -391,6 +391,69 @@ impl Ephemeris {
         Ok(result)
     }
 
+    /// ARMC + true obliquity at `tjd_ut`, shared setup for [`Ephemeris::azalt`] /
+    /// [`Ephemeris::azalt_rev`]. Port of `swe_azalt`/`swe_azalt_rev`'s ARMC construction
+    /// (`swe_sidtime(tjd_ut)*15 + geolon`) and their `SE_ECL_NUT` true-obliquity lookup, which
+    /// both resolve deltaT via `swe_deltat_ex(tjd_ut, -1, NULL)` -- the `-1` sentinel forces
+    /// `SE_TIDAL_DEFAULT` regardless of the configured ephemeris backend, same pattern as
+    /// [`Ephemeris::houses_ex2`]. See docs/c-ref-refraction-azalt.md §1 step 3, §8.
+    fn azalt_armc_eps(&self, tjd_ut: f64, geolon: f64) -> (f64, f64) {
+        let deltat_config = {
+            let mut c = self.config.clone();
+            c.tidal_acceleration = Some(crate::constants::TIDAL_DEFAULT);
+            c
+        };
+        let tjde = tjd_ut + crate::deltat::calc_deltat(tjd_ut, &deltat_config);
+        let models = &self.config.astro_models;
+        let eps_true = crate::calc::calc_ecl_nut(tjde, CalcFlags::empty(), models)[0];
+
+        let armc = crate::math::normalize_degrees(
+            crate::sidereal_time::sidereal_time(tjd_ut, &self.config) * 15.0 + geolon,
+        );
+        (armc, eps_true)
+    }
+
+    /// Ecliptic/equatorial -> azimuth + true/apparent altitude at `tjd_ut` (UT). Port of
+    /// `swe_azalt` (swecl.c:2788-2825). `geopos` = [longitude, latitude, height above sea (m)].
+    /// `atpress` in hPa (`0` => standard-atmosphere estimate from `geopos[2]`), `attemp` in deg
+    /// C. `lapse_rate` in deg K/m -- C's default is `0.0065`; the stateless port has no
+    /// `swe_set_lapse_rate` equivalent, so callers pass it explicitly (see
+    /// docs/c-ref-refraction-azalt.md §9). `xin` = [lon/RA, lat/dec], degrees. Returns
+    /// `[azimuth (from south, positive clockwise via west), true altitude, apparent altitude]`,
+    /// degrees.
+    #[allow(clippy::too_many_arguments)]
+    pub fn azalt(
+        &self,
+        tjd_ut: f64,
+        dir: crate::azalt::AzAltDir,
+        geopos: [f64; 3],
+        atpress: f64,
+        attemp: f64,
+        lapse_rate: f64,
+        xin: [f64; 2],
+    ) -> [f64; 3] {
+        let (armc, eps_true) = self.azalt_armc_eps(tjd_ut, geopos[0]);
+        crate::azalt::azalt(
+            dir, armc, eps_true, geopos, atpress, attemp, lapse_rate, xin,
+        )
+    }
+
+    /// Azimuth + true altitude -> ecliptic/equatorial coordinates at `tjd_ut` (UT). Port of
+    /// `swe_azalt_rev` (swecl.c:2839-2873). Inverse of [`Ephemeris::azalt`]'s geometric
+    /// transform only -- does NOT de-refract; `xin[1]` must already be a true altitude. `geopos`
+    /// = [longitude, latitude, height (unused)]. `xin` = [azimuth (from south, clockwise), true
+    /// altitude], degrees. Returns [lon/RA, lat/dec], degrees.
+    pub fn azalt_rev(
+        &self,
+        tjd_ut: f64,
+        dir: crate::azalt::HorDir,
+        geopos: [f64; 3],
+        xin: [f64; 2],
+    ) -> [f64; 2] {
+        let (armc, eps_true) = self.azalt_armc_eps(tjd_ut, geopos[0]);
+        crate::azalt::azalt_rev(dir, armc, eps_true, geopos[1], xin)
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`

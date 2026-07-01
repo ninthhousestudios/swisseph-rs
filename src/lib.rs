@@ -5,6 +5,7 @@ pub mod flags;
 pub mod types;
 
 pub mod ayanamsa;
+pub mod azalt;
 pub mod bias;
 pub mod calc;
 pub mod corrections;

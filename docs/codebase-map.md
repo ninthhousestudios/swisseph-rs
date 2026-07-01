@@ -89,6 +89,15 @@ src/
 │                          topocentric_house_pos, sunshine_apc_house_pos (shared I/i/Y formula)
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
+├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
+│                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
+│                          extended, Sinclair calc_astronomical_refr + calc_dip horizon-dip, 5-
+│                          iteration Newton inversion for TrueToApp), azalt/azalt_rev (pure
+│                          geometry cores, take precomputed armc+eps_true — Ephemeris::azalt/
+│                          azalt_rev in context.rs resolve ARMC/eps_true/deltaT — forced
+│                          TIDAL_DEFAULT via azalt_armc_eps, same pattern as houses_ex2 — and
+│                          delegate); RefracDir/AzAltDir/HorDir direction enums (AzAltDir/HorDir
+│                          kept distinct since C's SE_ECL2HOR==SE_HOR2ECL==0 collide)
 ├── heliacal.rs         — EMPTY stub
 ├── phenomena.rs        — EMPTY stub
 └── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
@@ -96,6 +105,11 @@ src/
 tests/
 ├── golden/
 │   ├── main.rs         — test harness: golden_data_path(), assert_f64_exact(), assert_f64_eps()
+│   ├── azalt.rs        — golden tests for refraction/horizontal coords (swisseph-rs/69: refrac
+│                          28 cases (7 inalt × 2 atpress × 2 dir, exact-or-1e-9 fallback);
+│                          refrac_ext 56 cases (× 2 geoalt, out + dret[0..4], exact-or-1e-9);
+│                          azalt/azalt_rev 8 cases each (2 tjd_ut × 2 geopos × 2 dir, via
+│                          Ephemeris::azalt/azalt_rev, eps 1e-7 — compounds sidtime/obliquity)
 │   ├── calc.rs        — golden tests for calc pipeline (1176 cases: 14 bodies × 7 epochs × 12 flag combos incl. SPEED3, no_speed)
 │   ├── calc_topo.rs   — golden tests for SEFLG_TOPOCTR (170 cases across 3 sub-matrices, swisseph-rs/80: moshier — 90 cases, 3 observers × 5 bodies × 3 epochs incl. a SPEED3 file-boundary epoch × 2 flag shapes {speed, speed_noaberr}; sweph — 40 cases, 2 observers × 5 bodies × 2 epochs (incl. the sepl_18 SPEED3 file-boundary epoch, widened tolerance there per the documented C-state artifact) × 2 flag shapes; jpl — 40 cases, same shape as sweph; positions eps 1e-9/speeds eps 1e-7 except the sweph file-boundary widening and an OPEN-BUG widening for jpl epochs != J2000 (swisseph-rs/81 — JPL TOPOCTR diverges from C away from J2000, root cause unconfirmed) — TOPOCTR+SPEED+!NOABERR forces SPEED3 (calc.rs plaus_iflag) for the "speed" shape only; "speed_noaberr" exercises the non-SPEED3 analytic-speed path)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
@@ -167,6 +181,7 @@ tests/
 │   ├── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
 │   ├── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
 │   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
+│   ├── azalt.json      — C-generated reference data for swe_refrac/swe_refrac_extended/swe_azalt/swe_azalt_rev (refrac: 28, refrac_ext: 56, azalt: 8, azalt_rev: 8)
 │   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback; ut_wrapper key: swe_houses_ex2 (UT-based) over 6 (tjd_ut,geolat,geolon) triples × 6 systems, + a SEFLG_NONUT variant at 1 triple; sidereal_trad key: swe_houses_ex2 with SEFLG_SIDEREAL + swe_set_sid_mode(SE_SIDM_LAHIRI) over 3 triples × 3 systems P/W/E; house_pos key: swe_house_pos over all 25 house-system chars × 2 (armc,geolat,eps) triples × 3 xpin, "err" field is hpos==0.0 (Koch's real failure sentinel), NOT serr-non-empty (P/G/J/L/Q/default set an informational serr on valid results) — the static sundec cache 'I'/'i' need is primed via a preceding swe_houses_armc_ex2(ascmc[9]=sundec) call; gauquelin_sector key: swe_gauquelin_sector imeth∈{0,1} over 6 ut_triples × 3 bodies (Sun/Moon/Mars))
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
@@ -184,6 +199,7 @@ tests/
     ├── gen_se1_header.c — standalone binary parser, dumps header + planet metadata as JSON
     ├── gen_jpl_pleph.c  — C harness to regenerate jpl_pleph.json (swi_pleph direct calls against de441.eph)
     ├── gen_fixstar.c    — C harness to regenerate fixstar.json (swe_fixstar2: 7 stars × 4 epochs × 7 flags + 4 mag cases)
+    ├── gen_azalt.c      — C harness to regenerate azalt.json (swe_refrac 7 inalt × 2 atpress × 2 dir; swe_refrac_extended × 2 geoalt; swe_azalt/swe_azalt_rev 2 tjd_ut × 2 geopos × 2 dir; swe_set_ephe_path(NULL))
     └── gen_houses.c     — C harness to regenerate houses.json (swe_houses_armc_ex2: angles_special,
                             equal_family, quad_arith, great_circle, iterative, gauquelin36,
                             closed_form_misc, sunshine — sunshine key sets ascmc[9]=sundec before

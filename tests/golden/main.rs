@@ -1,5 +1,6 @@
 mod ayanamsa;
 mod ayanamsa_calc;
+mod azalt;
 mod calc;
 mod calc_jpl;
 mod calc_sweph;
