@@ -408,7 +408,7 @@ impl Ephemeris {
         let eps_true = crate::calc::calc_ecl_nut(tjde, CalcFlags::empty(), models)[0];
 
         let armc = crate::math::normalize_degrees(
-            crate::sidereal_time::sidereal_time(tjd_ut, &self.config) * 15.0 + geolon,
+            crate::sidereal_time::sidereal_time(tjd_ut, &deltat_config) * 15.0 + geolon,
         );
         (armc, eps_true)
     }

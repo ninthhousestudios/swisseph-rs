@@ -25,7 +25,14 @@ static int dirs[] = { SE_TRUE_TO_APP, SE_APP_TO_TRUE };
 static const char *dir_names[] = { "TrueToApp", "AppToTrue" };
 #define N_DIR 2
 
-static double azalt_tjd_uts[] = { 2451545.0, 2459000.5 };
+static double azalt_tjd_uts[] = { 2451545.0, 2459000.5, -1000000.0 };
+/* -1000000.0 = far-past epoch (matches obliquity_bias.json's "Far past" epoch):
+ * exercises the tidal-acceleration correction in the ARMC's sidereal-time
+ * computation (adjust_for_tidacc scales with (year-1955)^2 -- see
+ * azalt_armc_eps's forced-TIDAL_DEFAULT deltaT). At this epoch, an ARMC computed
+ * with Moshier's default tid_acc (TIDAL_DE404) instead of the C-mandated
+ * TIDAL_DEFAULT (TIDAL_DE431) diverges by ~4.5e-7 degrees -- enough to trip the
+ * azalt/azalt_rev golden tests' 1e-7 tolerance. */
 #define N_AZALT_TJD (sizeof(azalt_tjd_uts) / sizeof(azalt_tjd_uts[0]))
 
 struct geopos_t { double lon, lat, height; };
