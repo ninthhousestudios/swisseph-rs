@@ -2,6 +2,14 @@
  * Generates golden reference data for the eclipse module: swe_sol_eclipse_where
  * (RSE 5, swisseph-rs/72). Later RSE tasks (6-12) add more keys to this same file.
  *
+ * The "dcore" field in each sol_where case comes from swi_test_eclipse_where_dcore, a
+ * non-static test-only hook added to ../swisseph/swecl.c (right after calc_planet_star) that
+ * forwards the full dcore[0..9] array out of the static eclipse_where(). C's public
+ * swe_sol_eclipse_where only exposes dcore[0] (via attr[3]); the rest of EclipseWhere's fields
+ * (penumbra_diameter_km, shadow_axis_distance_km, both fundamental-plane diameters, both cone
+ * half-angle cosines) have no other C oracle. Requires libswe.a to be rebuilt after that patch
+ * (`cc -g -Wall -fPIC -c swecl.c -o swecl.o && ar r libswe.a swecl.o` from ../swisseph).
+ *
  * Compile (from repo root):
  *   cc -O2 -I../swisseph -o tests/c-gen/gen_eclipse tests/c-gen/gen_eclipse.c \
  *      -L../swisseph -lswe -lm
@@ -11,6 +19,15 @@
 
 #include <stdio.h>
 #include "swephexp.h"
+
+/* swi_test_eclipse_where_dcore: see ../swisseph/swecl.c patch note above. Not declared in any
+ * public header. */
+extern int32 swi_test_eclipse_where_dcore(double tjd_ut, int32 ipl, char *starname, int32 ifl,
+                                           double *geopos, double *dcore, char *serr);
+
+/* Local to swecl.c (not in any public header); mirrored here to mask ifl the same way
+ * swe_sol_eclipse_where does before its own eclipse_where call (swecl.c:67,574). */
+#define SEFLG_EPHMASK (SEFLG_JPLEPH | SEFLG_SWIEPH | SEFLG_MOSEPH)
 
 /* Instants of maximum eclipse (UT) for known central solar eclipses, plus a plain-noon epoch
  * that is nowhere near a solar conjunction (exercises the "no eclipse anywhere" / retval==0
@@ -40,6 +57,15 @@ int main(void) {
         double attr[20] = { 0 };
         char serr[256] = { 0 };
         int32 retval = swe_sol_eclipse_where(tjd_ut, ifl, geopos, attr, serr);
+
+        /* swe_sol_eclipse_where masks ifl &= SEFLG_EPHMASK before calling eclipse_where
+         * (swecl.c:574) -- replicate that here so the dcore we capture matches what
+         * swe_sol_eclipse_where's own eclipse_where call actually saw. */
+        double geopos2[10] = { 0 };
+        double dcore[10] = { 0 };
+        char serr2[256] = { 0 };
+        swi_test_eclipse_where_dcore(tjd_ut, SE_SUN, NULL, ifl & SEFLG_EPHMASK, geopos2, dcore, serr2);
+
         if (!first) printf(",\n");
         first = 0;
         printf("    {\"tjd_ut\": %.17g, \"nonut\": %s, \"retval\": %d, \"geopos\": [",
@@ -47,6 +73,8 @@ int main(void) {
         for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", geopos[k]);
         printf("], \"attr\": [");
         for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
+        printf("], \"dcore\": [");
+        for (int k = 0; k < 7; k++) printf("%s%.20e", k ? ", " : "", dcore[k]);
         printf("]}");
     }
     printf("\n  ]\n");
