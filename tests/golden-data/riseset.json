@@ -36,5 +36,27 @@
     {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900096336738346145e+06},
     {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900055118266772479e+06},
     {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45900126525062415749e+06}
+  ],
+  "dip": [
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "tjd_ut": 2451545, "atpress": 0, "retval": 0, "tret0": 2.45154580137101933360e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "tjd_ut": 2451545, "atpress": 1013.25, "retval": 0, "tret0": 2.45154580184912821278e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "tjd_ut": 2451545, "atpress": 0, "retval": 0, "tret0": 2.45154575253637786955e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "tjd_ut": 2451545, "atpress": 1013.25, "retval": 0, "tret0": 2.45154575253637786955e+06},
+    {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "tjd_ut": 2451545, "atpress": 0, "retval": -2, "tret0": 0.00000000000000000000e+00},
+    {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "tjd_ut": 2451545, "atpress": 1013.25, "retval": -2, "tret0": 0.00000000000000000000e+00}
+  ],
+  "mtrans_flags": [
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Sun", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45154597885278798640e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Sun", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154547868873272091e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Moon", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45154584006980899721e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Moon", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154532472039433196e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Sun", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45154500228244904429e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Sun", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154550244644191116e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Moon", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45154586455342266709e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Moon", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154534919521911070e+06},
+    {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Sun", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45154594995437748730e+06},
+    {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Sun", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154544979044701904e+06},
+    {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Moon", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45154581028911471367e+06},
+    {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Moon", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154529495003772900e+06}
   ]
 }

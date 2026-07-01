@@ -14,8 +14,33 @@ struct FullCase {
 }
 
 #[derive(Deserialize)]
+struct DipCase {
+    geopos: [f64; 3],
+    #[allow(dead_code)]
+    geopos_name: String,
+    tjd_ut: f64,
+    atpress: f64,
+    retval: i32,
+    tret0: f64,
+}
+
+#[derive(Deserialize)]
+struct MtransFlagsCase {
+    geopos: [f64; 3],
+    #[allow(dead_code)]
+    geopos_name: String,
+    body: String,
+    tjd_ut: f64,
+    rsmi: String,
+    retval: i32,
+    tret0: f64,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     full: Vec<FullCase>,
+    dip: Vec<DipCase>,
+    mtrans_flags: Vec<MtransFlagsCase>,
 }
 
 fn load() -> GoldenData {
@@ -39,6 +64,7 @@ fn rsmi_of(s: &str) -> RiseSetFlags {
         "RISE" => RiseSetFlags::RISE,
         "SET" => RiseSetFlags::SET,
         "MTRANSIT" => RiseSetFlags::MTRANSIT,
+        "ITRANSIT" => RiseSetFlags::ITRANSIT,
         other => panic!("Unknown rsmi: {other}"),
     }
 }
@@ -59,6 +85,81 @@ fn full() {
             body,
             None,
             CalcFlags::MOSEPH,
+            rsmi,
+            c.geopos,
+            1013.25,
+            15.0,
+            0.0,
+        );
+        if c.retval == -2 {
+            match actual {
+                Err(Error::CircumpolarBody) => {}
+                other => panic!("{label}: expected CircumpolarBody, got {other:?}"),
+            }
+        } else {
+            let result = actual.unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+            super::assert_f64_eps(&format!("{label}.time"), c.tret0, result.time, 1e-6);
+        }
+    }
+}
+
+/// Covers the `horhgt == -100` auto-dip sentinel combined with `atpress == 0`: calc_dip must
+/// receive `atpress` unmodified (not routed through the atpress-auto-estimate used elsewhere),
+/// per swecl.c:4415-4416.
+#[test]
+fn dip() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.dip.iter().enumerate() {
+        let label = format!(
+            "dip[{i}][geopos={:?},tjd_ut={},atpress={}]",
+            c.geopos, c.tjd_ut, c.atpress
+        );
+        let actual = ephe.rise_trans_true_hor(
+            c.tjd_ut,
+            Body::Sun,
+            None,
+            CalcFlags::MOSEPH,
+            RiseSetFlags::RISE
+                | RiseSetFlags::NO_REFRACTION
+                | RiseSetFlags::DISC_CENTER
+                | RiseSetFlags::FORCE_SLOW,
+            c.geopos,
+            c.atpress,
+            15.0,
+            -100.0,
+        );
+        if c.retval == -2 {
+            match actual {
+                Err(Error::CircumpolarBody) => {}
+                other => panic!("{label}: expected CircumpolarBody, got {other:?}"),
+            }
+        } else {
+            let result = actual.unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+            super::assert_f64_eps(&format!("{label}.time"), c.tret0, result.time, 1e-6);
+        }
+    }
+}
+
+/// Covers `calc_mer_trans` with `SEFLG_NONUT | SEFLG_TRUEPOS` set on `epheflag`: C masks
+/// `epheflag` down to `SEFLG_EPHMASK` only for meridian transits (swecl.c:4701), dropping
+/// NONUT/TRUEPOS -- unlike the rise/set branch, which keeps them (swecl.c:4425).
+#[test]
+fn mtrans_flags() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.mtrans_flags.iter().enumerate() {
+        let body = body_of(&c.body);
+        let rsmi = rsmi_of(&c.rsmi);
+        let label = format!(
+            "mtrans_flags[{i}][geopos={:?},body={},tjd_ut={},rsmi={}]",
+            c.geopos, c.body, c.tjd_ut, c.rsmi
+        );
+        let actual = ephe.rise_trans_true_hor(
+            c.tjd_ut,
+            body,
+            None,
+            CalcFlags::MOSEPH | CalcFlags::NONUT | CalcFlags::TRUEPOS,
             rsmi,
             c.geopos,
             1013.25,
