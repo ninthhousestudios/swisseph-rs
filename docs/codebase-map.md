@@ -97,7 +97,7 @@ tests/
 ├── golden/
 │   ├── main.rs         — test harness: golden_data_path(), assert_f64_exact(), assert_f64_eps()
 │   ├── calc.rs        — golden tests for calc pipeline (1176 cases: 14 bodies × 7 epochs × 12 flag combos incl. SPEED3, no_speed)
-│   ├── calc_topo.rs   — golden tests for SEFLG_TOPOCTR (45 cases: 3 observers × 5 bodies × 3 epochs incl. a SPEED3 file-boundary epoch; MOSEPH|TOPOCTR|EQUATORIAL|SPEED, positions eps 1e-9/speeds eps 1e-7 — TOPOCTR+SPEED+!NOABERR forces SPEED3 (calc.rs plaus_iflag), so every case exercises the 3-point-derivative dispatch)
+│   ├── calc_topo.rs   — golden tests for SEFLG_TOPOCTR (170 cases across 3 sub-matrices, swisseph-rs/80: moshier — 90 cases, 3 observers × 5 bodies × 3 epochs incl. a SPEED3 file-boundary epoch × 2 flag shapes {speed, speed_noaberr}; sweph — 40 cases, 2 observers × 5 bodies × 2 epochs (incl. the sepl_18 SPEED3 file-boundary epoch, widened tolerance there per the documented C-state artifact) × 2 flag shapes; jpl — 40 cases, same shape as sweph; positions eps 1e-9/speeds eps 1e-7 except the sweph file-boundary widening and an OPEN-BUG widening for jpl epochs != J2000 (swisseph-rs/81 — JPL TOPOCTR diverges from C away from J2000, root cause unconfirmed) — TOPOCTR+SPEED+!NOABERR forces SPEED3 (calc.rs plaus_iflag) for the "speed" shape only; "speed_noaberr" exercises the non-SPEED3 analytic-speed path)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
