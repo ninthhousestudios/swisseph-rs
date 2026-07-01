@@ -7,8 +7,10 @@
 //! wrapped by `Ephemeris::azalt`/`azalt_rev`); the functions here take `&Ephemeris` explicitly
 //! since the algorithm interleaves many `calc`/`azalt`/`azalt_rev` calls.
 
-use crate::azalt::{AzAltDir, HorDir};
-use crate::constants::{AUNIT, LAPSE_RATE, RADTODEG, RISE_SET_GEOALT_MAX, RISE_SET_GEOALT_MIN};
+use crate::azalt::{AzAltDir, HorDir, RefracDir};
+use crate::constants::{
+    AUNIT, DEGTORAD, LAPSE_RATE, RADTODEG, RISE_SET_GEOALT_MAX, RISE_SET_GEOALT_MIN,
+};
 use crate::context::{Ephemeris, EphemerisConfig, TopoPosition};
 use crate::error::Error;
 use crate::flags::{CalcFlags, RiseSetFlags};
@@ -281,6 +283,162 @@ pub(crate) fn rise_trans_true_hor(
     }
 
     Err(Error::CircumpolarBody)
+}
+
+/// Fast rise/set algorithm: semi-diurnal-arc estimate + Newton iteration. Port of
+/// `rise_set_fast` (swecl.c:4203-4325, docs/c-ref-riseset.md §3). Only valid for
+/// `|geopos[1]| <= 60` (`<= 65` for the Sun), never for fixed stars or twilight -- eligibility is
+/// the caller's ([`crate::context::Ephemeris::rise_trans`]) responsibility. Unlike the full
+/// algorithm, this never signals circumpolar/`Error::CircumpolarBody`: the semi-diurnal-arc
+/// clamps (`sda`) just produce a (possibly meaningless) estimate that the Newton loop "refines"
+/// anyway (§3.2).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rise_set_fast(
+    eph: &Ephemeris,
+    tjd_ut0: f64,
+    body: Body,
+    epheflag: CalcFlags,
+    rsmi: RiseSetFlags,
+    geopos: [f64; 3],
+    atpress: f64,
+    attemp: f64,
+) -> Result<RiseSetResult, Error> {
+    let nloop = if body == Body::Moon { 4 } else { 2 };
+    let facrise = if rsmi.contains(RiseSetFlags::SET) {
+        -1.0
+    } else {
+        1.0
+    };
+    let geoctr_no_ecl_lat = rsmi.contains(RiseSetFlags::GEOCTR_NO_ECL_LAT);
+
+    let topo_config = {
+        let mut c = eph.config().clone();
+        c.topographic = Some(TopoPosition {
+            longitude: geopos[0],
+            latitude: geopos[1],
+            altitude: geopos[2],
+        });
+        c
+    };
+
+    // §3.1 setup: `iflagtopo` for the semi-diurnal-arc step always carries EQUATORIAL (needs
+    // RA/dec), TOPOCTR unless GEOCTR_NO_ECL_LAT.
+    let iflag_base = epheflag & IFLAG_KEEP_MASK;
+    let mut iflagtopo_sda = iflag_base | CalcFlags::EQUATORIAL;
+    if !geoctr_no_ecl_lat {
+        iflagtopo_sda |= CalcFlags::TOPOCTR;
+    }
+
+    // §3.3 step 3: horizontal-conversion working flags -- geocentric ecliptic if
+    // GEOCTR_NO_ECL_LAT, else topocentric equatorial.
+    let (tohor_flag, iflagtopo_newton) = if geoctr_no_ecl_lat {
+        (AzAltDir::EclToHor, iflag_base)
+    } else {
+        (
+            AzAltDir::EquToHor,
+            iflag_base | CalcFlags::EQUATORIAL | CalcFlags::TOPOCTR,
+        )
+    };
+
+    // §3.3 step 1: resolve atpress once, reused for every iteration.
+    let atpress = crate::azalt::resolve_atpress(atpress, geopos[2]);
+
+    // §3.3 step 2: refraction at the horizon, computed once, reused every iteration.
+    let mut dret = [0.0; 4];
+    crate::azalt::refrac_extended(
+        0.000001,
+        0.0,
+        atpress,
+        attemp,
+        LAPSE_RATE,
+        RefracDir::AppToTrue,
+        &mut dret,
+    );
+    let refr = dret[1] - dret[0];
+
+    let mut tjd_ut = tjd_ut0;
+    let mut is_second_run = false;
+    let tr = loop {
+        // §3.2: semi-diurnal-arc estimate.
+        let r = eph.calc_ut_with_config(tjd_ut, body, iflagtopo_sda, &topo_config)?;
+        let decl = r.data[1];
+        let mut sda = -(geopos[1] * DEGTORAD).tan() * (decl * DEGTORAD).tan();
+        sda = if sda >= 1.0 {
+            10.0
+        } else if sda <= -1.0 {
+            180.0
+        } else {
+            sda.acos() * RADTODEG
+        };
+        let armc = eph.azalt_armc_eps(tjd_ut, geopos[0]).0;
+        let md = crate::math::normalize_degrees(r.data[0] - armc);
+        let mdrise = crate::math::normalize_degrees(sda * facrise);
+        let mut dmd = crate::math::normalize_degrees(md - mdrise);
+        if dmd > 358.0 {
+            dmd -= 360.0;
+        }
+        let mut tr = tjd_ut + dmd / 360.0;
+
+        // §3.3: Newton iteration.
+        for _ in 0..nloop {
+            let r = eph.calc_ut_with_config(tr, body, iflagtopo_newton, &topo_config)?;
+            let mut xx = [r.data[0], r.data[1], r.data[2]];
+            if geoctr_no_ecl_lat {
+                xx[1] = 0.0;
+            }
+            let rdi = get_sun_rad_plus_refr(body, xx[2], rsmi, refr);
+            let xaz = eph.azalt(
+                tr,
+                tohor_flag,
+                geopos,
+                atpress,
+                attemp,
+                LAPSE_RATE,
+                [xx[0], xx[1]],
+            );
+            let xaz2 = eph.azalt(
+                tr + 0.001,
+                tohor_flag,
+                geopos,
+                atpress,
+                attemp,
+                LAPSE_RATE,
+                [xx[0], xx[1]],
+            );
+            let dd = xaz2[1] - xaz[1];
+            let dalt = xaz[1] + rdi;
+            let dt = (dalt / dd / 1000.0).clamp(-0.1, 0.1);
+            tr -= dt;
+        }
+
+        // §3.2 step 5: retry-next-day guard, at most one retry.
+        if tr < tjd_ut0 && !is_second_run {
+            tjd_ut += 0.5;
+            is_second_run = true;
+            continue;
+        }
+        break tr;
+    };
+
+    Ok(RiseSetResult { time: tr })
+}
+
+/// Target horizon-altitude offset (degrees): disc angular radius (signed by limb) plus
+/// refraction. Port of `get_sun_rad_plus_refr` (swecl.c:4176-4194, §3.4). `dist_au` is the
+/// body's distance (AU); `refr` is the once-computed horizon refraction (§3.3 step 2).
+fn get_sun_rad_plus_refr(body: Body, dist_au: f64, rsmi: RiseSetFlags, refr: f64) -> f64 {
+    let mut rdi = 0.0;
+    if !rsmi.contains(RiseSetFlags::DISC_CENTER) {
+        let dd_m = disc_diameter_m(body, false, rsmi);
+        rdi = disc_radius_deg(rsmi, body, dd_m, dist_au);
+    }
+    if rsmi.contains(RiseSetFlags::DISC_BOTTOM) {
+        rdi = -rdi;
+    }
+    if !rsmi.contains(RiseSetFlags::NO_REFRACTION) {
+        rdi += refr;
+    }
+    rdi
 }
 
 /// Disc angular radius (degrees) at a given distance. `dd_m` is the resolved disc diameter

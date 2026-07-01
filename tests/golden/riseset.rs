@@ -37,10 +37,23 @@ struct MtransFlagsCase {
 }
 
 #[derive(Deserialize)]
+struct FastCase {
+    geopos: [f64; 3],
+    #[allow(dead_code)]
+    geopos_name: String,
+    body: String,
+    tjd_ut: f64,
+    rsmi: String,
+    retval: i32,
+    tret0: f64,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     full: Vec<FullCase>,
     dip: Vec<DipCase>,
     mtrans_flags: Vec<MtransFlagsCase>,
+    fast: Vec<FastCase>,
 }
 
 fn load() -> GoldenData {
@@ -138,6 +151,55 @@ fn dip() {
             let result = actual.unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
             super::assert_f64_eps(&format!("{label}.time"), c.tret0, result.time, 1e-6);
         }
+    }
+}
+
+/// `swe_rise_trans`'s fast path (`rise_set_fast`), dispatched via `Ephemeris::rise_trans`.
+/// Also sanity-checks that the fast and full algorithms agree to ~1e-5 day for the same inputs.
+#[test]
+fn fast() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.fast.iter().enumerate() {
+        let body = body_of(&c.body);
+        let rsmi = rsmi_of(&c.rsmi);
+        let label = format!(
+            "fast[{i}][geopos={:?},body={},tjd_ut={},rsmi={}]",
+            c.geopos, c.body, c.tjd_ut, c.rsmi
+        );
+        let actual = ephe.rise_trans(
+            c.tjd_ut,
+            body,
+            None,
+            CalcFlags::MOSEPH,
+            rsmi,
+            c.geopos,
+            1013.25,
+            15.0,
+        );
+        assert_eq!(c.retval, 0, "{label}: unexpected non-OK C retval");
+        let result = actual.unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+        super::assert_f64_eps(&format!("{label}.time"), c.tret0, result.time, 1e-6);
+
+        let full = ephe
+            .rise_trans_true_hor(
+                c.tjd_ut,
+                body,
+                None,
+                CalcFlags::MOSEPH,
+                rsmi,
+                c.geopos,
+                1013.25,
+                15.0,
+                0.0,
+            )
+            .unwrap_or_else(|e| panic!("{label}: full algorithm unexpected error {e}"));
+        super::assert_f64_eps(
+            &format!("{label}.fast_vs_full"),
+            full.time,
+            result.time,
+            1e-5,
+        );
     }
 }
 

@@ -129,6 +129,47 @@ int main(void) {
             }
         }
     }
+    printf("\n  ],\n");
+
+    /* "fast" -- swe_rise_trans dispatcher's fast path (rise_set_fast): 3 geopos (all |lat| <=
+     * 60, so all are fast-eligible for both Sun and Moon) x 2 bodies x 2 epochs x RISE/SET (no
+     * FORCE_SLOW -- that's what routes swe_rise_trans through the fast algorithm). */
+    printf("  \"fast\": [\n");
+    first = 1;
+    {
+        static struct geopos_t fast_geoposs[] = {
+            { 8.55, 47.37, 500.0, "Zurich" },
+            { 0.0, 0.0, 0.0, "Null Island" },
+            { 139.7, 35.7, 40.0, "Tokyo" },
+        };
+        size_t n_fast_geopos = sizeof(fast_geoposs) / sizeof(fast_geoposs[0]);
+        static int32 fast_rsmis[] = { SE_CALC_RISE, SE_CALC_SET };
+        static const char *fast_rsmi_names[] = { "RISE", "SET" };
+        for (size_t ig = 0; ig < n_fast_geopos; ig++) {
+            for (size_t ib = 0; ib < N_BODY; ib++) {
+                for (size_t it = 0; it < N_TJD; it++) {
+                    for (size_t ir = 0; ir < 2; ir++) {
+                        double geopos[3] = { fast_geoposs[ig].lon, fast_geoposs[ig].lat, fast_geoposs[ig].height };
+                        double tjd_ut = tjd_uts[it];
+                        int32 ipl = bodies[ib];
+                        int32 rsmi = fast_rsmis[ir];
+                        double tret[10] = { 0 };
+                        char serr[256] = { 0 };
+                        int32 retval = swe_rise_trans(
+                            tjd_ut, ipl, NULL, SEFLG_MOSEPH, rsmi, geopos,
+                            1013.25, 15.0, tret, serr);
+                        if (!first) printf(",\n");
+                        first = 0;
+                        printf("    {\"geopos\": [%.17g, %.17g, %.17g], \"geopos_name\": \"%s\", "
+                               "\"body\": \"%s\", \"tjd_ut\": %.17g, \"rsmi\": \"%s\", "
+                               "\"retval\": %d, \"tret0\": %.20e}",
+                               geopos[0], geopos[1], geopos[2], fast_geoposs[ig].name,
+                               body_names[ib], tjd_ut, fast_rsmi_names[ir], (int)retval, tret[0]);
+                    }
+                }
+            }
+        }
+    }
     printf("\n  ]\n");
 
     printf("}\n");

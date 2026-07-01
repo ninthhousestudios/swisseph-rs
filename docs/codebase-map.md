@@ -118,8 +118,18 @@ src/
 │                          without needing to match Ephemeris's own configured topographic
 │                          position (mirrors C's per-call swe_set_topo, but stateless);
 │                          azalt_armc_eps widened to pub(crate) for calc_mer_trans's ARMC.
-│                          Fast-path optimization (rise_set_fast) + swe_rise_trans dispatcher are
-│                          RSE 4 (not yet ported).
+│                          rise_set_fast (swisseph-rs/71, swe_rise_trans_fast port): semi-diurnal-
+│                          arc estimate (armc/decl snapshot, sda clamped to 10°/180° for
+│                          never-rises/never-sets rather than signaling circumpolar — this path
+│                          NEVER returns Error::CircumpolarBody) + 2 Newton iterations (4 for
+│                          Moon) via finite-difference azalt slope (0.001-day step), at most one
+│                          tjd_ut+0.5 retry if the estimate lands before the input time;
+│                          get_sun_rad_plus_refr computes the target altitude offset (disc radius
+│                          reusing disc_diameter_m/disc_radius_deg + once-computed horizon
+│                          refraction). Ephemeris::rise_trans (context.rs, swe_rise_trans
+│                          dispatcher port) picks fast vs rise_trans_true_hor(horhgt=0.0) by the
+│                          §4 eligibility gate (not fixstar, RISE/SET only, !FORCE_SLOW, no
+│                          twilight, body in Sun..=TrueNode, |geolat|≤60 or Sun≤65).
 ├── heliacal.rs         — EMPTY stub
 ├── phenomena.rs        — EMPTY stub
 └── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
@@ -185,13 +195,21 @@ tests/
 │                         dgsect via Ephemeris::gauquelin_sector_geometric — this test caught a
 │                         pre-existing sidtime_long_term deltaT/tid_acc bug at 1600/1800 AD epochs,
 │                         fixed in sidereal_time.rs (see that file's codebase-map entry))
-├── riseset.rs         — golden tests for rise_trans_true_hor (swisseph-rs/70; full: 36 cases, 3
-│                         geopos (Zurich/Null Island/Tromso) × 2 bodies (Sun/Moon) × 2 epochs ×
-│                         3 rsmi (RISE/SET/MTRANSIT, all with FORCE_SLOW OR'd in for parity with
-│                         the C harness though it's a no-op on this function), eps 1e-6 time
-│                         (≈0.1s); 4 of the 36 (Tromso Sun RISE/SET at both epochs) are
-│                         circumpolar (C retval -2) and assert Err(Error::CircumpolarBody)
-│                         instead of a time)
+├── riseset.rs         — golden tests for rise_trans_true_hor + rise_trans (swisseph-rs/70,71;
+│                         full: 36 cases, 3 geopos (Zurich/Null Island/Tromso) × 2 bodies
+│                         (Sun/Moon) × 2 epochs × 3 rsmi (RISE/SET/MTRANSIT, all with FORCE_SLOW
+│                         OR'd in for parity with the C harness though it's a no-op on this
+│                         function), eps 1e-6 time (≈0.1s); 4 of the 36 (Tromso Sun RISE/SET at
+│                         both epochs) are circumpolar (C retval -2) and assert
+│                         Err(Error::CircumpolarBody) instead of a time; dip: 6 cases, horhgt=-100
+│                         auto-dip sentinel × atpress ∈ {0, 1013.25} × 3 geopos, locks in that
+│                         calc_dip receives atpress unmodified (not auto-estimated); mtrans_flags:
+│                         12 cases, epheflag NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/
+│                         ITRANSIT, locks in calc_mer_trans's narrower SEFLG_EPHMASK-only mask;
+│                         fast: 24 cases via Ephemeris::rise_trans (swe_rise_trans dispatcher),
+│                         3 geopos all |lat|≤60 (Zurich/Null Island/Tokyo) × 2 bodies × 2 epochs ×
+│                         RISE/SET (no FORCE_SLOW — that's what selects the fast path), eps 1e-6
+│                         vs C tret0 + a same-input fast-vs-full cross-check eps 1e-5 day)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -212,7 +230,7 @@ tests/
 │   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
 │   ├── azalt.json      — C-generated reference data for swe_refrac/swe_refrac_extended/swe_azalt/swe_azalt_rev (refrac: 28, refrac_ext: 56, azalt: 8, azalt_rev: 8)
 │   ├── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback; ut_wrapper key: swe_houses_ex2 (UT-based) over 6 (tjd_ut,geolat,geolon) triples × 6 systems, + a SEFLG_NONUT variant at 1 triple; sidereal_trad key: swe_houses_ex2 with SEFLG_SIDEREAL + swe_set_sid_mode(SE_SIDM_LAHIRI) over 3 triples × 3 systems P/W/E; house_pos key: swe_house_pos over all 25 house-system chars × 2 (armc,geolat,eps) triples × 3 xpin, "err" field is hpos==0.0 (Koch's real failure sentinel), NOT serr-non-empty (P/G/J/L/Q/default set an informational serr on valid results) — the static sundec cache 'I'/'i' need is primed via a preceding swe_houses_armc_ex2(ascmc[9]=sundec) call; gauquelin_sector key: swe_gauquelin_sector imeth∈{0,1} over 6 ut_triples × 3 bodies (Sun/Moon/Mars))
-│   └── riseset.json    — C-generated reference data for swe_rise_trans_true_hor (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err)
+│   └── riseset.json    — C-generated reference data for swe_rise_trans_true_hor + swe_rise_trans (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err; dip key: 6 cases, horhgt=-100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: 12 cases, NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key: 24 cases via swe_rise_trans, 3 geopos all \|lat\|≤60 × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -243,7 +261,11 @@ tests/
     └── gen_riseset.c    — C harness to regenerate riseset.json (swe_rise_trans_true_hor: full
                             key, 3 geopos × 2 bodies (Sun/Moon) × 2 epochs × 3 rsmi
                             (RISE/SET/MTRANSIT, | SE_BIT_FORCE_SLOW_METHOD), SEFLG_MOSEPH,
-                            records retval so circumpolar -2 cases assert Err)
+                            records retval so circumpolar -2 cases assert Err; dip key: horhgt=
+                            -100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: NONUT|
+                            TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key:
+                            swe_rise_trans (swisseph-rs/71), 3 geopos all |lat|≤60 (Zurich/Null
+                            Island/Tokyo) × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
 ```
 
 ## Key Types in types.rs

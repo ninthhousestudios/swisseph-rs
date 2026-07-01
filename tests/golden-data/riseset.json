@@ -58,5 +58,31 @@
     {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Sun", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154544979044701904e+06},
     {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Moon", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "retval": 0, "tret0": 2.45154581028911471367e+06},
     {"geopos": [18.949999999999999, 69.650000000000006, 10], "geopos_name": "Tromso", "body": "Moon", "tjd_ut": 2451545, "rsmi": "ITRANSIT", "retval": 0, "tret0": 2.45154529495003772900e+06}
+  ],
+  "fast": [
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Sun", "tjd_ut": 2451545, "rsmi": "RISE", "retval": 0, "tret0": 2.45154580080752307549e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Sun", "tjd_ut": 2451545, "rsmi": "SET", "retval": 0, "tret0": 2.45154515635973308235e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Sun", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900064840852702036e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Sun", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900130135910073295e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Moon", "tjd_ut": 2451545, "rsmi": "RISE", "retval": 0, "tret0": 2.45154562477648258209e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Moon", "tjd_ut": 2451545, "rsmi": "SET", "retval": 0, "tret0": 2.45154503171771299094e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900102036354737356e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900054340445203707e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Sun", "tjd_ut": 2451545, "rsmi": "RISE", "retval": 0, "tret0": 2.45154575002825586125e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Sun", "tjd_ut": 2451545, "rsmi": "SET", "retval": 0, "tret0": 2.45154525486570037901e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Sun", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900074597344500944e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Sun", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900125094216130674e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Moon", "tjd_ut": 2451545, "rsmi": "RISE", "retval": 0, "tret0": 2.45154560714296950027e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Moon", "tjd_ut": 2451545, "rsmi": "SET", "retval": 0, "tret0": 2.45154509128384524956e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900106144357938319e+06},
+    {"geopos": [0, 0, 0], "geopos_name": "Null Island", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900054295851383358e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Sun", "tjd_ut": 2451545, "rsmi": "RISE", "retval": 0, "tret0": 2.45154541046763816848e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Sun", "tjd_ut": 2451545, "rsmi": "SET", "retval": 0, "tret0": 2.45154581847136840224e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Sun", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900131023081438616e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Sun", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900091046123486012e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Moon", "tjd_ut": 2451545, "rsmi": "RISE", "retval": 0, "tret0": 2.45154523188272351399e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Moon", "tjd_ut": 2451545, "rsmi": "SET", "retval": 0, "tret0": 2.45154569378405716270e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900064438607823104e+06},
+    {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900118534070858732e+06}
   ]
 }

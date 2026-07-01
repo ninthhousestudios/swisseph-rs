@@ -505,6 +505,53 @@ impl Ephemeris {
         )
     }
 
+    /// Rise/set/meridian-transit search, dispatching to the fast algorithm when eligible.
+    /// Port of `swe_rise_trans` (swecl.c:4355-4383, docs/c-ref-riseset.md §4). Fast-path
+    /// eligible iff: not a fixed star, requesting RISE/SET (not a transit), `FORCE_SLOW` not
+    /// set, no twilight bit, `body` in `Sun..=TrueNode`, and `|geopos[1]| <= 60` (`<= 65` for
+    /// the Sun). Otherwise delegates to [`Ephemeris::rise_trans_true_hor`] with `horhgt = 0.0`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rise_trans(
+        &self,
+        tjd_ut: f64,
+        body: Body,
+        starname: Option<&str>,
+        epheflag: CalcFlags,
+        rsmi: crate::flags::RiseSetFlags,
+        geopos: [f64; 3],
+        atpress: f64,
+        attemp: f64,
+    ) -> Result<crate::riseset::RiseSetResult, Error> {
+        use crate::flags::RiseSetFlags;
+
+        let is_fixstar = starname.is_some_and(|s| !s.is_empty());
+        let no_twilight = !rsmi.intersects(
+            RiseSetFlags::CIVIL_TWILIGHT
+                | RiseSetFlags::NAUTIC_TWILIGHT
+                | RiseSetFlags::ASTRO_TWILIGHT,
+        );
+        let classic_body =
+            (Body::Sun.to_raw_id()..=Body::TrueNode.to_raw_id()).contains(&body.to_raw_id());
+        let lat_ok = geopos[1].abs() <= 60.0 || (body == Body::Sun && geopos[1].abs() <= 65.0);
+
+        let fast_eligible = !is_fixstar
+            && rsmi.intersects(RiseSetFlags::RISE | RiseSetFlags::SET)
+            && !rsmi.contains(RiseSetFlags::FORCE_SLOW)
+            && no_twilight
+            && classic_body
+            && lat_ok;
+
+        if fast_eligible {
+            crate::riseset::rise_set_fast(
+                self, tjd_ut, body, epheflag, rsmi, geopos, atpress, attemp,
+            )
+        } else {
+            self.rise_trans_true_hor(
+                tjd_ut, body, starname, epheflag, rsmi, geopos, atpress, attemp, 0.0,
+            )
+        }
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`
