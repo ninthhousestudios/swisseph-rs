@@ -236,6 +236,123 @@ impl Ephemeris {
         )
     }
 
+    /// Tropical houses at `tjd_ut` (UT), no flags. Port of `swe_houses` (swehouse.c:120-160).
+    pub fn houses(
+        &self,
+        tjd_ut: f64,
+        geolat: f64,
+        geolon: f64,
+        hsys: crate::types::HouseSystem,
+    ) -> Result<crate::houses::HouseResult, Error> {
+        self.houses_ex2(tjd_ut, CalcFlags::empty(), geolat, geolon, hsys)
+    }
+
+    /// Houses at `tjd_ut` (UT) with flags, no speeds requested by the caller (speeds are
+    /// always computed — `HouseResult` carries them unconditionally). Port of `swe_houses_ex`
+    /// (swehouse.c:200-236).
+    pub fn houses_ex(
+        &self,
+        tjd_ut: f64,
+        flags: CalcFlags,
+        geolat: f64,
+        geolon: f64,
+        hsys: crate::types::HouseSystem,
+    ) -> Result<crate::houses::HouseResult, Error> {
+        self.houses_ex2(tjd_ut, flags, geolat, geolon, hsys)
+    }
+
+    /// Houses at `tjd_ut` (UT) with flags and speeds. Port of `swe_houses_ex2`
+    /// (swehouse.c:238-270). Computes ARMC + true obliquity from `tjd_ut`, resolves the Sun's
+    /// declination for Sunshine house systems, and dispatches to the traditional-sidereal or
+    /// tropical driver. See docs/c-ref-houses.md §3, §6, §11.
+    pub fn houses_ex2(
+        &self,
+        tjd_ut: f64,
+        flags: CalcFlags,
+        geolat: f64,
+        geolon: f64,
+        hsys: crate::types::HouseSystem,
+    ) -> Result<crate::houses::HouseResult, Error> {
+        use crate::constants::{DEGTORAD, RADTODEG};
+        use crate::types::HouseSystem;
+
+        // C's swe_houses_ex2 resolves deltaT tidal acceleration via swe_deltat_ex(tjd_ut, iflag,
+        // NULL) where iflag is the caller's flags (never carrying an ephemeris-source bit for a
+        // typical house call) -- this falls through to SE_TIDAL_DEFAULT regardless of the
+        // actually-configured ephemeris backend (swephlib.c:2545-2568, ~2701). Our stateless
+        // Ephemeris::calc_deltat normally resolves tid_acc from config.ephemeris_source, which
+        // would silently pick up e.g. Moshier's DE404 here -- diverging from C by several
+        // microdegrees at pre-1900 epochs. Force TIDAL_DEFAULT to match.
+        let deltat_config = {
+            let mut c = self.config.clone();
+            c.tidal_acceleration = Some(crate::constants::TIDAL_DEFAULT);
+            c
+        };
+        let tjde = tjd_ut + crate::deltat::calc_deltat(tjd_ut, &deltat_config);
+        let models = &self.config.astro_models;
+
+        // eps is always computed with iflag=0, regardless of the caller's flags
+        // (swehouse.c:245, c-ref-houses.md §3).
+        let eps_mean = crate::obliquity::obliquity(tjde, CalcFlags::empty(), models).eps * RADTODEG;
+        let nut = crate::nutation::nutation(tjde, CalcFlags::empty(), models);
+        let mut dpsi_deg = nut.dpsi * RADTODEG;
+        let mut deps_deg = nut.deps * RADTODEG;
+        if flags.contains(CalcFlags::NONUT) {
+            dpsi_deg = 0.0;
+            deps_deg = 0.0;
+        }
+        let eps_true = eps_mean + deps_deg;
+        let armc = crate::math::normalize_degrees(
+            crate::sidereal_time::sidereal_time0(tjd_ut, eps_true, dpsi_deg, &deltat_config) * 15.0
+                + geolon,
+        );
+
+        let sundec = if matches!(hsys, HouseSystem::Sunshine | HouseSystem::SunshineAlt) {
+            let xp = self.calc_ut(tjd_ut, Body::Sun, CalcFlags::SPEED | CalcFlags::EQUATORIAL)?;
+            Some(xp.data[1])
+        } else {
+            None
+        };
+
+        let mut result = if flags.contains(CalcFlags::SIDEREAL) {
+            if self
+                .config
+                .sidereal_bits
+                .intersects(SiderealBits::ECL_T0 | SiderealBits::SSY_PLANE)
+            {
+                return Err(Error::CError(
+                    "sidereal house mode ECL_T0/SSY_PLANE not yet implemented".into(),
+                ));
+            }
+            let ayanamsa = self.get_ayanamsa_ex(tjde, flags)?;
+            crate::houses::sidereal_houses_trad(armc, geolat, eps_true, hsys, sundec, ayanamsa)?
+        } else {
+            crate::houses::houses_armc(armc, geolat, eps_true, hsys, sundec)?
+        };
+
+        if flags.contains(CalcFlags::RADIANS) {
+            let ito = if hsys == HouseSystem::Gauquelin {
+                36
+            } else {
+                12
+            };
+            for cusp in result.cusps.iter_mut().take(ito + 1).skip(1) {
+                *cusp *= DEGTORAD;
+            }
+            let ascmc = &mut result.ascmc;
+            ascmc.ascendant *= DEGTORAD;
+            ascmc.mc *= DEGTORAD;
+            ascmc.armc *= DEGTORAD;
+            ascmc.vertex *= DEGTORAD;
+            ascmc.equatorial_ascendant *= DEGTORAD;
+            ascmc.coascendant_koch *= DEGTORAD;
+            ascmc.coascendant_munkasey *= DEGTORAD;
+            ascmc.polar_ascendant *= DEGTORAD;
+        }
+
+        Ok(result)
+    }
+
     fn extract_for_body(xreturn: &[f64; 24], body: Body, flags: CalcFlags) -> [f64; 6] {
         if body == Body::EclipticNutation {
             crate::calc::extract_ecl_nut(

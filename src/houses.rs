@@ -1482,3 +1482,60 @@ pub fn houses_armc(
         ascmc_speeds: h.ascmc_speeds,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Traditional sidereal houses — sidereal_houses_trad (swehouse.c:535-587)
+// ---------------------------------------------------------------------------
+
+/// Traditional sidereal house computation: compute tropical houses via
+/// [`houses_armc`], then shift every cusp/ascmc entry (except `armc`) by the
+/// already-computed ayanamsa. Kept pure — the caller (`Ephemeris::houses_ex2`)
+/// resolves `ayanamsa` via `get_ayanamsa_ex` and passes it in.
+pub fn sidereal_houses_trad(
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    hsys: HouseSystem,
+    sundec: Option<f64>,
+    ayanamsa: f64,
+) -> Result<HouseResult, Error> {
+    // Whole Sign is computed as Equal, then re-fixed to 30-degree boundaries below.
+    let ihs2 = if hsys == HouseSystem::WholeSign {
+        HouseSystem::Equal
+    } else {
+        hsys
+    };
+    let mut result = houses_armc(armc, geolat, eps, ihs2, sundec)?;
+
+    let ito = if hsys == HouseSystem::Gauquelin {
+        36
+    } else {
+        12
+    };
+    for cusp in result.cusps.iter_mut().take(ito + 1).skip(1) {
+        *cusp = normalize_degrees(*cusp - ayanamsa);
+        if hsys == HouseSystem::WholeSign {
+            *cusp -= *cusp % 30.0;
+        }
+    }
+    // Equal-Aries: re-fixed to exact 0,30,60... boundaries (the ayanamsa shift above
+    // would otherwise leave them off-multiple).
+    if hsys == HouseSystem::EqualAries {
+        for (i, cusp) in result.cusps.iter_mut().enumerate().take(13).skip(1) {
+            *cusp = (i as f64 - 1.0) * 30.0;
+        }
+    }
+
+    // ascmc[2] is armc — skipped, per swehouse.c:892 (loop excludes it).
+    result.ascmc.ascendant = normalize_degrees(result.ascmc.ascendant - ayanamsa);
+    result.ascmc.mc = normalize_degrees(result.ascmc.mc - ayanamsa);
+    result.ascmc.vertex = normalize_degrees(result.ascmc.vertex - ayanamsa);
+    result.ascmc.equatorial_ascendant =
+        normalize_degrees(result.ascmc.equatorial_ascendant - ayanamsa);
+    result.ascmc.coascendant_koch = normalize_degrees(result.ascmc.coascendant_koch - ayanamsa);
+    result.ascmc.coascendant_munkasey =
+        normalize_degrees(result.ascmc.coascendant_munkasey - ayanamsa);
+    result.ascmc.polar_ascendant = normalize_degrees(result.ascmc.polar_ascendant - ayanamsa);
+
+    Ok(result)
+}

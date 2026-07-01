@@ -50,6 +50,26 @@ static double sundecs[] = { -23.0, -10.0, 0.0, 10.0, 23.0 };
 static double polar_geolats[] = { 51.5, -33.87, 0.0, 64.0, -64.0, 78.0, -78.0 };
 #define N_POLAR_GEOLAT (sizeof(polar_geolats) / sizeof(polar_geolats[0]))
 
+/* --- Houses 7/9 (Ephemeris UT wrappers + traditional sidereal) --- */
+
+struct ut_triple { double tjd_ut, geolat, geolon; };
+
+static struct ut_triple ut_triples[] = {
+    { 2451545.0,  51.5,    -0.13  },  /* J2000.0, London */
+    { 2460310.5, -33.87,  151.21  },  /* 2024-Jan-1, Sydney */
+    { 2433282.5,   0.0,     0.0   },  /* 1950-Jan-1, equator */
+    { 2488069.5,  40.71,  -74.01  },  /* 2100-Jan-1, New York */
+    { 2378496.5,  64.0,    10.0   },  /* 1800-Jan-1, near-polar N */
+    { 2305447.5, -64.0,   151.0   },  /* 1600-Jan-1, near-polar S */
+};
+#define N_UT_TRIPLE (sizeof(ut_triples) / sizeof(ut_triples[0]))
+
+static char ut_wrapper_systems[] = { 'P', 'K', 'C', 'R', 'W', 'I' };
+#define N_UT_WRAPPER_SYS (sizeof(ut_wrapper_systems) / sizeof(ut_wrapper_systems[0]))
+
+static char sidereal_trad_systems[] = { 'P', 'W', 'E' };
+#define N_SIDEREAL_TRAD_SYS (sizeof(sidereal_trad_systems) / sizeof(sidereal_trad_systems[0]))
+
 int main(void) {
     int ia, ig, ie, is;
     int first;
@@ -421,6 +441,148 @@ int main(void) {
                         printf("]}");
                     }
                 }
+            }
+        }
+    }
+    printf("\n  ]\n");
+
+    /* --- ut_wrapper: swe_houses_ex2 (UT-based, date-aware entry point). Exercises
+     * Ephemeris::houses_ex2's own ARMC/obliquity/nutation/sidtime setup, plus the
+     * self-computed Sun declination for hsys='I'. One triple gets a NONUT variant. */
+    printf(",\n  \"ut_wrapper\": [\n");
+    first = 1;
+    {
+        int it, is2;
+        for (it = 0; it < N_UT_TRIPLE; it++) {
+            for (is2 = 0; is2 < N_UT_WRAPPER_SYS; is2++) {
+                double tjd_ut = ut_triples[it].tjd_ut;
+                double geolat = ut_triples[it].geolat;
+                double geolon = ut_triples[it].geolon;
+                char hsys = ut_wrapper_systems[is2];
+                int retc, i;
+
+                memset(cusp, 0, sizeof(cusp));
+                memset(cusp_speed, 0, sizeof(cusp_speed));
+                memset(ascmc, 0, sizeof(ascmc));
+                memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                serr[0] = '\0';
+
+                retc = swe_houses_ex2(tjd_ut, 0, geolat, geolon, hsys, cusp, ascmc,
+                                       cusp_speed, ascmc_speed, serr);
+                (void)retc;
+
+                if (!first) printf(",\n");
+                first = 0;
+                printf("    {\"tjd_ut\": %.20e, \"geolat\": %.20e, \"geolon\": %.20e, "
+                       "\"hsys\": \"%c\", \"nonut\": false, \"cusps\": [",
+                       tjd_ut, geolat, geolon, hsys);
+                for (i = 1; i <= 12; i++) {
+                    printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                }
+                printf("], \"cusp_speed\": [");
+                for (i = 1; i <= 12; i++) {
+                    printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                }
+                printf("], \"ascmc\": [");
+                for (i = 0; i < 8; i++) {
+                    printf("%.20e%s", ascmc[i], (i < 7) ? ", " : "");
+                }
+                printf("], \"ascmc_speed\": [");
+                for (i = 0; i < 8; i++) {
+                    printf("%.20e%s", ascmc_speed[i], (i < 7) ? ", " : "");
+                }
+                printf("]}");
+            }
+        }
+
+        /* NONUT variant: one triple (index 0), all systems in the subset. */
+        for (is2 = 0; is2 < N_UT_WRAPPER_SYS; is2++) {
+            double tjd_ut = ut_triples[0].tjd_ut;
+            double geolat = ut_triples[0].geolat;
+            double geolon = ut_triples[0].geolon;
+            char hsys = ut_wrapper_systems[is2];
+            int retc, i;
+
+            memset(cusp, 0, sizeof(cusp));
+            memset(cusp_speed, 0, sizeof(cusp_speed));
+            memset(ascmc, 0, sizeof(ascmc));
+            memset(ascmc_speed, 0, sizeof(ascmc_speed));
+            serr[0] = '\0';
+
+            retc = swe_houses_ex2(tjd_ut, SEFLG_NONUT, geolat, geolon, hsys, cusp, ascmc,
+                                   cusp_speed, ascmc_speed, serr);
+            (void)retc;
+
+            printf(",\n");
+            printf("    {\"tjd_ut\": %.20e, \"geolat\": %.20e, \"geolon\": %.20e, "
+                   "\"hsys\": \"%c\", \"nonut\": true, \"cusps\": [",
+                   tjd_ut, geolat, geolon, hsys);
+            for (i = 1; i <= 12; i++) {
+                printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+            }
+            printf("], \"cusp_speed\": [");
+            for (i = 1; i <= 12; i++) {
+                printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+            }
+            printf("], \"ascmc\": [");
+            for (i = 0; i < 8; i++) {
+                printf("%.20e%s", ascmc[i], (i < 7) ? ", " : "");
+            }
+            printf("], \"ascmc_speed\": [");
+            for (i = 0; i < 8; i++) {
+                printf("%.20e%s", ascmc_speed[i], (i < 7) ? ", " : "");
+            }
+            printf("]}");
+        }
+    }
+    printf("\n  ]\n");
+
+    /* --- sidereal_trad: swe_houses_ex2 with SEFLG_SIDEREAL, traditional (non ECL_T0/SSY_PLANE)
+     * mode, Lahiri ayanamsa. Reuses the first 3 ut_triples. */
+    swe_set_sid_mode(SE_SIDM_LAHIRI, 0, 0);
+    printf(",\n  \"sidereal_trad\": [\n");
+    first = 1;
+    {
+        int it, is2;
+        for (it = 0; it < 3; it++) {
+            for (is2 = 0; is2 < N_SIDEREAL_TRAD_SYS; is2++) {
+                double tjd_ut = ut_triples[it].tjd_ut;
+                double geolat = ut_triples[it].geolat;
+                double geolon = ut_triples[it].geolon;
+                char hsys = sidereal_trad_systems[is2];
+                int retc, i;
+
+                memset(cusp, 0, sizeof(cusp));
+                memset(cusp_speed, 0, sizeof(cusp_speed));
+                memset(ascmc, 0, sizeof(ascmc));
+                memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                serr[0] = '\0';
+
+                retc = swe_houses_ex2(tjd_ut, SEFLG_SIDEREAL, geolat, geolon, hsys, cusp, ascmc,
+                                       cusp_speed, ascmc_speed, serr);
+                (void)retc;
+
+                if (!first) printf(",\n");
+                first = 0;
+                printf("    {\"tjd_ut\": %.20e, \"geolat\": %.20e, \"geolon\": %.20e, "
+                       "\"hsys\": \"%c\", \"sid_mode\": %d, \"cusps\": [",
+                       tjd_ut, geolat, geolon, hsys, SE_SIDM_LAHIRI);
+                for (i = 1; i <= 12; i++) {
+                    printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                }
+                printf("], \"cusp_speed\": [");
+                for (i = 1; i <= 12; i++) {
+                    printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                }
+                printf("], \"ascmc\": [");
+                for (i = 0; i < 8; i++) {
+                    printf("%.20e%s", ascmc[i], (i < 7) ? ", " : "");
+                }
+                printf("], \"ascmc_speed\": [");
+                for (i = 0; i < 8; i++) {
+                    printf("%.20e%s", ascmc_speed[i], (i < 7) ? ", " : "");
+                }
+                printf("]}");
             }
         }
     }

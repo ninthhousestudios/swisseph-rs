@@ -12,7 +12,7 @@ src/
 ├── corrections.rs      — relativistic corrections: meff (lookup), aberr_light (Lorentz), deflect_light (GR bending)
 ├── flags.rs            — bitflags! structs: CalcFlags, SiderealBits, etc. (146 lines)
 ├── error.rs            — Error enum
-├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_ut, fixstar2_mag, calc_fixstar), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
+├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
 ├── math.rs             — pure math functions: normalize, chebyshev, cartpol, cotrans, poly_eval
 ├── date.rs             — Julian Day ↔ calendar conversion, delta-T, UTC
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
@@ -54,7 +54,12 @@ src/
 │                          Asc1/Asc2/AscDash core trig, fix_asc_polar, mc_like (shared MC/equasc
 │                          projection), polar_shift_subset (shared C/H/J/R polar-circle 180° flip),
 │                          NewtonCusp/placidus_newton_cusp (shared P/G Newton-iteration skeleton),
-│                          apc_sector (radians-domain helper for Y)
+│                          apc_sector (radians-domain helper for Y);
+│                          sidereal_houses_trad (traditional sidereal: houses_armc at tropical
+│                          armc/eps then subtract ayanamsa from cusps/ascmc except armc; W routed
+│                          through Equal + re-fixed to 30° multiples; N re-fixed to (i-1)*30
+│                          unconditionally) — ayanamsa is passed in, kept pure; ECL_T0/SSY_PLANE
+│                          sidereal modes deferred (sub-task 9)
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
 ├── heliacal.rs         — EMPTY stub
@@ -98,7 +103,12 @@ tests/
 │                         same combos for contrast), eps 1e-9 cusps/speeds for the 'i' fallback
 │                         subset (fill_porphyry is closed-form, bitwise-exact elsewhere);
 │                         sunshine_requires_sundec: negative test, Sunshine + sundec=None
-│                         returns Err)
+│                         returns Err; ut_wrapper: 42 cases — 36: 6 (tjd_ut,geolat,geolon) triples
+│                         × 6 systems P/K/C/R/W/I + 6: 1 triple × 6 systems with SEFLG_NONUT,
+│                         eps 1e-7 cusps/ascmc, 1e-6 speeds via Ephemeris::houses_ex2 (compounds
+│                         deltaT/obliquity/nutation/sidtime — looser than the pure-armc tests);
+│                         sidereal_trad: 9 cases, systems P/W/E × 3 triples, SEFLG_SIDEREAL +
+│                         Lahiri, same tolerances)
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -117,7 +127,7 @@ tests/
 │   ├── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
 │   ├── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
 │   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
-│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback)
+│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback; ut_wrapper key: swe_houses_ex2 (UT-based) over 6 (tjd_ut,geolat,geolon) triples × 6 systems, + a SEFLG_NONUT variant at 1 triple; sidereal_trad key: swe_houses_ex2 with SEFLG_SIDEREAL + swe_set_sid_mode(SE_SIDM_LAHIRI) over 3 triples × 3 systems P/W/E)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -137,7 +147,9 @@ tests/
     └── gen_houses.c     — C harness to regenerate houses.json (swe_houses_armc_ex2: angles_special,
                             equal_family, quad_arith, great_circle, iterative, gauquelin36,
                             closed_form_misc, sunshine — sunshine key sets ascmc[9]=sundec before
-                            calling, per c-ref-houses.md §11)
+                            calling, per c-ref-houses.md §11; ut_wrapper/sidereal_trad keys use
+                            swe_houses_ex2 (UT-based) instead, over a 6-triple
+                            (tjd_ut,geolat,geolon) battery)
 ```
 
 ## Key Types in types.rs

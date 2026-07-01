@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use swisseph::houses::houses_armc;
 use swisseph::types::HouseSystem;
+use swisseph::{CalcFlags, Ephemeris, EphemerisConfig};
 
 #[derive(Deserialize)]
 struct AnglesSpecialCase {
@@ -83,6 +84,31 @@ struct SunshineCase {
 }
 
 #[derive(Deserialize)]
+struct UtWrapperCase {
+    tjd_ut: f64,
+    geolat: f64,
+    geolon: f64,
+    hsys: String,
+    nonut: bool,
+    cusps: [f64; 12],
+    cusp_speed: [f64; 12],
+    ascmc: [f64; 8],
+    ascmc_speed: [f64; 8],
+}
+
+#[derive(Deserialize)]
+struct SiderealTradCase {
+    tjd_ut: f64,
+    geolat: f64,
+    geolon: f64,
+    hsys: String,
+    cusps: [f64; 12],
+    cusp_speed: [f64; 12],
+    ascmc: [f64; 8],
+    ascmc_speed: [f64; 8],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     angles_special: Vec<AnglesSpecialCase>,
     equal_family: Vec<EqualFamilyCase>,
@@ -92,6 +118,8 @@ struct GoldenData {
     gauquelin36: Vec<Gauquelin36Case>,
     closed_form_misc: Vec<ClosedFormMiscCase>,
     sunshine: Vec<SunshineCase>,
+    ut_wrapper: Vec<UtWrapperCase>,
+    sidereal_trad: Vec<SiderealTradCase>,
 }
 
 fn load() -> GoldenData {
@@ -408,4 +436,115 @@ fn sunshine_requires_sundec() {
     let err = houses_armc(0.0, 51.5, 23.4392911, HouseSystem::Sunshine, None)
         .expect_err("Sunshine without sundec must error");
     assert!(matches!(err, swisseph::error::Error::CError(_)));
+}
+
+#[test]
+fn ut_wrapper() {
+    let eph = Ephemeris::new(EphemerisConfig::default()).unwrap();
+    let data = load();
+    assert_eq!(
+        data.ut_wrapper.len(),
+        42,
+        "expected 42 golden cases (36: 6 triples x 6 systems + 6: 1 triple x 6 systems NONUT)"
+    );
+    for (i, c) in data.ut_wrapper.iter().enumerate() {
+        let hsys = parse_hsys(&c.hsys);
+        let flags = if c.nonut {
+            CalcFlags::NONUT
+        } else {
+            CalcFlags::empty()
+        };
+        let result = eph
+            .houses_ex2(c.tjd_ut, flags, c.geolat, c.geolon, hsys)
+            .unwrap_or_else(|e| panic!("case {i} ({}): houses_ex2 failed: {e}", c.hsys));
+
+        let label_base = format!(
+            "case {i} ({} tjd_ut={:.6} geolat={:.6} geolon={:.6} nonut={})",
+            c.hsys, c.tjd_ut, c.geolat, c.geolon, c.nonut
+        );
+        for h in 1..=12usize {
+            super::assert_f64_eps(
+                &format!("{label_base} cusp[{h}]"),
+                c.cusps[h - 1],
+                result.cusps[h],
+                1e-7,
+            );
+            super::assert_f64_eps(
+                &format!("{label_base} cusp_speed[{h}]"),
+                c.cusp_speed[h - 1],
+                result.cusp_speeds[h],
+                1e-6,
+            );
+        }
+        let actual_ascmc = result.ascmc.as_array();
+        let actual_ascmc_speed = result.ascmc_speeds.as_array();
+        for j in 0..8 {
+            super::assert_f64_eps(
+                &format!("{label_base} ascmc[{j}]"),
+                c.ascmc[j],
+                actual_ascmc[j],
+                1e-7,
+            );
+            super::assert_f64_eps(
+                &format!("{label_base} ascmc_speed[{j}]"),
+                c.ascmc_speed[j],
+                actual_ascmc_speed[j],
+                1e-6,
+            );
+        }
+    }
+}
+
+#[test]
+fn sidereal_trad() {
+    let mut config = EphemerisConfig::default();
+    config.set_sidereal_mode(1 /* Lahiri */, 0.0, 0.0);
+    let eph = Ephemeris::new(config).unwrap();
+    let data = load();
+    assert_eq!(
+        data.sidereal_trad.len(),
+        9,
+        "expected 9 golden cases (3 systems x 3 triples)"
+    );
+    for (i, c) in data.sidereal_trad.iter().enumerate() {
+        let hsys = parse_hsys(&c.hsys);
+        let result = eph
+            .houses_ex2(c.tjd_ut, CalcFlags::SIDEREAL, c.geolat, c.geolon, hsys)
+            .unwrap_or_else(|e| panic!("case {i} ({}): houses_ex2 failed: {e}", c.hsys));
+
+        let label_base = format!(
+            "case {i} ({} tjd_ut={:.6} geolat={:.6} geolon={:.6})",
+            c.hsys, c.tjd_ut, c.geolat, c.geolon
+        );
+        for h in 1..=12usize {
+            super::assert_f64_eps(
+                &format!("{label_base} cusp[{h}]"),
+                c.cusps[h - 1],
+                result.cusps[h],
+                1e-7,
+            );
+            super::assert_f64_eps(
+                &format!("{label_base} cusp_speed[{h}]"),
+                c.cusp_speed[h - 1],
+                result.cusp_speeds[h],
+                1e-6,
+            );
+        }
+        let actual_ascmc = result.ascmc.as_array();
+        let actual_ascmc_speed = result.ascmc_speeds.as_array();
+        for j in 0..8 {
+            super::assert_f64_eps(
+                &format!("{label_base} ascmc[{j}]"),
+                c.ascmc[j],
+                actual_ascmc[j],
+                1e-7,
+            );
+            super::assert_f64_eps(
+                &format!("{label_base} ascmc_speed[{j}]"),
+                c.ascmc_speed[j],
+                actual_ascmc_speed[j],
+                1e-6,
+            );
+        }
+    }
 }
