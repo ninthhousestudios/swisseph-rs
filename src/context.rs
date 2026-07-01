@@ -120,7 +120,7 @@ pub struct Ephemeris {
 }
 
 impl Ephemeris {
-    pub fn new(config: EphemerisConfig) -> crate::Result<Self> {
+    pub fn new(mut config: EphemerisConfig) -> crate::Result<Self> {
         let leap_seconds = Self::build_leap_seconds(&config)?;
         let mut jpl_file: Option<crate::jpl::JplFile> = None;
         let (planet_files, moon_files) = match config.ephemeris_source {
@@ -149,6 +149,23 @@ impl Ephemeris {
             }
             EphemerisSource::Moshier => (Vec::new(), Vec::new()),
         };
+        // Resolve the ephemeris-specific tidal acceleration from the open file's
+        // DE number, mirroring C's `swi_get_tid_acc` (swephlib.c:3211–3221): JPL
+        // uses the JPL file's denum, SWIEPH the moon (SEI_FILE_MOON) file's. This
+        // is what makes ΔT — and therefore the topocentric observer offset — match
+        // C away from J2000 (DE441 tid_acc differs from the DE431 default). Only
+        // fill in when the caller hasn't pinned tid_acc explicitly (C's
+        // `is_tid_acc_manual` short-circuit).
+        if config.tidal_acceleration.is_none() {
+            let denum = match config.ephemeris_source {
+                EphemerisSource::Swiss => moon_files.first().map(|f| f.header().denum),
+                EphemerisSource::Jpl => jpl_file.as_ref().map(|f| f.header().denum),
+                EphemerisSource::Moshier => None,
+            };
+            if let Some(denum) = denum {
+                config.tidal_acceleration = Some(crate::deltat::denum_to_tid_acc(denum));
+            }
+        }
         let stars = crate::stars::load_catalog(config.ephe_path.as_deref());
         Ok(Self {
             config,

@@ -36,9 +36,32 @@ fn resolve_tidal_acceleration(config: &EphemerisConfig) -> f64 {
     }
     match config.ephemeris_source {
         EphemerisSource::Moshier => TIDAL_DE404,
-        // JPL/Swiss: when file backends land, read denum from file header.
-        // Until then, fall back to DE431.
+        // File backends: the effective tid_acc comes from the open file's denum,
+        // resolved once at `Ephemeris::new` into `config.tidal_acceleration`
+        // (so the branch above returns it). This fallback only fires for configs
+        // built without going through `Ephemeris::new` (e.g. standalone deltaT
+        // tests), where C's `swi_get_tid_acc` has no open file and lands on the
+        // `default:` case → DE431.
         EphemerisSource::Jpl | EphemerisSource::Swiss => TIDAL_DEFAULT,
+    }
+}
+
+/// Map an ephemeris DE number to its tidal-acceleration constant, mirroring the
+/// `swi_get_tid_acc` switch (swephlib.c:3223–3236). Unknown denums fall to the
+/// library default (DE431).
+pub(crate) fn denum_to_tid_acc(denum: i32) -> f64 {
+    match denum {
+        200 => TIDAL_DE200,
+        403 => TIDAL_DE403,
+        404 => TIDAL_DE404,
+        405 => TIDAL_DE405,
+        406 => TIDAL_DE406,
+        421 => TIDAL_DE421,
+        422 => TIDAL_DE422,
+        430 => TIDAL_DE430,
+        431 => TIDAL_DE431,
+        440 | 441 => TIDAL_DE441,
+        _ => TIDAL_DEFAULT,
     }
 }
 

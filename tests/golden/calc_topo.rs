@@ -132,22 +132,10 @@ fn golden_calc_topo() {
         let is_forced_speed3 = c.flag_name == "speed";
         let is_boundary = c.ephemeris == "sweph" && is_forced_speed3 && c.jd == 2378496.5;
 
-        // OPEN BUG, not an accepted artifact (swisseph-rs/81): the JPL backend's
-        // TOPOCTR output diverges from C away from J2000 (confirmed at
-        // jd=2378496.5, reproduces even with TRUEPOS so it isn't a light-time/
-        // SPEED3 effect). get_observer's offset is proven identical/correct
-        // across backends (temporary instrumentation confirmed bit-identical
-        // output for the same jd regardless of ephemeris source); root cause
-        // is unconfirmed. Widened here only so this coverage lands — remove
-        // once swisseph-rs/81 is fixed.
-        let is_jpl_away_from_j2000 = c.ephemeris == "jpl" && c.jd != 2451545.0;
-
         for k in 0..6 {
             let diff = (c.output[k] - result.data[k]).abs();
             let eps = if is_boundary {
                 if k < 3 { 1e-4 } else { 1.0 }
-            } else if is_jpl_away_from_j2000 {
-                if k < 3 { 1e-5 } else { 2e-4 }
             } else if k < 3 {
                 1e-9
             } else {
