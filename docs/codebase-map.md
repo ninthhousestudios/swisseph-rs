@@ -32,7 +32,8 @@ src/
 │                          ephemeris backend — the same deltaT/tid_acc-inconsistency pattern as
 │                          houses_ex2's; discovered via a gauquelin_sector golden-test mismatch at
 │                          1600/1800 AD epochs (swisseph-rs/66)
-├── calc.rs             — calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut, extract_output, extract_ecl_nut, plaus_iflag, speed3_interval, denormalize_positions, calc_speed_3point: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline + SPEED3 helpers
+├── calc.rs             — calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut, extract_output, extract_ecl_nut, plaus_iflag, speed3_interval, denormalize_positions, calc_speed_3point: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline + SPEED3 helpers; apparent_planet/apparent_sun/apparent_moon (generic over PositionProvider, used by the sweph/JPL backends); topo_offset helper — computes the observer offset (zero vector when TOPOCTR isn't set) and threads it through both the Moshier pipeline (calc_planet/calc_sun/calc_moon, added to earth_helio directly) and the generic pipeline (added to earth_bary/earth_helio as `xobs`/`xobs_helio`) in place of the plain geocenter wherever it functions as "the observer" (light-time, parallax, aberration, deflection)
+├── topocentric.rs      — get_observer: swi_get_observer port (NONUT-forced mean-frame path only, docs/c-ref-topocentric.md §3), geodetic→geocentric flattening + diurnal rotation + precession to J2000, returns observer position+velocity offset (AU/AU-day) from the geocenter
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
 │   ├── backend.rs      — compute() public API, compute_pipeline() for calc.rs, embofs_mosh, planet/earth velocity helpers, Body dispatch
@@ -96,6 +97,7 @@ tests/
 ├── golden/
 │   ├── main.rs         — test harness: golden_data_path(), assert_f64_exact(), assert_f64_eps()
 │   ├── calc.rs        — golden tests for calc pipeline (1176 cases: 14 bodies × 7 epochs × 12 flag combos incl. SPEED3, no_speed)
+│   ├── calc_topo.rs   — golden tests for SEFLG_TOPOCTR (45 cases: 3 observers × 5 bodies × 3 epochs incl. a SPEED3 file-boundary epoch; MOSEPH|TOPOCTR|EQUATORIAL|SPEED, positions eps 1e-9/speeds eps 1e-7 — TOPOCTR+SPEED+!NOABERR forces SPEED3 (calc.rs plaus_iflag), so every case exercises the 3-point-derivative dispatch)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module

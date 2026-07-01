@@ -3,6 +3,7 @@ mod ayanamsa_calc;
 mod calc;
 mod calc_jpl;
 mod calc_sweph;
+mod calc_topo;
 mod corrections;
 mod date;
 mod deltat;

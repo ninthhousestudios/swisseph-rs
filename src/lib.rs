@@ -23,8 +23,9 @@ pub mod precession;
 pub mod sidereal_time;
 pub mod stars;
 pub mod sweph_file;
+pub mod topocentric;
 
-pub use context::{CalcResult, Ephemeris, EphemerisConfig};
+pub use context::{CalcResult, Ephemeris, EphemerisConfig, TopoPosition};
 pub use error::Error;
 pub use flags::CalcFlags;
 pub use houses::{AscMc, HouseResult};

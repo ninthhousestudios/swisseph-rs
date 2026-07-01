@@ -175,9 +175,10 @@ impl Ephemeris {
     /// deduplication for repeated same-JD queries should cache externally.
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
-        let unsupported = flags & CalcFlags::TOPOCTR;
-        if !unsupported.is_empty() {
-            return Err(Error::UnsupportedFlags(unsupported));
+        if flags.contains(CalcFlags::TOPOCTR) && self.config.topographic.is_none() {
+            return Err(Error::CError(
+                "topocentric requires topographic position".to_string(),
+            ));
         }
 
         if body == Body::Earth {
@@ -513,8 +514,8 @@ impl Ephemeris {
         models: &crate::types::AstroModels,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         match body {
-            Body::Sun => crate::calc::calc_sun(jd_tt, eps_j2000, flags, models),
-            Body::Moon => crate::calc::calc_moon(jd_tt, eps_j2000, flags, models),
+            Body::Sun => crate::calc::calc_sun(jd_tt, eps_j2000, flags, &self.config, models),
+            Body::Moon => crate::calc::calc_moon(jd_tt, eps_j2000, flags, &self.config, models),
             Body::Mercury
             | Body::Venus
             | Body::Mars
@@ -522,7 +523,9 @@ impl Ephemeris {
             | Body::Saturn
             | Body::Uranus
             | Body::Neptune
-            | Body::Pluto => crate::calc::calc_planet(jd_tt, body, eps_j2000, flags, models),
+            | Body::Pluto => {
+                crate::calc::calc_planet(jd_tt, body, eps_j2000, flags, &self.config, models)
+            }
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Moshier,
@@ -544,6 +547,7 @@ impl Ephemeris {
                 &self.planet_files,
                 &self.moon_files,
                 flags,
+                &self.config,
                 models,
             ),
             Body::Moon => crate::calc::calc_moon_sweph(
@@ -551,6 +555,7 @@ impl Ephemeris {
                 &self.planet_files,
                 &self.moon_files,
                 flags,
+                &self.config,
                 models,
             ),
             Body::Mercury
@@ -567,6 +572,7 @@ impl Ephemeris {
                 &self.moon_files,
                 eps_j2000,
                 flags,
+                &self.config,
                 models,
             ),
             _ => Err(Error::EphemerisNotAvailable {
@@ -586,8 +592,8 @@ impl Ephemeris {
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         let file = self.jpl_file.as_ref().unwrap();
         match body {
-            Body::Sun => crate::calc::calc_sun_jpl(jd_tt, file, flags, models),
-            Body::Moon => crate::calc::calc_moon_jpl(jd_tt, file, flags, models),
+            Body::Sun => crate::calc::calc_sun_jpl(jd_tt, file, flags, &self.config, models),
+            Body::Moon => crate::calc::calc_moon_jpl(jd_tt, file, flags, &self.config, models),
             Body::Mercury
             | Body::Venus
             | Body::Mars
@@ -595,9 +601,15 @@ impl Ephemeris {
             | Body::Saturn
             | Body::Uranus
             | Body::Neptune
-            | Body::Pluto => {
-                crate::calc::calc_planet_jpl(jd_tt, body, file, eps_j2000, flags, models)
-            }
+            | Body::Pluto => crate::calc::calc_planet_jpl(
+                jd_tt,
+                body,
+                file,
+                eps_j2000,
+                flags,
+                &self.config,
+                models,
+            ),
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Jpl,
