@@ -1,1 +1,3 @@
-gen_precession
+# Compiled generator binaries -- only the .c sources are tracked.
+gen_*
+!gen_*.c

@@ -348,7 +348,9 @@ pub struct EclipseHow {
     /// Saros series member number, 1-based (solar eclipses of the Sun only).
     pub saros_member: f64,
     /// Eclipse-type classification (TOTAL/ANNULAR/PARTIAL, possibly OR'd with VISIBLE); empty
-    /// means no eclipse visible from this location at this instant.
+    /// means no eclipse visible from this location at this instant. [`sol_eclipse_how`]
+    /// additionally merges CENTRAL/NONCENTRAL in from the geocentric shadow geometry
+    /// (`eclipse_where`) -- `eclipse_how` itself never sets those bits.
     pub flags: EclipseFlags,
 }
 
@@ -911,28 +913,31 @@ pub(crate) fn sol_eclipse_when_glob(
                 *dc_i = contact_dc(n, &w, de_km);
                 t += dta;
             }
-            // C ignores `find_zero`'s failure return and leaves `tret[i1]`/`tret[i2]` at
-            // whatever they held before (0.0 here, matching C's zero-initialized locals) --
-            // never hit for well-conditioned real eclipses.
+            // Divergence from C on `find_zero` failure (no real parabola roots): C ignores the
+            // failure return and proceeds with zero-initialized `dt1`/`dt2`, i.e. assigns
+            // `tret[i1] = tret[i2] = tjd + dta` and Newton-refines from there. We leave the
+            // slots at 0.0 and skip refinement instead -- refining around 0.0 would evaluate
+            // `eclipse_where` at JD ~0 (4713 BC). Unreachable for well-conditioned real
+            // eclipses: the confirmed eclipse guarantees a sign change in `dc`.
             if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], dta) {
                 tret[i1] = tjd + dt1 + dta;
                 tret[i2] = tjd + dt2 + dta;
-            }
 
-            let mut dt = dtb;
-            for _ in 0..3 {
-                for &j in &[i1, i2] {
-                    let mut dc2 = [0.0f64; 2];
-                    let mut t = tret[j] - dt;
-                    for dc_i in dc2.iter_mut() {
-                        let w = eclipse_where(eph, t, Body::Sun, None, ifl)?;
-                        *dc_i = contact_dc(n, &w, de_km);
-                        t += dt;
+                let mut dt = dtb;
+                for _ in 0..3 {
+                    for &j in &[i1, i2] {
+                        let mut dc2 = [0.0f64; 2];
+                        let mut t = tret[j] - dt;
+                        for dc_i in dc2.iter_mut() {
+                            let w = eclipse_where(eph, t, Body::Sun, None, ifl)?;
+                            *dc_i = contact_dc(n, &w, de_km);
+                            t += dt;
+                        }
+                        let dt1 = dc2[1] / ((dc2[1] - dc2[0]) / dt);
+                        tret[j] -= dt1;
                     }
-                    let dt1 = dc2[1] / ((dc2[1] - dc2[0]) / dt);
-                    tret[j] -= dt1;
+                    dt /= 3.0;
                 }
-                dt /= 3.0;
             }
         }
 
@@ -1322,6 +1327,16 @@ pub(crate) fn eclipse_when_loc(
                 }
                 tret[1] -= crate::deltat::calc_deltat(tret[1], config);
                 tret[4] -= crate::deltat::calc_deltat(tret[4], config);
+            } else {
+                // Divergence from C on `find_zero` failure: C proceeds with zero-initialized
+                // offsets (`tret[1] = tret[4] = tjd + twohr`) and refines from there. Leaving
+                // the slots at 0.0 is not an option here -- `tret[1]` feeds the
+                // `rise_trans(tret[1] - 0.001, ...)` calls below, which would then evaluate at
+                // JD ~0 (4713 BC). Unreachable for real eclipses (`dc[1] = rsplusrm - dctrmin
+                // >= 0` by the rejection guard above, so the parabola has real roots); if it
+                // ever fires, treat the lunation as "no eclipse found" and advance the search.
+                k += direction;
+                continue 'next_try;
             }
         }
 
