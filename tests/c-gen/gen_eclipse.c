@@ -1,7 +1,8 @@
 /*
  * Generates golden reference data for the eclipse module: swe_sol_eclipse_where
- * (RSE 5, swisseph-rs/72) and swe_sol_eclipse_how (RSE 6, swisseph-rs/73). Later RSE tasks
- * (7-12) add more keys to this same file.
+ * (RSE 5, swisseph-rs/72), swe_sol_eclipse_how (RSE 6, swisseph-rs/73), and
+ * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74). Later RSE tasks (8-12) add more keys to
+ * this same file.
  *
  * The "dcore" field in each sol_where case comes from swi_test_eclipse_where_dcore, a
  * non-static test-only hook added to ../swisseph/swecl.c (right after calc_planet_star) that
@@ -106,6 +107,30 @@ int main(void) {
             printf("    {\"tjd_ut\": %.17g, \"geopos\": [%.17g, %.17g, %.17g], \"retval\": %d, \"attr\": [",
                    tjd_ut, geopos[0], geopos[1], geopos[2], retval);
             for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
+            printf("]}");
+        }
+    }
+    printf("\n  ],\n");
+
+    /* === sol_when_glob === */
+    static double glob_tjd_starts[] = { 2451545.0, 2459000.5 };
+    #define N_GLOB_START (sizeof(glob_tjd_starts) / sizeof(glob_tjd_starts[0]))
+    printf("  \"sol_when_glob\": [\n");
+    first = 1;
+    for (size_t i = 0; i < N_GLOB_START; i++) {
+        for (int backward = 0; backward <= 1; backward++) {
+            double tjd_start = glob_tjd_starts[i];
+            int32 ifltype = 0;
+            double tret[10] = { 0 };
+            char serr[256] = { 0 };
+            int32 retval = swe_sol_eclipse_when_glob(tjd_start, SEFLG_MOSEPH, ifltype, tret,
+                                                       backward, serr);
+
+            if (!first) printf(",\n");
+            first = 0;
+            printf("    {\"tjd_start\": %.17g, \"backward\": %s, \"retval\": %d, \"tret\": [",
+                   tjd_start, backward ? "true" : "false", retval);
+            for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
             printf("]}");
         }
     }

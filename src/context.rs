@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::date::LEAP_SECONDS;
 use crate::error::Error;
-use crate::flags::{CalcFlags, SiderealBits};
+use crate::flags::{CalcFlags, EclipseFlags, SiderealBits};
 use crate::types::{
     AstroModels, Body, DeltaT, EphemerisSource, JdUt1, NutationModel, PrecessionModel, SiderealMode,
 };
@@ -574,6 +574,19 @@ impl Ephemeris {
         geopos: [f64; 3],
     ) -> Result<crate::eclipse::EclipseHow, Error> {
         crate::eclipse::sol_eclipse_how(self, tjd_ut, ifl, geopos)
+    }
+
+    /// Global eclipse search: next/previous solar eclipse anywhere on Earth from `tjd_start`
+    /// (UT), restricted to eclipse types in `ifltype` (empty = all types). Port of
+    /// `swe_sol_eclipse_when_glob` (swecl.c:1185-1515).
+    pub fn sol_eclipse_when_glob(
+        &self,
+        tjd_start: f64,
+        ifl: CalcFlags,
+        ifltype: EclipseFlags,
+        backward: bool,
+    ) -> Result<crate::eclipse::SolarEclipseGlobal, Error> {
+        crate::eclipse::sol_eclipse_when_glob(self, tjd_start, ifl, ifltype, backward)
     }
 
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic

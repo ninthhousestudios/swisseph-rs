@@ -125,7 +125,26 @@ src/
 │                          classification — and attr[0..3]/attr[8..10] with it — while leaving
 │                          azimuth/true_altitude/apparent_altitude/elongation populated, matching
 │                          swe_sol_eclipse_how's own layered visibility override). Ephemeris::
-│                          sol_eclipse_how in context.rs delegates.
+│                          sol_eclipse_how in context.rs delegates. SolarEclipseGlobal
+│                          (swisseph-rs/74, tret[0..7]: time_maximum, time_ra_conjunction,
+│                          time_begin/end, time_totality_begin/end, time_centerline_begin/end —
+│                          tret[8..9] omitted, unimplemented upstream); contact_dc (shared
+│                          contact-time sample formula for n=0 eclipse begin/end, n=1
+│                          totality/annularity begin/end, n=2 center-line begin/end — n=0
+│                          literally divides by cos_umbra_half_angle not cos_penumbra_half_angle,
+│                          a verbatim C quirk per docs/c-ref-eclipse-solar.md §5.5);
+│                          sol_eclipse_when_glob (swe_sol_eclipse_when_glob port: `'next_try: loop`
+│                          + `continue 'next_try` standing in for C's `goto next_try`; Meeus
+│                          lunation stepping with the [21°,159°] F-argument rejection band;
+│                          find_maximum-refined minimum-separation search then a 3-pass
+│                          fixed-point ET→UT deltaT conversion; eclipse_where+eclipse_how
+│                          confirmation; ifltype bit-cascade rejection/retry; find_zero-refined
+│                          contact times with a 3-pass Newton polish; annular-total (hybrid)
+│                          detection via a core-shadow sign change; secant-refined RA-conjunction
+│                          instant (tret[1]); diverges from C only in that a negative-discriminant
+│                          find_zero leaves tret[i1]/tret[i2] at 0.0 instead of C's stale-value
+│                          carryover — unreachable for well-conditioned real eclipses). Ephemeris::
+│                          sol_eclipse_when_glob in context.rs delegates.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -196,7 +215,11 @@ tests/
 │                          -100.0,40.0,0 off-track), asserts all 11 attr[] fields
 │                          (magnitude/diameter_ratio/obscuration/core_diameter_km/azimuth/
 │                          true_altitude/apparent_altitude/elongation/nasa_magnitude/
-│                          saros_series/saros_member) eps 1e-7 + exact retval flags bitmask)
+│                          saros_series/saros_member) eps 1e-7 + exact retval flags bitmask;
+│                          sol_when_glob: 4 cases — 2 tjd_start (2000/2020) × 2 backward,
+│                          ifltype=0 (all types), asserts tret[0..7] (time_maximum,
+│                          time_ra_conjunction, time_begin/end, time_totality_begin/end,
+│                          time_centerline_begin/end) eps 1e-5 day + exact retval flags bitmask)
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -265,9 +288,10 @@ tests/
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
-│   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key)
-│                          and swe_sol_eclipse_how (sol_how key); later RSE tasks 7-12 add more
-│                          keys to this same file
+│   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key),
+│                          swe_sol_eclipse_how (sol_how key), and swe_sol_eclipse_when_glob
+│                          (sol_when_glob key); later RSE tasks 8-12 add more keys to this same
+│                          file
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -291,7 +315,8 @@ tests/
     │                       no-eclipse epoch, one case with SEFLG_NONUT to confirm it's masked
     │                       away by swe_sol_eclipse_where's own `ifl &= SEFLG_EPHMASK`;
     │                       swe_sol_eclipse_how: the same 4 epochs × 2 observers (near-central
-    │                       and off-track))
+    │                       and off-track); swe_sol_eclipse_when_glob: 2 tjd_start × 2 backward,
+    │                       ifltype=0)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

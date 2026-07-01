@@ -6,7 +6,8 @@
 use std::f64::consts::PI;
 
 use crate::constants::{
-    AUNIT, DEGTORAD, EARTH_OBLATENESS, LAPSE_RATE, PLANETARY_DIAMETERS, RADTODEG, REARTH, RMOON,
+    AUNIT, DEGTORAD, EARTH_OBLATENESS, J2000, LAPSE_RATE, PLANETARY_DIAMETERS, RADTODEG, REARTH,
+    RMOON, RSUN,
 };
 use crate::context::{Ephemeris, EphemerisConfig, TopoPosition};
 use crate::error::Error;
@@ -631,4 +632,372 @@ pub(crate) fn sol_eclipse_how(
     how.flags = retflag;
 
     Ok(how)
+}
+
+/// Global solar-eclipse search result: `tret[0..10]` per `swe_sol_eclipse_when_glob`
+/// (swecl.c:1185-1515, §5.8). `tret[8]`/`tret[9]` (annular-total transition times) are not
+/// implemented upstream and always `0.0` in C -- omitted here.
+#[derive(Debug, Clone, Copy)]
+pub struct SolarEclipseGlobal {
+    /// Time (UT) of maximum eclipse: geocentric minimum Sun-Moon angular separation. `tret[0]`.
+    pub time_maximum: f64,
+    /// Time (UT) when the eclipse's RA-conjunction instant occurs (geocentric RA(Sun) ==
+    /// RA(Moon)), or `0.0` if no such instant falls within the eclipse window. `tret[1]`.
+    pub time_ra_conjunction: f64,
+    /// Time (UT) of eclipse begin, first contact anywhere on Earth. `tret[2]`.
+    pub time_begin: f64,
+    /// Time (UT) of eclipse end, last contact anywhere on Earth. `tret[3]`.
+    pub time_end: f64,
+    /// Time (UT) of totality/annularity begin, `0.0` if partial. `tret[4]`.
+    pub time_totality_begin: f64,
+    /// Time (UT) of totality/annularity end, `0.0` if partial. `tret[5]`.
+    pub time_totality_end: f64,
+    /// Time (UT) of center-line begin, `0.0` if noncentral. `tret[6]`.
+    pub time_centerline_begin: f64,
+    /// Time (UT) of center-line end, `0.0` if noncentral. `tret[7]`.
+    pub time_centerline_end: f64,
+    /// Eclipse-type classification (CENTRAL/NONCENTRAL combined with
+    /// TOTAL/ANNULAR/HYBRID/PARTIAL). Never empty -- the search retries indefinitely (bounded
+    /// only by ephemeris range) until a matching eclipse is found.
+    pub flags: EclipseFlags,
+}
+
+/// Contact-time sample formula (swecl.c:1394-1424, §5.5), shared by the coarse `find_zero` pass
+/// and the 3-pass Newton refinement. `n`: 0 = eclipse begin/end (penumbra boundary, but divides
+/// by `cosf1`/umbra half-angle -- literal C quirk, not a typo, negligible impact since both
+/// half-angles are well under 1°); 1 = totality/annularity begin/end (umbra boundary); 2 =
+/// center-line begin/end.
+fn contact_dc(n: u32, w: &EclipseWhere, de_km: f64) -> f64 {
+    match n {
+        0 => {
+            w.penumbra_diameter_fundamental_km / 2.0 + de_km / w.cos_umbra_half_angle
+                - w.shadow_axis_distance_km
+        }
+        1 => {
+            w.umbra_diameter_fundamental_km.abs() / 2.0 + de_km / w.cos_penumbra_half_angle
+                - w.shadow_axis_distance_km
+        }
+        _ => de_km / w.cos_penumbra_half_angle - w.shadow_axis_distance_km,
+    }
+}
+
+/// Global eclipse search: find the next (or, if `backward`, previous) solar eclipse anywhere on
+/// Earth after/before `tjd_start` (UT), restricted to eclipse types in `ifltype`. Port of
+/// `swe_sol_eclipse_when_glob` (swecl.c:1185-1515, §5). `ifltype = EclipseFlags::empty()` means
+/// all types.
+pub(crate) fn sol_eclipse_when_glob(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ifl: CalcFlags,
+    ifltype: EclipseFlags,
+    backward: bool,
+) -> Result<SolarEclipseGlobal, Error> {
+    let ifl = ifl & crate::calc::EPHMASK;
+    let config = eph.config();
+
+    if ifltype == (EclipseFlags::PARTIAL | EclipseFlags::CENTRAL) {
+        return Err(Error::CError(
+            "central partial eclipses do not exist".to_string(),
+        ));
+    }
+    if ifltype == (EclipseFlags::HYBRID | EclipseFlags::NONCENTRAL) {
+        return Err(Error::CError(
+            "non-central hybrid (annular-total) eclipses do not exist".to_string(),
+        ));
+    }
+
+    let mut ifltype = ifltype;
+    if ifltype.is_empty() {
+        ifltype = EclipseFlags::ALLTYPES_SOLAR;
+    }
+    if ifltype == EclipseFlags::TOTAL
+        || ifltype == EclipseFlags::ANNULAR
+        || ifltype == EclipseFlags::HYBRID
+    {
+        ifltype |= EclipseFlags::NONCENTRAL | EclipseFlags::CENTRAL;
+    }
+    if ifltype == EclipseFlags::PARTIAL {
+        ifltype |= EclipseFlags::NONCENTRAL;
+    }
+
+    let direction = if backward { -1.0 } else { 1.0 };
+    let iflag = CalcFlags::EQUATORIAL | ifl;
+    let iflag_cart = iflag | CalcFlags::XYZ;
+    let de_km = 6378.140;
+
+    let mut k = ((tjd_start - J2000) / 365.2425 * 12.3685).trunc();
+    k -= direction;
+
+    'next_try: loop {
+        let mut tret = [0.0f64; 8];
+
+        let tt_ = k / 1236.85;
+        let t2 = tt_ * tt_;
+        let t3 = t2 * tt_;
+        let t4 = t3 * tt_;
+        let mut ff = normalize_degrees(
+            160.7108 + 390.67050274 * k - 0.0016341 * t2 - 0.00000227 * t3 + 0.000000011 * t4,
+        );
+        if ff > 180.0 {
+            ff -= 180.0;
+        }
+        if ff > 21.0 && ff < 159.0 {
+            k += direction;
+            continue 'next_try;
+        }
+
+        // Approximate time of geocentric maximum eclipse (Meeus, German ed., p. 381).
+        let mut tjd = 2451550.09765 + 29.530588853 * k + 0.0001337 * t2 - 0.000000150 * t3
+            + 0.00000000073 * t4;
+        let m = normalize_degrees(2.5534 + 29.10535669 * k - 0.0000218 * t2 - 0.00000011 * t3);
+        let mm = normalize_degrees(
+            201.5643 + 385.81693528 * k + 0.1017438 * t2 + 0.00001239 * t3 + 0.000000058 * t4,
+        );
+        let e = 1.0 - 0.002516 * tt_ - 0.0000074 * t2;
+        let m_rad = m * DEGTORAD;
+        let mm_rad = mm * DEGTORAD;
+        tjd = tjd - 0.4075 * mm_rad.sin() + 0.1721 * e * m_rad.sin();
+
+        // Iterative refinement to the instant of minimum geocentric Sun-Moon angular separation
+        // (§5.3). `tjd` is treated as ET/TT throughout this refinement (Meeus's formula is
+        // dynamical time); UT conversion happens once, after convergence.
+        let dtstart = if !(2_000_000.0..=2_500_000.0).contains(&tjd) {
+            5.0
+        } else {
+            1.0
+        };
+        let mut dt = dtstart;
+        while dt > 0.0001 {
+            let mut dc = [0.0f64; 3];
+            let mut t = tjd - dt;
+            for dc_i in dc.iter_mut() {
+                let ls = eph.calc(t, Body::Sun, iflag)?.data;
+                let lm = eph.calc(t, Body::Moon, iflag)?.data;
+                let xs = eph.calc(t, Body::Sun, iflag_cart)?.data;
+                let xm = eph.calc(t, Body::Moon, iflag_cart)?.data;
+                let xa = [xs[0] / ls[2], xs[1] / ls[2], xs[2] / ls[2]];
+                let xb = [xm[0] / lm[2], xm[1] / lm[2], xm[2] / lm[2]];
+                let rmoon = (RMOON / lm[2]).asin() * RADTODEG;
+                let rsun = (RSUN / ls[2]).asin() * RADTODEG;
+                *dc_i = dot_prod_unit(xa, xb).acos() * RADTODEG - (rmoon + rsun);
+                t += dt;
+            }
+            let (dtint, _) = crate::math::find_maximum(dc[0], dc[1], dc[2], dt);
+            tjd += dtint + dt;
+            dt /= 4.0;
+        }
+
+        // 3-pass fixed-point ET->UT conversion (swecl.c:1310-1312).
+        let tjds1 = tjd - crate::deltat::calc_deltat(tjd, config);
+        let tjds2 = tjd - crate::deltat::calc_deltat(tjds1, config);
+        let tjd = tjd - crate::deltat::calc_deltat(tjds2, config);
+
+        let where_result = eclipse_where(eph, tjd, Body::Sun, None, ifl)?;
+        // In extreme cases `eclipse_where` under-detects a tiny eclipse -- confirm via
+        // `eclipse_how` with the coordinates `eclipse_where` returned.
+        let how_result = eclipse_how(
+            eph,
+            tjd,
+            Body::Sun,
+            None,
+            ifl,
+            where_result.central_longitude,
+            where_result.central_latitude,
+            0.0,
+        )?;
+        if how_result.flags.is_empty() {
+            k += direction;
+            continue 'next_try;
+        }
+        tret[0] = tjd;
+        if (backward && tret[0] >= tjd_start - 0.0001)
+            || (!backward && tret[0] <= tjd_start + 0.0001)
+        {
+            k += direction;
+            continue 'next_try;
+        }
+
+        // Eclipse type (TOTAL/ANNULAR/etc.); ANNULAR_TOTAL (hybrid) is discovered later (§5.6).
+        let mut retflag = where_result.flags;
+        let mut dont_times = false;
+        if retflag.is_empty() {
+            // Can happen with an extremely small percentage (C: "fix this????").
+            retflag = EclipseFlags::PARTIAL | EclipseFlags::NONCENTRAL;
+            tret[4] = tjd;
+            tret[5] = tjd;
+            dont_times = true;
+        }
+
+        if !ifltype.contains(EclipseFlags::NONCENTRAL) && retflag.contains(EclipseFlags::NONCENTRAL)
+        {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::CENTRAL) && retflag.contains(EclipseFlags::CENTRAL) {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::ANNULAR) && retflag.contains(EclipseFlags::ANNULAR) {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::PARTIAL) && retflag.contains(EclipseFlags::PARTIAL) {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.intersects(EclipseFlags::TOTAL | EclipseFlags::HYBRID)
+            && retflag.contains(EclipseFlags::TOTAL)
+        {
+            k += direction;
+            continue 'next_try;
+        }
+
+        if dont_times {
+            return Ok(SolarEclipseGlobal {
+                time_maximum: tret[0],
+                time_ra_conjunction: 0.0,
+                time_begin: 0.0,
+                time_end: 0.0,
+                time_totality_begin: tret[4],
+                time_totality_end: tret[5],
+                time_centerline_begin: 0.0,
+                time_centerline_end: 0.0,
+                flags: retflag,
+            });
+        }
+
+        // Contact-time refinement (§5.5): n=0 eclipse begin/end (always), n=1 totality/
+        // annularity begin/end (skip if PARTIAL), n=2 center-line begin/end (skip if
+        // NONCENTRAL).
+        let o = if retflag.contains(EclipseFlags::PARTIAL) {
+            0
+        } else if retflag.contains(EclipseFlags::NONCENTRAL) {
+            1
+        } else {
+            2
+        };
+        let dta = 2.0 / 24.0;
+        let dtb = 10.0 / 24.0 / 60.0 / 3.0;
+
+        for n in 0..=o {
+            let (i1, i2) = match n {
+                0 => (2usize, 3usize),
+                1 => (4usize, 5usize),
+                _ => (6usize, 7usize),
+            };
+
+            let mut dc = [0.0f64; 3];
+            let mut t = tjd - dta;
+            for dc_i in dc.iter_mut() {
+                let w = eclipse_where(eph, t, Body::Sun, None, ifl)?;
+                *dc_i = contact_dc(n, &w, de_km);
+                t += dta;
+            }
+            // C ignores `find_zero`'s failure return and leaves `tret[i1]`/`tret[i2]` at
+            // whatever they held before (0.0 here, matching C's zero-initialized locals) --
+            // never hit for well-conditioned real eclipses.
+            if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], dta) {
+                tret[i1] = tjd + dt1 + dta;
+                tret[i2] = tjd + dt2 + dta;
+            }
+
+            let mut dt = dtb;
+            for _ in 0..3 {
+                for &j in &[i1, i2] {
+                    let mut dc2 = [0.0f64; 2];
+                    let mut t = tret[j] - dt;
+                    for dc_i in dc2.iter_mut() {
+                        let w = eclipse_where(eph, t, Body::Sun, None, ifl)?;
+                        *dc_i = contact_dc(n, &w, de_km);
+                        t += dt;
+                    }
+                    let dt1 = dc2[1] / ((dc2[1] - dc2[0]) / dt);
+                    tret[j] -= dt1;
+                }
+                dt /= 3.0;
+            }
+        }
+
+        // Annular-total (hybrid) detection (§5.6).
+        if retflag.contains(EclipseFlags::TOTAL) {
+            let dc0 = eclipse_where(eph, tret[0], Body::Sun, None, ifl)?.core_diameter_km;
+            let dc1 = eclipse_where(eph, tret[4], Body::Sun, None, ifl)?.core_diameter_km;
+            let dc2 = eclipse_where(eph, tret[5], Body::Sun, None, ifl)?.core_diameter_km;
+            if dc0 * dc1 < 0.0 || dc0 * dc2 < 0.0 {
+                retflag |= EclipseFlags::HYBRID;
+                retflag.remove(EclipseFlags::TOTAL);
+            }
+        }
+        if !ifltype.contains(EclipseFlags::TOTAL) && retflag.contains(EclipseFlags::TOTAL) {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::HYBRID) && retflag.contains(EclipseFlags::HYBRID) {
+            k += direction;
+            continue 'next_try;
+        }
+
+        // Time of maximum eclipse at local apparent noon (§5.7): first check for a solar
+        // RA-transit sign change between eclipse begin/end; if found, secant-iterate to the
+        // instant of exact geocentric RA(Sun) == RA(Moon).
+        let mut dc_transit = [0.0f64; 2];
+        for (i, dc_i) in dc_transit.iter_mut().enumerate() {
+            let tt = tret[2 + i] + crate::deltat::calc_deltat(tret[2 + i], config);
+            let ls = eph.calc(tt, Body::Sun, iflag)?.data;
+            let lm = eph.calc(tt, Body::Moon, iflag)?.data;
+            let mut d = normalize_degrees(ls[0] - lm[0]);
+            if d > 180.0 {
+                d -= 360.0;
+            }
+            *dc_i = d;
+        }
+        if dc_transit[0] * dc_transit[1] >= 0.0 {
+            tret[1] = 0.0;
+        } else {
+            let mut tjd_ra = tjd;
+            let mut dt = 0.1;
+            let dt1_init = (tret[3] - tret[2]) / 2.0;
+            if dt1_init < dt {
+                dt = dt1_init / 2.0;
+            }
+            while dt > 0.01 {
+                let mut dc2 = [0.0f64; 2];
+                let mut t = tjd_ra;
+                for dc_i in dc2.iter_mut() {
+                    let tt = t + crate::deltat::calc_deltat(t, config);
+                    let ls = eph.calc(tt, Body::Sun, iflag)?.data;
+                    let lm = eph.calc(tt, Body::Moon, iflag)?.data;
+                    let mut d = normalize_degrees(ls[0] - lm[0]);
+                    if d > 180.0 {
+                        d -= 360.0;
+                    }
+                    if d > 180.0 {
+                        d -= 360.0;
+                    }
+                    *dc_i = d;
+                    t -= dt;
+                }
+                let a = (dc2[1] - dc2[0]) / dt;
+                if a < 1e-10 {
+                    break;
+                }
+                let dt1 = dc2[0] / a;
+                tjd_ra += dt1;
+                dt /= 3.0;
+            }
+            tret[1] = tjd_ra;
+        }
+
+        return Ok(SolarEclipseGlobal {
+            time_maximum: tret[0],
+            time_ra_conjunction: tret[1],
+            time_begin: tret[2],
+            time_end: tret[3],
+            time_totality_begin: tret[4],
+            time_totality_end: tret[5],
+            time_centerline_begin: tret[6],
+            time_centerline_end: tret[7],
+            flags: retflag,
+        });
+    }
 }

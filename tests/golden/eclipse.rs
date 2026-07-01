@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use swisseph::{CalcFlags, Ephemeris};
+use swisseph::{CalcFlags, EclipseFlags, Ephemeris};
 
 #[derive(Deserialize)]
 struct SolWhereCase {
@@ -20,9 +20,18 @@ struct SolHowCase {
 }
 
 #[derive(Deserialize)]
+struct SolWhenGlobCase {
+    tjd_start: f64,
+    backward: bool,
+    retval: i32,
+    tret: [f64; 10],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
     sol_how: Vec<SolHowCase>,
+    sol_when_glob: Vec<SolWhenGlobCase>,
 }
 
 fn load() -> GoldenData {
@@ -209,6 +218,86 @@ fn sol_how() {
             c.attr[10],
             result.saros_member,
             1e-7,
+        );
+    }
+}
+
+/// `swe_sol_eclipse_when_glob` (`Ephemeris::sol_eclipse_when_glob`): global next/previous solar
+/// eclipse search. `ifltype` fixed at "all types" (0) per the golden-data generator; `tjd_start`
+/// x `backward` battery exercises both search directions from two epochs, landing on a mix of
+/// total/annular/partial-noncentral eclipses.
+#[test]
+fn sol_when_glob() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.sol_when_glob.iter().enumerate() {
+        let label = format!(
+            "sol_when_glob[{i}][tjd_start={},backward={}]",
+            c.tjd_start, c.backward
+        );
+        let result = ephe
+            .sol_eclipse_when_glob(
+                c.tjd_start,
+                CalcFlags::MOSEPH,
+                EclipseFlags::empty(),
+                c.backward,
+            )
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[0] (time_maximum)"),
+            c.tret[0],
+            result.time_maximum,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[1] (time_ra_conjunction)"),
+            c.tret[1],
+            result.time_ra_conjunction,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[2] (time_begin)"),
+            c.tret[2],
+            result.time_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[3] (time_end)"),
+            c.tret[3],
+            result.time_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[4] (time_totality_begin)"),
+            c.tret[4],
+            result.time_totality_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[5] (time_totality_end)"),
+            c.tret[5],
+            result.time_totality_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[6] (time_centerline_begin)"),
+            c.tret[6],
+            result.time_centerline_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[7] (time_centerline_end)"),
+            c.tret[7],
+            result.time_centerline_end,
+            1e-5,
         );
     }
 }
