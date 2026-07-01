@@ -2,8 +2,13 @@
 //! (`swe_houses_armc_ex2`). See `docs/c-ref-houses.md`.
 
 use crate::error::Error;
-use crate::math::{cotrans, diff_degrees, normalize_degrees, normalize_radians};
-use crate::types::HouseSystem;
+use crate::flags::CalcFlags;
+use crate::math::{
+    cartesian_to_polar, cartesian_to_polar_with_speed, cotrans, cross_prod, diff_degrees,
+    dot_prod_unit, normalize_degrees, normalize_radians, polar_to_cartesian,
+    polar_to_cartesian_with_speed, rotate_x,
+};
+use crate::types::{AstroModels, HouseSystem, PrecessionDirection};
 
 // ---------------------------------------------------------------------------
 // Constants (swehouse.h:87, swehouse.c:68-70, swehouse.c:940)
@@ -1536,6 +1541,239 @@ pub fn sidereal_houses_trad(
     result.ascmc.polar_ascendant = normalize_degrees(result.ascmc.polar_ascendant - ayanamsa);
 
     Ok(result)
+}
+
+// ---------------------------------------------------------------------------
+// Sidereal houses — ecl_t0 / ssypl geometric projections
+// (swehouse.c:318-403, swehouse.c:425-532)
+// ---------------------------------------------------------------------------
+
+/// Shared tail of `sidereal_houses_ecl_t0`/`sidereal_houses_ssypl`: rotate the moving point
+/// `pos`/`vel` (Cartesian, mean-equator-of-`tjde` frame) onto the *true* equator of `tjde` by
+/// applying the mean-obliquity rotation, the nutation-in-longitude shift, then the true-obliquity
+/// rotation back. Identical in both callers (swehouse.c:349-357, swehouse.c:498-506).
+fn rotate_to_true_equator(pos: [f64; 3], vel: [f64; 3], eps: f64, nutlo: [f64; 2]) -> [f64; 6] {
+    let eps_mean_rad = (eps - nutlo[1]) * crate::constants::DEGTORAD;
+    let pos = rotate_x(pos, eps_mean_rad);
+    let vel = rotate_x(vel, eps_mean_rad);
+    let mut polsp = cartesian_to_polar_with_speed([pos[0], pos[1], pos[2], vel[0], vel[1], vel[2]]);
+    polsp[0] += nutlo[0] * crate::constants::DEGTORAD;
+    let cart = polar_to_cartesian_with_speed(polsp);
+    let eps_true_rad = eps * crate::constants::DEGTORAD;
+    let pos = rotate_x([cart[0], cart[1], cart[2]], -eps_true_rad);
+    let vel = rotate_x([cart[3], cart[4], cart[5]], -eps_true_rad);
+    [pos[0], pos[1], pos[2], vel[0], vel[1], vel[2]]
+}
+
+/// Shared core of `sidereal_houses_ecl_t0`/`sidereal_houses_ssypl`: given the fully-precessed
+/// moving point `x` (Cartesian position+velocity, true-equator-of-`tjde` frame), compute the
+/// auxiliary obliquity `epsx` and auxiliary vernal point `xvpx` from the point's instantaneous
+/// orbital-plane normal, derive `armcx`, drive `houses_armc`, and return the raw (unsigned,
+/// un-offset) `dvpxe` distance for the caller to finish combining with its own ayanamsa terms.
+/// Ports the shared steps 1a/1b/2/3/4/5 (swehouse.c:358-388, swehouse.c:507-517).
+fn sidereal_houses_geom_core(
+    x: [f64; 6],
+    armc: f64,
+    lat: f64,
+    hsys: HouseSystem,
+    sundec: Option<f64>,
+) -> Result<(HouseResult, f64), Error> {
+    let xnorm = cross_prod([x[0], x[1], x[2]], [x[3], x[4], x[5]]);
+    let rxy_sq = xnorm[0] * xnorm[0] + xnorm[1] * xnorm[1];
+    let rxyz = (rxy_sq + xnorm[2] * xnorm[2]).sqrt();
+    let rxy = rxy_sq.sqrt();
+    let epsx = asind(rxy / rxyz);
+
+    let mut vz = x[5];
+    if vz.abs() < 1e-15 {
+        vz = 1e-15;
+    }
+    let fac = x[2] / vz;
+    let sgn = vz / vz.abs();
+    let xvpx = [
+        (x[0] - fac * x[3]) * sgn,
+        (x[1] - fac * x[4]) * sgn,
+        (x[2] - fac * vz) * sgn,
+    ];
+
+    let x2 = cartesian_to_polar(xvpx);
+    let dvpx = x2[0] * crate::constants::RADTODEG;
+    let armcx = normalize_degrees(armc - dvpx);
+
+    let result = houses_armc(armcx, lat, epsx, hsys, sundec)?;
+    let dvpxe = acosd(dot_prod_unit([x[0], x[1], x[2]], xvpx));
+
+    Ok((result, dvpxe))
+}
+
+/// Subtract `shift` from every cusp and `ascmc` entry (except `armc`), matching
+/// swehouse.c:391-401/519-529's tail (both callers, shared with [`sidereal_houses_trad`]'s
+/// equivalent loop). Re-fixes Equal-Aries cusps to exact 30-degree multiples afterward.
+fn apply_sidereal_shift(mut result: HouseResult, hsys: HouseSystem, shift: f64) -> HouseResult {
+    let ito = if hsys == HouseSystem::Gauquelin {
+        36
+    } else {
+        12
+    };
+    for cusp in result.cusps.iter_mut().take(ito + 1).skip(1) {
+        *cusp = normalize_degrees(*cusp - shift);
+    }
+
+    result.ascmc.ascendant = normalize_degrees(result.ascmc.ascendant - shift);
+    result.ascmc.mc = normalize_degrees(result.ascmc.mc - shift);
+    result.ascmc.vertex = normalize_degrees(result.ascmc.vertex - shift);
+    result.ascmc.equatorial_ascendant =
+        normalize_degrees(result.ascmc.equatorial_ascendant - shift);
+    result.ascmc.coascendant_koch = normalize_degrees(result.ascmc.coascendant_koch - shift);
+    result.ascmc.coascendant_munkasey =
+        normalize_degrees(result.ascmc.coascendant_munkasey - shift);
+    result.ascmc.polar_ascendant = normalize_degrees(result.ascmc.polar_ascendant - shift);
+
+    if hsys == HouseSystem::EqualAries {
+        for (i, cusp) in result.cusps.iter_mut().enumerate().take(13).skip(1) {
+            *cusp = (i as f64 - 1.0) * 30.0;
+        }
+    }
+
+    result
+}
+
+/// Sidereal houses projected onto the ecliptic of the ayanamsa epoch `t0`. Port of
+/// `sidereal_houses_ecl_t0` (swehouse.c:318-403). `t0`/`ayan_t0` are
+/// `EphemerisConfig::sidereal_t0`/`sidereal_ayan_t0` passed by the caller *unresolved* — unlike
+/// `swi_get_ayanamsa_ex`'s callers, C's own `sidereal_houses_ecl_t0` reads `sip->t0` raw, with no
+/// `t0_is_UT` deltaT adjustment (swehouse.c:341,350,388), so the Rust port must not apply
+/// `ayanamsa::resolve_t0` here either.
+#[allow(clippy::too_many_arguments)]
+pub fn sidereal_houses_ecl_t0(
+    tjde: f64,
+    armc: f64,
+    eps: f64,
+    nutlo: [f64; 2],
+    lat: f64,
+    hsys: HouseSystem,
+    sundec: Option<f64>,
+    t0: f64,
+    ayan_t0: f64,
+    models: &AstroModels,
+) -> Result<HouseResult, Error> {
+    let epst0 = crate::obliquity::obliquity(t0, CalcFlags::empty(), models).eps;
+
+    // Vernal point as a unit vector on the mean ecliptic of t0 (pos=[1,0,0], unit angular
+    // velocity vel=[0,1,0]), rotated to the equator of t0.
+    let mut pos = rotate_x([1.0, 0.0, 0.0], -epst0);
+    let mut vel = rotate_x([0.0, 1.0, 0.0], -epst0);
+
+    // t0 -> J2000 -> tjde (position and velocity precessed as separate 3-vectors, matching C's
+    // two-call-per-leg structure).
+    crate::precession::precess(
+        &mut pos,
+        t0,
+        CalcFlags::empty(),
+        models,
+        PrecessionDirection::DateToJ2000,
+    );
+    crate::precession::precess(
+        &mut pos,
+        tjde,
+        CalcFlags::empty(),
+        models,
+        PrecessionDirection::J2000ToDate,
+    );
+    crate::precession::precess(
+        &mut vel,
+        t0,
+        CalcFlags::empty(),
+        models,
+        PrecessionDirection::DateToJ2000,
+    );
+    crate::precession::precess(
+        &mut vel,
+        tjde,
+        CalcFlags::empty(),
+        models,
+        PrecessionDirection::J2000ToDate,
+    );
+
+    let x = rotate_to_true_equator(pos, vel, eps, nutlo);
+    let (result, dvpxe) = sidereal_houses_geom_core(x, armc, lat, hsys, sundec)?;
+    let dvpxe = if tjde < t0 { -dvpxe } else { dvpxe };
+
+    Ok(apply_sidereal_shift(result, hsys, dvpxe + ayan_t0))
+}
+
+/// Sidereal houses projected onto the solar-system invariable plane. Port of
+/// `sidereal_houses_ssypl` (swehouse.c:425-532). Same `t0`/`ayan_t0` raw-usage caveat as
+/// [`sidereal_houses_ecl_t0`] applies.
+#[allow(clippy::too_many_arguments)]
+pub fn sidereal_houses_ssypl(
+    tjde: f64,
+    armc: f64,
+    eps: f64,
+    nutlo: [f64; 2],
+    lat: f64,
+    hsys: HouseSystem,
+    sundec: Option<f64>,
+    t0: f64,
+    ayan_t0: f64,
+    models: &AstroModels,
+) -> Result<HouseResult, Error> {
+    use crate::constants::{J2000, RADTODEG, SSY_PLANE_INCL, SSY_PLANE_NODE, SSY_PLANE_NODE_E2000};
+
+    let eps2000 = crate::obliquity::obliquity(J2000, CalcFlags::empty(), models).eps;
+
+    // Zero point on the solar-system rotation plane -> ecliptic 2000.
+    let pos = rotate_x([1.0, 0.0, 0.0], -SSY_PLANE_INCL);
+    let vel = rotate_x([0.0, 1.0, 0.0], -SSY_PLANE_INCL);
+    let mut polsp = cartesian_to_polar_with_speed([pos[0], pos[1], pos[2], vel[0], vel[1], vel[2]]);
+    polsp[0] += SSY_PLANE_NODE_E2000;
+    let cart = polar_to_cartesian_with_speed(polsp);
+
+    // To equator 2000.
+    let mut pos = rotate_x([cart[0], cart[1], cart[2]], -eps2000);
+    let mut vel = rotate_x([cart[3], cart[4], cart[5]], -eps2000);
+
+    // To mean equator of t.
+    crate::precession::precess(
+        &mut pos,
+        tjde,
+        CalcFlags::empty(),
+        models,
+        PrecessionDirection::J2000ToDate,
+    );
+    crate::precession::precess(
+        &mut vel,
+        tjde,
+        CalcFlags::empty(),
+        models,
+        PrecessionDirection::J2000ToDate,
+    );
+
+    // To true equator of t (identical tail to ecl_t0).
+    let x = rotate_to_true_equator(pos, vel, eps, nutlo);
+    let (result, dvpxe) = sidereal_houses_geom_core(x, armc, lat, hsys, sundec)?;
+    // Always positive for dates after 5400 BC (swehouse.c:516) -- no tjde<t0 sign flip here,
+    // unlike ecl_t0.
+    let dvpxe = dvpxe - SSY_PLANE_NODE * RADTODEG;
+
+    // Ayanamsa between t0 and J2000, measured on the solar-system plane (swehouse.c:518-531).
+    let mut x0 = [1.0, 0.0, 0.0];
+    if t0 != J2000 {
+        crate::precession::precess(
+            &mut x0,
+            t0,
+            CalcFlags::empty(),
+            models,
+            PrecessionDirection::DateToJ2000,
+        );
+    }
+    let x0 = rotate_x(x0, eps2000);
+    let mut x0pol = cartesian_to_polar(x0);
+    x0pol[0] -= SSY_PLANE_NODE_E2000;
+    let x0cart = rotate_x(polar_to_cartesian(x0pol), SSY_PLANE_INCL);
+    let x00 = (cartesian_to_polar(x0cart)[0] + SSY_PLANE_NODE) * RADTODEG;
+
+    Ok(apply_sidereal_shift(result, hsys, dvpxe + ayan_t0 + x00))
 }
 
 // ---------------------------------------------------------------------------

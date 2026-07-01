@@ -65,8 +65,17 @@ src/
 │                          sidereal_houses_trad (traditional sidereal: houses_armc at tropical
 │                          armc/eps then subtract ayanamsa from cusps/ascmc except armc; W routed
 │                          through Equal + re-fixed to 30° multiples; N re-fixed to (i-1)*30
-│                          unconditionally) — ayanamsa is passed in, kept pure; ECL_T0/SSY_PLANE
-│                          sidereal modes deferred (sub-task 9);
+│                          unconditionally) — ayanamsa is passed in, kept pure;
+│                          sidereal_houses_ecl_t0/sidereal_houses_ssypl (geometric sidereal
+│                          projections onto the ecliptic-of-t0/solar-system-plane: build a vernal-
+│                          point-like moving vector, precess/nutate it to tjde's true equator,
+│                          derive an auxiliary obliquity+vernal-point from its orbital-plane normal
+│                          via cross_prod/dot_prod_unit, compute houses at the resulting
+│                          armcx/epsx, then subtract dvpxe+ayan_t0(+x00 for ssypl) from every
+│                          cusp/ascmc except armc) — t0/ayan_t0 passed in raw (unlike
+│                          ayanamsa::resolve_t0's callers, C's own sidereal_houses_ecl_t0/ssypl
+│                          never apply the t0_is_UT deltaT adjustment); shared helpers
+│                          rotate_to_true_equator, sidereal_houses_geom_core, apply_sidereal_shift;
 │                          house_pos (swe_house_pos port: planet ecl.[lon,lat] → continuous house
 │                          position 1.0..13.0, all 25 HouseSystem variants incl. Alcabitius which
 │                          calc_h doesn't implement yet — house_pos's Alcabitius branch is
@@ -125,7 +134,10 @@ tests/
 │                         eps 1e-7 cusps/ascmc, 1e-6 speeds via Ephemeris::houses_ex2 (compounds
 │                         deltaT/obliquity/nutation/sidtime — looser than the pure-armc tests);
 │                         sidereal_trad: 9 cases, systems P/W/E × 3 triples, SEFLG_SIDEREAL +
-│                         Lahiri, same tolerances; house_pos: 150 cases, all 25 house-system chars
+│                         Lahiri, same tolerances; sidereal_geom: 18 cases, systems P/C/W x 3
+│                         triples x 2 sid_modes (Lahiri|SE_SIDBIT_ECL_T0, Lahiri|SE_SIDBIT_SSY_PLANE),
+│                         same tolerances, exercises sidereal_houses_ecl_t0/ssypl; house_pos: 150
+│                         cases, all 25 house-system chars
 │                         × 2 armc/geolat/eps triples (1 temperate, 1 polar — armc=105/geolat=67
 │                         chosen so 2/3 xpin succeed and 1/3 hits Koch's genuine hpos==0 circumpolar
 │                         failure) × 3 xpin, eps 1e-7 hpos, "err" cases (1: Koch) assert Err instead
@@ -279,20 +291,22 @@ All `pub fn`. Key functions and their line ranges:
 | d2l | 108–114 | (f64) → i32 |
 | chebyshev_eval | 120–131 | (f64, &[f64]) → f64 |
 | chebyshev_deriv | 133–156 | (f64, &[f64]) → f64 |
-| rotate_x | 162–166 | ([f64;3], f64) → [f64;3] |
-| rotate_x_sincos | 168–174 | ([f64;3], f64, f64) → [f64;3] |
-| cartesian_to_polar | 176–193 | ([f64;3]) → [f64;3] |
-| polar_to_cartesian | 195–202 | ([f64;3]) → [f64;3] |
-| cartesian_to_polar_with_speed | 208–237 | ([f64;6]) → [f64;6] |
-| polar_to_cartesian_with_speed | 239–261 | ([f64;6]) → [f64;6] |
-| cotrans | 267–274 | ([f64;3], f64) → [f64;3] |
-| cotrans_with_speed | 276–290 | ([f64;6], f64) → [f64;6] |
-| split_degrees | 304–364 | (f64, SplitDegFlags) → DegreeParts |
-| poly_eval | 366–368 | (&[f64], f64) → f64 — Horner's method |
-| OWEN_T0S | 374 | [f64; 5] — Owen interval boundaries |
-| owen_t0_icof | 376 | (f64) → (f64, usize) — Owen interval + index |
-| owen_chebyshev_basis | 390 | (f64) → (usize, [f64; 10]) — shared by obliquity + precession |
-| **unit tests** | 410+ | |
+| cross_prod | 167–173 | ([f64;3], [f64;3]) → [f64;3] — swi_cross_prod |
+| dot_prod_unit | 177–185 | ([f64;3], [f64;3]) → f64 — swi_dot_prod_unit, clamped to [-1,1] |
+| rotate_x | 190–194 | ([f64;3], f64) → [f64;3] |
+| rotate_x_sincos | 196–202 | ([f64;3], f64, f64) → [f64;3] |
+| cartesian_to_polar | 204–221 | ([f64;3]) → [f64;3] |
+| polar_to_cartesian | 223–230 | ([f64;3]) → [f64;3] |
+| cartesian_to_polar_with_speed | 236–265 | ([f64;6]) → [f64;6] |
+| polar_to_cartesian_with_speed | 267–289 | ([f64;6]) → [f64;6] |
+| cotrans | 295–302 | ([f64;3], f64) → [f64;3] |
+| cotrans_with_speed | 304–318 | ([f64;6], f64) → [f64;6] |
+| split_degrees | 332–392 | (f64, SplitDegFlags) → DegreeParts |
+| poly_eval | 394–396 | (&[f64], f64) → f64 — Horner's method |
+| OWEN_T0S | 402 | [f64; 5] — Owen interval boundaries |
+| owen_t0_icof | 404 | (f64) → (f64, usize) — Owen interval + index |
+| owen_chebyshev_basis | 418 | (f64) → (usize, [f64; 10]) — shared by obliquity + precession |
+| **unit tests** | 438+ | |
 
 ## Golden Test Pattern
 

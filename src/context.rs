@@ -315,17 +315,37 @@ impl Ephemeris {
         };
 
         let mut result = if flags.contains(CalcFlags::SIDEREAL) {
-            if self
-                .config
-                .sidereal_bits
-                .intersects(SiderealBits::ECL_T0 | SiderealBits::SSY_PLANE)
-            {
-                return Err(Error::CError(
-                    "sidereal house mode ECL_T0/SSY_PLANE not yet implemented".into(),
-                ));
+            let bits = self.config.sidereal_bits;
+            if bits.contains(SiderealBits::ECL_T0) {
+                crate::houses::sidereal_houses_ecl_t0(
+                    tjde,
+                    armc,
+                    eps_true,
+                    [dpsi_deg, deps_deg],
+                    geolat,
+                    hsys,
+                    sundec,
+                    self.config.sidereal_t0,
+                    self.config.sidereal_ayan_t0,
+                    models,
+                )?
+            } else if bits.contains(SiderealBits::SSY_PLANE) {
+                crate::houses::sidereal_houses_ssypl(
+                    tjde,
+                    armc,
+                    eps_true,
+                    [dpsi_deg, deps_deg],
+                    geolat,
+                    hsys,
+                    sundec,
+                    self.config.sidereal_t0,
+                    self.config.sidereal_ayan_t0,
+                    models,
+                )?
+            } else {
+                let ayanamsa = self.get_ayanamsa_ex(tjde, flags)?;
+                crate::houses::sidereal_houses_trad(armc, geolat, eps_true, hsys, sundec, ayanamsa)?
             }
-            let ayanamsa = self.get_ayanamsa_ex(tjde, flags)?;
-            crate::houses::sidereal_houses_trad(armc, geolat, eps_true, hsys, sundec, ayanamsa)?
         } else {
             crate::houses::houses_armc(armc, geolat, eps_true, hsys, sundec)?
         };

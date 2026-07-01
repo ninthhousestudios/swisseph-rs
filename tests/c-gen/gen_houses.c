@@ -70,6 +70,17 @@ static char ut_wrapper_systems[] = { 'P', 'K', 'C', 'R', 'W', 'I' };
 static char sidereal_trad_systems[] = { 'P', 'W', 'E' };
 #define N_SIDEREAL_TRAD_SYS (sizeof(sidereal_trad_systems) / sizeof(sidereal_trad_systems[0]))
 
+/* --- Houses 9/9 (ECL_T0 / SSY_PLANE geometric sidereal projections) --- */
+
+static char sidereal_geom_systems[] = { 'P', 'C', 'W' };
+#define N_SIDEREAL_GEOM_SYS (sizeof(sidereal_geom_systems) / sizeof(sidereal_geom_systems[0]))
+
+static int sidereal_geom_modes[] = {
+    SE_SIDM_LAHIRI | SE_SIDBIT_ECL_T0,
+    SE_SIDM_LAHIRI | SE_SIDBIT_SSY_PLANE,
+};
+#define N_SIDEREAL_GEOM_MODES (sizeof(sidereal_geom_modes) / sizeof(sidereal_geom_modes[0]))
+
 int main(void) {
     int ia, ig, ie, is;
     int first;
@@ -583,6 +594,59 @@ int main(void) {
                     printf("%.20e%s", ascmc_speed[i], (i < 7) ? ", " : "");
                 }
                 printf("]}");
+            }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* --- sidereal_geom: swe_houses_ex2 with SEFLG_SIDEREAL, ECL_T0/SSY_PLANE geometric
+     * projection modes (swehouse.c:318-532), Lahiri t0/ayan_t0. Reuses the first 3 ut_triples. */
+    printf("  \"sidereal_geom\": [\n");
+    first = 1;
+    {
+        int it, is2, im;
+        for (im = 0; im < N_SIDEREAL_GEOM_MODES; im++) {
+            swe_set_sid_mode(sidereal_geom_modes[im], 0, 0);
+            for (it = 0; it < 3; it++) {
+                for (is2 = 0; is2 < N_SIDEREAL_GEOM_SYS; is2++) {
+                    double tjd_ut = ut_triples[it].tjd_ut;
+                    double geolat = ut_triples[it].geolat;
+                    double geolon = ut_triples[it].geolon;
+                    char hsys = sidereal_geom_systems[is2];
+                    int retc, i;
+
+                    memset(cusp, 0, sizeof(cusp));
+                    memset(cusp_speed, 0, sizeof(cusp_speed));
+                    memset(ascmc, 0, sizeof(ascmc));
+                    memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                    serr[0] = '\0';
+
+                    retc = swe_houses_ex2(tjd_ut, SEFLG_SIDEREAL, geolat, geolon, hsys, cusp, ascmc,
+                                           cusp_speed, ascmc_speed, serr);
+                    (void)retc;
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"tjd_ut\": %.20e, \"geolat\": %.20e, \"geolon\": %.20e, "
+                           "\"hsys\": \"%c\", \"sid_mode\": %d, \"cusps\": [",
+                           tjd_ut, geolat, geolon, hsys, sidereal_geom_modes[im]);
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                    }
+                    printf("], \"cusp_speed\": [");
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                    }
+                    printf("], \"ascmc\": [");
+                    for (i = 0; i < 8; i++) {
+                        printf("%.20e%s", ascmc[i], (i < 7) ? ", " : "");
+                    }
+                    printf("], \"ascmc_speed\": [");
+                    for (i = 0; i < 8; i++) {
+                        printf("%.20e%s", ascmc_speed[i], (i < 7) ? ", " : "");
+                    }
+                    printf("]}");
+                }
             }
         }
     }

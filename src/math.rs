@@ -160,6 +160,30 @@ pub fn chebyshev_deriv(x: f64, coeffs: &[f64]) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// Vector algebra (swephlib.c: swi_cross_prod, swi_dot_prod_unit)
+// ---------------------------------------------------------------------------
+
+/// Cross product `a × b`. Port of `swi_cross_prod` (swephlib.c:160-165).
+pub fn cross_prod(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Cosine of the angle between `x` and `y`, clamped to `[-1,1]`. Port of
+/// `swi_dot_prod_unit` (swephlib.c:453-464).
+pub fn dot_prod_unit(x: [f64; 3], y: [f64; 3]) -> f64 {
+    let mut dop = x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let e1 = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+    let e2 = (y[0] * y[0] + y[1] * y[1] + y[2] * y[2]).sqrt();
+    dop /= e1;
+    dop /= e2;
+    dop.clamp(-1.0, 1.0)
+}
+
+// ---------------------------------------------------------------------------
 // Coordinate transforms — basic
 // ---------------------------------------------------------------------------
 
