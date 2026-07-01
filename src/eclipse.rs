@@ -662,6 +662,43 @@ pub struct SolarEclipseGlobal {
     pub flags: EclipseFlags,
 }
 
+/// Meeus (German ed., p.381) synodic-month lunation estimate for signed month index `k`: the
+/// approximate mean-conjunction instant (ET/TT, not yet delta-T-corrected to UT) plus the
+/// F-argument node-proximity pre-filter. Textually identical in `swe_sol_eclipse_when_glob`
+/// (swecl.c:1227-1265, §5.2) and `eclipse_when_loc` (swecl.c:2129-2172, §6.2) -- each C function
+/// re-derives it independently; factored into one function here per the C ref doc's porting note.
+/// Returns `None` if `k`'s F-argument (Moon's distance from its node at the mean conjunction)
+/// falls in the `(21,159)` degree band, meaning no solar eclipse is geometrically possible for
+/// this lunation -- the caller should advance `k` and retry.
+fn meeus_new_moon_estimate(k: f64) -> Option<f64> {
+    let tt_ = k / 1236.85;
+    let t2 = tt_ * tt_;
+    let t3 = t2 * tt_;
+    let t4 = t3 * tt_;
+    let mut ff = normalize_degrees(
+        160.7108 + 390.67050274 * k - 0.0016341 * t2 - 0.00000227 * t3 + 0.000000011 * t4,
+    );
+    if ff > 180.0 {
+        ff -= 180.0;
+    }
+    if ff > 21.0 && ff < 159.0 {
+        return None;
+    }
+
+    // Approximate time of geocentric maximum eclipse (Meeus, German ed., p. 381).
+    let mut tjd =
+        2451550.09765 + 29.530588853 * k + 0.0001337 * t2 - 0.000000150 * t3 + 0.00000000073 * t4;
+    let m = normalize_degrees(2.5534 + 29.10535669 * k - 0.0000218 * t2 - 0.00000011 * t3);
+    let mm = normalize_degrees(
+        201.5643 + 385.81693528 * k + 0.1017438 * t2 + 0.00001239 * t3 + 0.000000058 * t4,
+    );
+    let e = 1.0 - 0.002516 * tt_ - 0.0000074 * t2;
+    let m_rad = m * DEGTORAD;
+    let mm_rad = mm * DEGTORAD;
+    tjd = tjd - 0.4075 * mm_rad.sin() + 0.1721 * e * m_rad.sin();
+    Some(tjd)
+}
+
 /// Contact-time sample formula (swecl.c:1394-1424, §5.5), shared by the coarse `find_zero` pass
 /// and the 3-pass Newton refinement. `n`: 0 = eclipse begin/end (penumbra boundary, but divides
 /// by `cosf1`/umbra half-angle -- literal C quirk, not a typo, negligible impact since both
@@ -731,32 +768,13 @@ pub(crate) fn sol_eclipse_when_glob(
     'next_try: loop {
         let mut tret = [0.0f64; 8];
 
-        let tt_ = k / 1236.85;
-        let t2 = tt_ * tt_;
-        let t3 = t2 * tt_;
-        let t4 = t3 * tt_;
-        let mut ff = normalize_degrees(
-            160.7108 + 390.67050274 * k - 0.0016341 * t2 - 0.00000227 * t3 + 0.000000011 * t4,
-        );
-        if ff > 180.0 {
-            ff -= 180.0;
-        }
-        if ff > 21.0 && ff < 159.0 {
-            k += direction;
-            continue 'next_try;
-        }
-
-        // Approximate time of geocentric maximum eclipse (Meeus, German ed., p. 381).
-        let mut tjd = 2451550.09765 + 29.530588853 * k + 0.0001337 * t2 - 0.000000150 * t3
-            + 0.00000000073 * t4;
-        let m = normalize_degrees(2.5534 + 29.10535669 * k - 0.0000218 * t2 - 0.00000011 * t3);
-        let mm = normalize_degrees(
-            201.5643 + 385.81693528 * k + 0.1017438 * t2 + 0.00001239 * t3 + 0.000000058 * t4,
-        );
-        let e = 1.0 - 0.002516 * tt_ - 0.0000074 * t2;
-        let m_rad = m * DEGTORAD;
-        let mm_rad = mm * DEGTORAD;
-        tjd = tjd - 0.4075 * mm_rad.sin() + 0.1721 * e * m_rad.sin();
+        let mut tjd = match meeus_new_moon_estimate(k) {
+            Some(tjd) => tjd,
+            None => {
+                k += direction;
+                continue 'next_try;
+            }
+        };
 
         // Iterative refinement to the instant of minimum geocentric Sun-Moon angular separation
         // (§5.3). `tjd` is treated as ET/TT throughout this refinement (Meeus's formula is
