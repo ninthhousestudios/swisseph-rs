@@ -23,8 +23,20 @@ pub const LAPSE_RATE: f64 = 0.0065;
 pub const KM_S_TO_AU_CTY: f64 = 21.095;
 
 // Valid observer-altitude range for rise/set (sweph.h:198-199, SEI_ECL_GEOALT_MIN/_MAX), meters.
+// Eclipse local-circumstance functions (`eclipse_how`/`eclipse_when_loc`) reuse the same range.
 pub const RISE_SET_GEOALT_MIN: f64 = -500.0;
 pub const RISE_SET_GEOALT_MAX: f64 = 25000.0;
+
+// Eclipse/occultation shadow-geometry body diameters, AU (swecl.c:80-84). `DSUN`'s numerator
+// matches `PLANETARY_DIAMETERS[0]` (Sun) exactly, so `RSUN` and the general `drad` lookup agree
+// for solar eclipses; `DMOON`'s 3476300.0 is the mean lunar radius used for shadow-cone geometry,
+// distinct from `PLANETARY_DIAMETERS[1]`'s 3475000.0 (a different, general-purpose figure).
+pub const DSUN: f64 = 1392000000.0 / AUNIT;
+pub const DMOON: f64 = 3476300.0 / AUNIT;
+pub const DEARTH: f64 = 6378140.0 * 2.0 / AUNIT;
+pub const RSUN: f64 = DSUN / 2.0;
+pub const RMOON: f64 = DMOON / 2.0;
+pub const REARTH: f64 = DEARTH / 2.0;
 
 // ---------------------------------------------------------------------------
 // Unit conversions

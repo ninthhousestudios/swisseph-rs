@@ -87,7 +87,26 @@ src/
 │                          mc_transform_raw (Morinus's un-normalized tand/cose transform),
 │                          bracket_interpolate_12 (shared J/default fallback), koch_house_pos,
 │                          topocentric_house_pos, sunshine_apc_house_pos (shared I/i/Y formula)
-├── eclipse.rs          — EMPTY stub
+├── eclipse.rs          — solar eclipse shadow geometry + shared eclipse/occultation helpers
+│                          (swisseph-rs/72): EclipseWhere (geopos[0..1]+dcore[0..6]+EclipseFlags,
+│                          mirrors C's swe_sol_eclipse_where output minus attr[], which needs the
+│                          not-yet-ported eclipse_how); body_radius_au (drad lookup, shared by
+│                          eclipse_where/eclipse_how, reuses constants::PLANETARY_DIAMETERS;
+│                          named-asteroid diameter not yet threaded through, returns 0.0);
+│                          calc_planet_star (shared body/star position dispatch: self.calc vs
+│                          self.fixstar2, reused by lunar-eclipse/occultation modules);
+│                          eclipse_where (swi_polcart-rebuilt rm/rs from polar lm/ls, NOT the
+│                          direct swe_calc cartesian output — literal FP-fidelity hazard per
+│                          docs/c-ref-eclipse-solar.md §3.2; two-pass earthobl ellipsoid
+│                          refinement, `for niter in 0..2` with `continue` standing in for C's
+│                          `goto iter_where`); sol_eclipse_where (public wrapper, pins ipl=Sun —
+│                          masks ifl to calc::EPHMASK before calling eclipse_where, matching C's
+│                          swe_sol_eclipse_where: this strips NONUT/TOPOCTR/etc. so eclipse_where's
+│                          own NONUT branch is unreachable through this entry point — the bug
+│                          that cost a debugging session before the C source was read directly).
+│                          Ephemeris::sol_eclipse_where in context.rs delegates (same wrapper
+│                          pattern as azalt/rise_trans). attr[]/eclipse_how land in RSE 6
+│                          (swisseph-rs/73).
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -147,6 +166,13 @@ tests/
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
+│   ├── eclipse.rs     — golden tests for eclipse (sol_where: 4 cases — 1999/2021/2024 known
+│                          central solar eclipses at their actual maximum-eclipse UT instants
+│                          (CENTRAL|TOTAL, CENTRAL|ANNULAR ×2, one with NONUT set to confirm it's
+│                          masked away same as C) + a plain-noon no-eclipse epoch; asserts
+│                          central_longitude/central_latitude/core_diameter_km eps 1e-7 + exact
+│                          retval flags bitmask; attr[] beyond dcore[0] needs eclipse_how,
+│                          swisseph-rs/73, not asserted here)
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -215,6 +241,8 @@ tests/
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
+│   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key;
+│                          later RSE tasks 6-12 add more keys to this same file)
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -233,6 +261,10 @@ tests/
 │   └── riseset.json    — C-generated reference data for swe_rise_trans_true_hor + swe_rise_trans (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err; dip key: 6 cases, horhgt=-100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: 12 cases, NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key: 24 cases via swe_rise_trans, 3 geopos all \|lat\|≤60 × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
+    ├── gen_eclipse.c   — C harness to regenerate eclipse.json (swe_sol_eclipse_where: 3 known
+    │                       central eclipses at their real maximum-eclipse UT instants + 1
+    │                       no-eclipse epoch, one case with SEFLG_NONUT to confirm it's masked
+    │                       away by swe_sol_eclipse_where's own `ifl &= SEFLG_EPHMASK`)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

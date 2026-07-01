@@ -22,7 +22,7 @@ use crate::types::{
     PrecessionDirection, PrecessionModel,
 };
 
-const EPHMASK: CalcFlags = CalcFlags::MOSEPH
+pub(crate) const EPHMASK: CalcFlags = CalcFlags::MOSEPH
     .union(CalcFlags::SWIEPH)
     .union(CalcFlags::JPLEPH);
 

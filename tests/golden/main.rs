@@ -8,6 +8,7 @@ mod calc_topo;
 mod corrections;
 mod date;
 mod deltat;
+mod eclipse;
 mod fixstar;
 mod fixstar_ayanamsa;
 mod houses;

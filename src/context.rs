@@ -552,6 +552,18 @@ impl Ephemeris {
         }
     }
 
+    /// Solar eclipse shadow geometry: geographic position of greatest eclipse + core/penumbra
+    /// shadow diameters, geocentric. Port of `swe_sol_eclipse_where`'s shadow-geometry pass
+    /// (`eclipse_where`, swecl.c:565-582, 640-886); local-circumstance attributes (`attr[]`, via
+    /// `eclipse_how`) land in a later task (RSE 6, swisseph-rs/73).
+    pub fn sol_eclipse_where(
+        &self,
+        tjd_ut: f64,
+        ifl: CalcFlags,
+    ) -> Result<crate::eclipse::EclipseWhere, Error> {
+        crate::eclipse::sol_eclipse_where(self, tjd_ut, ifl)
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`

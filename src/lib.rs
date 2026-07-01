@@ -28,6 +28,7 @@ pub mod sweph_file;
 pub mod topocentric;
 
 pub use context::{CalcResult, Ephemeris, EphemerisConfig, TopoPosition};
+pub use eclipse::EclipseWhere;
 pub use error::Error;
 pub use flags::{CalcFlags, RiseSetFlags};
 pub use houses::{AscMc, HouseResult};
