@@ -393,6 +393,48 @@ pub fn poly_eval(coeffs: &[f64], x: f64) -> f64 {
     coeffs.iter().rev().fold(0.0, |acc, &c| acc * x + c)
 }
 
+// ---------------------------------------------------------------------------
+// Parabola interpolation (swecl.c: find_maximum/find_zero) — shared by the
+// rise/set module and (future) eclipse contact-time refinement
+// ---------------------------------------------------------------------------
+
+/// Parabola-fit extremum through 3 equally-spaced samples `y00` (x=-1), `y11` (x=0, the
+/// *middle* sample), `y2` (x=+1, the *rightmost/most-recent* sample), real spacing `dx`. Port
+/// of `find_maximum` (swecl.c:4133-4146; see docs/c-ref-riseset.md §1).
+///
+/// Returns `(dxret, yret)`: `dxret` is the extremum's time offset **relative to the `y2`
+/// sample** (not the middle one) — callers do `t_extremum = t_of_y2_sample + dxret`. `yret` is
+/// the extremum value. No domain check: a caller passing collinear samples (`a == 0`) gets a
+/// division by zero, matching C (never hit in practice — samples come from real altitude
+/// curves with curvature).
+pub fn find_maximum(y00: f64, y11: f64, y2: f64, dx: f64) -> (f64, f64) {
+    let c = y11;
+    let b = (y2 - y00) / 2.0;
+    let a = (y2 + y00) / 2.0 - c;
+    let x = -b / 2.0 / a;
+    let y = (4.0 * a * c - b * b) / 4.0 / a;
+    let dxret = (x - 1.0) * dx;
+    (dxret, y)
+}
+
+/// Parabola-fit root(s) through 3 equally-spaced samples (same layout/convention as
+/// [`find_maximum`]). Port of `find_zero` (swecl.c:4148-4162; see docs/c-ref-riseset.md §1).
+///
+/// Returns `None` if the parabola never crosses zero (negative discriminant); otherwise
+/// `Some((dxret1, dxret2))`, both root offsets relative to the `y2` sample (`x1` uses `+sqrt`,
+/// `x2` uses `-sqrt` — order is fixed, not sorted).
+pub fn find_zero(y00: f64, y11: f64, y2: f64, dx: f64) -> Option<(f64, f64)> {
+    let c = y11;
+    let b = (y2 - y00) / 2.0;
+    let a = (y2 + y00) / 2.0 - c;
+    if b * b - 4.0 * a * c < 0.0 {
+        return None;
+    }
+    let x1 = (-b + (b * b - 4.0 * a * c).sqrt()) / 2.0 / a;
+    let x2 = (-b - (b * b - 4.0 * a * c).sqrt()) / 2.0 / a;
+    Some(((x1 - 1.0) * dx, (x2 - 1.0) * dx))
+}
+
 /// Convert ARMC (RA of Midheaven, degrees) to MC ecliptic longitude (degrees).
 /// Port of `swi_armc_to_mc` (swehouse.c:872–888).
 pub fn armc_to_mc(armc_deg: f64, eps_deg: f64) -> f64 {
@@ -620,6 +662,31 @@ mod tests {
                 rotated[i]
             );
         }
+    }
+
+    #[test]
+    fn find_maximum_symmetric_parabola() {
+        // y = 4 - 3x^2 sampled at x = -1, 0, 1 -> y00=1, y11=4, y2=1. Vertex at x=0, y=4.
+        let (dxret, yret) = find_maximum(1.0, 4.0, 1.0, 2.0);
+        assert!((yret - 4.0).abs() < 1e-12);
+        // Vertex (x=0) is one middle-sample-spacing (dx=2) before the y2 sample (x=1).
+        assert!((dxret - -2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn find_zero_known_roots() {
+        // y = x^2 - 1 sampled at x = -1, 0, 1 -> y00=0, y11=-1, y2=0. Roots at x=-1, x=1.
+        let (dxret1, dxret2) = find_zero(0.0, -1.0, 0.0, 1.0).expect("real roots");
+        // Root at x=1 (the y2 sample itself) -> offset 0.
+        assert!((dxret1 - 0.0).abs() < 1e-12);
+        // Root at x=-1 -> two dx-units before the y2 sample.
+        assert!((dxret2 - -2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn find_zero_no_real_root() {
+        // y = x^2 + 1 sampled at x = -1, 0, 1 -> never crosses zero.
+        assert!(find_zero(2.0, 1.0, 2.0, 1.0).is_none());
     }
 
     #[test]

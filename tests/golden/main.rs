@@ -21,6 +21,7 @@ mod moshier_planet;
 mod nutation;
 mod obliquity_bias;
 mod precession;
+mod riseset;
 mod se1_header;
 mod sidereal_time;
 mod sweph_eval;

@@ -191,8 +191,22 @@ impl Ephemeris {
     /// positions. Moshier evaluations are sub-microsecond; callers needing
     /// deduplication for repeated same-JD queries should cache externally.
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
-        let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
-        if flags.contains(CalcFlags::TOPOCTR) && self.config.topographic.is_none() {
+        self.calc_with_config(jd_tt, body, flags, &self.config)
+    }
+
+    /// Same as [`calc`](Self::calc) but with an explicit config override. Used by the rise/set
+    /// module (`riseset.rs`) to thread a caller-supplied `geopos` into the TOPOCTR pipeline
+    /// without requiring it to match the `Ephemeris`'s own configured topographic position
+    /// (mirrors C's per-call `swe_set_topo` before `swe_calc_ut`, but stateless).
+    pub(crate) fn calc_with_config(
+        &self,
+        jd_tt: f64,
+        body: Body,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<CalcResult, Error> {
+        let flags = crate::calc::plaus_iflag(flags, config.ephemeris_source);
+        if flags.contains(CalcFlags::TOPOCTR) && config.topographic.is_none() {
             return Err(Error::CError(
                 "topocentric requires topographic position".to_string(),
             ));
@@ -206,10 +220,10 @@ impl Ephemeris {
         }
 
         if flags.contains(CalcFlags::SPEED3) {
-            return self.calc_speed3(jd_tt, body, flags);
+            return self.calc_speed3(jd_tt, body, flags, config);
         }
 
-        let (mut xreturn, x2000, flags_used) = self.calc_inner(jd_tt, body, flags)?;
+        let (mut xreturn, x2000, flags_used) = self.calc_inner(jd_tt, body, flags, config)?;
         if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
             self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags_used)?;
         }
@@ -222,6 +236,19 @@ impl Ephemeris {
     pub fn calc_ut(&self, jd_ut: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let dt = crate::deltat::calc_deltat(jd_ut, &self.config);
         self.calc(jd_ut + dt, body, flags)
+    }
+
+    /// Same as [`calc_ut`](Self::calc_ut) but with an explicit config override; see
+    /// [`calc_with_config`](Self::calc_with_config).
+    pub(crate) fn calc_ut_with_config(
+        &self,
+        jd_ut: f64,
+        body: Body,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<CalcResult, Error> {
+        let dt = crate::deltat::calc_deltat(jd_ut, config);
+        self.calc_with_config(jd_ut + dt, body, flags, config)
     }
 
     /// Ayanamsa at `jd_tt` (TT), with nutation added unless `NONUT` is set.
@@ -397,7 +424,7 @@ impl Ephemeris {
     /// both resolve deltaT via `swe_deltat_ex(tjd_ut, -1, NULL)` -- the `-1` sentinel forces
     /// `SE_TIDAL_DEFAULT` regardless of the configured ephemeris backend, same pattern as
     /// [`Ephemeris::houses_ex2`]. See docs/c-ref-refraction-azalt.md §1 step 3, §8.
-    fn azalt_armc_eps(&self, tjd_ut: f64, geolon: f64) -> (f64, f64) {
+    pub(crate) fn azalt_armc_eps(&self, tjd_ut: f64, geolon: f64) -> (f64, f64) {
         let deltat_config = {
             let mut c = self.config.clone();
             c.tidal_acceleration = Some(crate::constants::TIDAL_DEFAULT);
@@ -452,6 +479,30 @@ impl Ephemeris {
     ) -> [f64; 2] {
         let (armc, eps_true) = self.azalt_armc_eps(tjd_ut, geopos[0]);
         crate::azalt::azalt_rev(dir, armc, eps_true, geopos[1], xin)
+    }
+
+    /// Rise/set/meridian-transit search (full algorithm). Port of `swe_rise_trans_true_hor`
+    /// (swecl.c:4387-4686); dispatches to `calc_mer_trans` when `rsmi` requests
+    /// `MTRANSIT`/`ITRANSIT`. `starname` selects a fixed star (ignoring `body`); `horhgt` is the
+    /// local horizon height above/below the sea-level horizon, degrees (`-100` = auto dip from
+    /// `geopos[2]`). See docs/c-ref-riseset.md. The fast-path optimization and the
+    /// `swe_rise_trans` dispatcher are a separate module (RSE 4).
+    #[allow(clippy::too_many_arguments)]
+    pub fn rise_trans_true_hor(
+        &self,
+        tjd_ut: f64,
+        body: Body,
+        starname: Option<&str>,
+        epheflag: CalcFlags,
+        rsmi: crate::flags::RiseSetFlags,
+        geopos: [f64; 3],
+        atpress: f64,
+        attemp: f64,
+        horhgt: f64,
+    ) -> Result<crate::riseset::RiseSetResult, Error> {
+        crate::riseset::rise_trans_true_hor(
+            self, tjd_ut, body, starname, epheflag, rsmi, geopos, atpress, attemp, horhgt,
+        )
     }
 
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
@@ -525,8 +576,9 @@ impl Ephemeris {
         jd_tt: f64,
         body: Body,
         flags: CalcFlags,
+        config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6], CalcFlags), Error> {
-        let models = &self.config.astro_models;
+        let models = &config.astro_models;
 
         if body == Body::EclipticNutation {
             let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);
@@ -556,9 +608,9 @@ impl Ephemeris {
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
-        match self.config.ephemeris_source {
+        match config.ephemeris_source {
             EphemerisSource::Swiss => {
-                match self.calc_body_sweph(jd_tt, body, &eps_j2000, flags, models) {
+                match self.calc_body_sweph(jd_tt, body, &eps_j2000, flags, models, config) {
                     Ok((xr, x2000)) => Ok((xr, x2000, flags)),
                     Err(Error::BeyondEphemerisLimits { .. }) => {
                         let fallback_flags = (flags & !CalcFlags::SWIEPH) | CalcFlags::MOSEPH;
@@ -568,6 +620,7 @@ impl Ephemeris {
                             &eps_j2000,
                             fallback_flags,
                             models,
+                            config,
                         )?;
                         Ok((xr, x2000, fallback_flags))
                     }
@@ -575,11 +628,13 @@ impl Ephemeris {
                 }
             }
             EphemerisSource::Jpl => {
-                let (xr, x2000) = self.calc_body_jpl(jd_tt, body, &eps_j2000, flags, models)?;
+                let (xr, x2000) =
+                    self.calc_body_jpl(jd_tt, body, &eps_j2000, flags, models, config)?;
                 Ok((xr, x2000, flags))
             }
             EphemerisSource::Moshier => {
-                let (xr, x2000) = self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models)?;
+                let (xr, x2000) =
+                    self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models, config)?;
                 Ok((xr, x2000, flags))
             }
         }
@@ -592,10 +647,11 @@ impl Ephemeris {
         eps_j2000: &crate::types::Epsilon,
         flags: CalcFlags,
         models: &crate::types::AstroModels,
+        config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         match body {
-            Body::Sun => crate::calc::calc_sun(jd_tt, eps_j2000, flags, &self.config, models),
-            Body::Moon => crate::calc::calc_moon(jd_tt, eps_j2000, flags, &self.config, models),
+            Body::Sun => crate::calc::calc_sun(jd_tt, eps_j2000, flags, config, models),
+            Body::Moon => crate::calc::calc_moon(jd_tt, eps_j2000, flags, config, models),
             Body::Mercury
             | Body::Venus
             | Body::Mars
@@ -604,7 +660,7 @@ impl Ephemeris {
             | Body::Uranus
             | Body::Neptune
             | Body::Pluto => {
-                crate::calc::calc_planet(jd_tt, body, eps_j2000, flags, &self.config, models)
+                crate::calc::calc_planet(jd_tt, body, eps_j2000, flags, config, models)
             }
             _ => Err(Error::EphemerisNotAvailable {
                 body,
@@ -620,6 +676,7 @@ impl Ephemeris {
         eps_j2000: &crate::types::Epsilon,
         flags: CalcFlags,
         models: &crate::types::AstroModels,
+        config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         match body {
             Body::Sun => crate::calc::calc_sun_sweph(
@@ -627,7 +684,7 @@ impl Ephemeris {
                 &self.planet_files,
                 &self.moon_files,
                 flags,
-                &self.config,
+                config,
                 models,
             ),
             Body::Moon => crate::calc::calc_moon_sweph(
@@ -635,7 +692,7 @@ impl Ephemeris {
                 &self.planet_files,
                 &self.moon_files,
                 flags,
-                &self.config,
+                config,
                 models,
             ),
             Body::Mercury
@@ -652,7 +709,7 @@ impl Ephemeris {
                 &self.moon_files,
                 eps_j2000,
                 flags,
-                &self.config,
+                config,
                 models,
             ),
             _ => Err(Error::EphemerisNotAvailable {
@@ -669,11 +726,12 @@ impl Ephemeris {
         eps_j2000: &crate::types::Epsilon,
         flags: CalcFlags,
         models: &crate::types::AstroModels,
+        config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         let file = self.jpl_file.as_ref().unwrap();
         match body {
-            Body::Sun => crate::calc::calc_sun_jpl(jd_tt, file, flags, &self.config, models),
-            Body::Moon => crate::calc::calc_moon_jpl(jd_tt, file, flags, &self.config, models),
+            Body::Sun => crate::calc::calc_sun_jpl(jd_tt, file, flags, config, models),
+            Body::Moon => crate::calc::calc_moon_jpl(jd_tt, file, flags, config, models),
             Body::Mercury
             | Body::Venus
             | Body::Mars
@@ -681,15 +739,9 @@ impl Ephemeris {
             | Body::Saturn
             | Body::Uranus
             | Body::Neptune
-            | Body::Pluto => crate::calc::calc_planet_jpl(
-                jd_tt,
-                body,
-                file,
-                eps_j2000,
-                flags,
-                &self.config,
-                models,
-            ),
+            | Body::Pluto => {
+                crate::calc::calc_planet_jpl(jd_tt, body, file, eps_j2000, flags, config, models)
+            }
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Jpl,
@@ -697,13 +749,19 @@ impl Ephemeris {
         }
     }
 
-    fn calc_speed3(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
+    fn calc_speed3(
+        &self,
+        jd_tt: f64,
+        body: Body,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<CalcResult, Error> {
         let dt = crate::calc::speed3_interval(body);
         let inner_flags = flags & !CalcFlags::SPEED3;
 
-        let (mut x0, x2000_0, _) = self.calc_inner(jd_tt - dt, body, inner_flags)?;
-        let (mut x2, x2000_2, _) = self.calc_inner(jd_tt + dt, body, inner_flags)?;
-        let (mut x1, x2000_1, flags_used) = self.calc_inner(jd_tt, body, inner_flags)?;
+        let (mut x0, x2000_0, _) = self.calc_inner(jd_tt - dt, body, inner_flags, config)?;
+        let (mut x2, x2000_2, _) = self.calc_inner(jd_tt + dt, body, inner_flags, config)?;
+        let (mut x1, x2000_1, flags_used) = self.calc_inner(jd_tt, body, inner_flags, config)?;
 
         // Sidereal projection must be applied to each of the three points
         // BEFORE the 3-point derivative, matching C's `use_speed3`, which calls

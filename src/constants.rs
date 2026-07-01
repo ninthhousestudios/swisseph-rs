@@ -22,6 +22,10 @@ pub const PARSEC_TO_AUNIT: f64 = 206264.8062471;
 pub const LAPSE_RATE: f64 = 0.0065;
 pub const KM_S_TO_AU_CTY: f64 = 21.095;
 
+// Valid observer-altitude range for rise/set (sweph.h:198-199, SEI_ECL_GEOALT_MIN/_MAX), meters.
+pub const RISE_SET_GEOALT_MIN: f64 = -500.0;
+pub const RISE_SET_GEOALT_MAX: f64 = 25000.0;
+
 // ---------------------------------------------------------------------------
 // Unit conversions
 // ---------------------------------------------------------------------------

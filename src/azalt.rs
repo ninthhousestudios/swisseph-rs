@@ -166,10 +166,21 @@ fn calc_astronomical_refr(inalt: f64, atpress: f64, attemp: f64) -> f64 {
     ((atpress - 80.0) / 930.0 / (1.0 + 0.00008 * (r + 39.0) * (attemp - 10.0)) * r) / 60.0
 }
 
+/// Standard-atmosphere pressure (hPa) estimated from observer altitude (meters) via the
+/// barometric formula, reused whenever a caller passes `atpress == 0.0` as an "auto-estimate"
+/// sentinel (`azalt`, and the rise/set module's `calc_dip` sentinel handling).
+pub(crate) fn resolve_atpress(atpress: f64, geoalt: f64) -> f64 {
+    if atpress == 0.0 {
+        1013.25 * (1.0 - 0.0065 * geoalt / 288.0).powf(5.255)
+    } else {
+        atpress
+    }
+}
+
 /// Geometric + refractive dip of the horizon (swecl.c:3158-3169), degrees, negative for
 /// `geoalt > 0`. Does NOT auto-estimate `atpress` when `0` -- that estimate is the caller's
 /// (`azalt`'s) responsibility, not this helper's (see module docs / c-ref §7).
-fn calc_dip(geoalt: f64, atpress: f64, attemp: f64, lapse_rate: f64) -> f64 {
+pub(crate) fn calc_dip(geoalt: f64, atpress: f64, attemp: f64, lapse_rate: f64) -> f64 {
     let krefr = (0.0342 + lapse_rate) / (0.154 * 0.0238);
     let d = 1.0 - 1.8480 * krefr * atpress / (273.15 + attemp) / (273.15 + attemp);
     -180.0 / PI * (1.0 / (1.0 + geoalt / EARTH_RADIUS)).acos() * d.sqrt()
@@ -206,11 +217,7 @@ pub fn azalt(
     let azimuth = 360.0 - x[0];
     let true_alt = x[1];
 
-    let atpress = if atpress == 0.0 {
-        1013.25 * (1.0 - 0.0065 * geopos[2] / 288.0).powf(5.255)
-    } else {
-        atpress
-    };
+    let atpress = resolve_atpress(atpress, geopos[2]);
 
     let mut dret = [0.0; 4];
     let app_alt = refrac_extended(

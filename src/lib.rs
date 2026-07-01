@@ -21,6 +21,7 @@ pub mod nutation;
 pub mod obliquity;
 pub mod phenomena;
 pub mod precession;
+pub mod riseset;
 pub mod sidereal_time;
 pub mod stars;
 pub mod sweph_file;
@@ -28,8 +29,9 @@ pub mod topocentric;
 
 pub use context::{CalcResult, Ephemeris, EphemerisConfig, TopoPosition};
 pub use error::Error;
-pub use flags::CalcFlags;
+pub use flags::{CalcFlags, RiseSetFlags};
 pub use houses::{AscMc, HouseResult};
+pub use riseset::RiseSetResult;
 pub use stars::{Star, StarCatalog};
 pub use types::{
     AsteroidId, Body, CalendarType, CometId, DegreeParts, DeltaT, EphemerisSource, Epsilon,
