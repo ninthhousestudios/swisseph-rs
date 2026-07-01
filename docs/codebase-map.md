@@ -105,8 +105,27 @@ src/
 │                          own NONUT branch is unreachable through this entry point — the bug
 │                          that cost a debugging session before the C source was read directly).
 │                          Ephemeris::sol_eclipse_where in context.rs delegates (same wrapper
-│                          pattern as azalt/rise_trans). attr[]/eclipse_how land in RSE 6
-│                          (swisseph-rs/73).
+│                          pattern as azalt/rise_trans). EclipseHow (attr[0..10]: magnitude,
+│                          diameter_ratio, obscuration, core_diameter_km, azimuth, true_altitude,
+│                          apparent_altitude, elongation, nasa_magnitude, saros_series,
+│                          saros_member, flags); calc_planet_star_topo (calc_planet_star variant
+│                          threading a per-call topographic config override through the planet
+│                          branch only — stars have no TOPOCTR path yet, matching riseset.rs);
+│                          eclipse_how (swisseph-rs/73, local circumstances at an observer:
+│                          builds a topo_config clone with `config.topographic` set from
+│                          geolon/geolat/geohgt rather than mutating `self` — same pattern as
+│                          riseset.rs's `topo_config`; obscuration via the circular-segment
+│                          lens-area formula; Saros lookup against the 181-entry
+│                          SAROS_DATA_SOLAR table (swecl.c:107-298, ported verbatim as a
+│                          `[(i32, f64); 181]` const) with the literal j/j+1 boundary-scan loop,
+│                          not a simplified nearest-cycle formula); sol_eclipse_how (public
+│                          wrapper: geopos[2] altitude-range validation, CENTRAL/NONCENTRAL merge
+│                          from a second eclipse_where call, then a redundant topocentric az/alt
+│                          recompute whose apparent-altitude<=0 gate can zero the whole
+│                          classification — and attr[0..3]/attr[8..10] with it — while leaving
+│                          azimuth/true_altitude/apparent_altitude/elongation populated, matching
+│                          swe_sol_eclipse_how's own layered visibility override). Ephemeris::
+│                          sol_eclipse_how in context.rs delegates.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -171,8 +190,13 @@ tests/
 │                          (CENTRAL|TOTAL, CENTRAL|ANNULAR ×2, one with NONUT set to confirm it's
 │                          masked away same as C) + a plain-noon no-eclipse epoch; asserts
 │                          central_longitude/central_latitude/core_diameter_km eps 1e-7 + exact
-│                          retval flags bitmask; attr[] beyond dcore[0] needs eclipse_how,
-│                          swisseph-rs/73, not asserted here)
+│                          retval flags bitmask; sol_how: 8 cases — the same 4 sol_where epochs
+│                          (incl. the no-eclipse epoch, exercising the horizon-visibility
+│                          clearing path) × 2 observers (8.55,47.37,500 near-central;
+│                          -100.0,40.0,0 off-track), asserts all 11 attr[] fields
+│                          (magnitude/diameter_ratio/obscuration/core_diameter_km/azimuth/
+│                          true_altitude/apparent_altitude/elongation/nasa_magnitude/
+│                          saros_series/saros_member) eps 1e-7 + exact retval flags bitmask)
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -241,8 +265,9 @@ tests/
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
-│   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key;
-│                          later RSE tasks 6-12 add more keys to this same file)
+│   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key)
+│                          and swe_sol_eclipse_how (sol_how key); later RSE tasks 7-12 add more
+│                          keys to this same file
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -264,7 +289,9 @@ tests/
     ├── gen_eclipse.c   — C harness to regenerate eclipse.json (swe_sol_eclipse_where: 3 known
     │                       central eclipses at their real maximum-eclipse UT instants + 1
     │                       no-eclipse epoch, one case with SEFLG_NONUT to confirm it's masked
-    │                       away by swe_sol_eclipse_where's own `ifl &= SEFLG_EPHMASK`)
+    │                       away by swe_sol_eclipse_where's own `ifl &= SEFLG_EPHMASK`;
+    │                       swe_sol_eclipse_how: the same 4 epochs × 2 observers (near-central
+    │                       and off-track))
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

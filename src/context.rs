@@ -554,14 +554,26 @@ impl Ephemeris {
 
     /// Solar eclipse shadow geometry: geographic position of greatest eclipse + core/penumbra
     /// shadow diameters, geocentric. Port of `swe_sol_eclipse_where`'s shadow-geometry pass
-    /// (`eclipse_where`, swecl.c:565-582, 640-886); local-circumstance attributes (`attr[]`, via
-    /// `eclipse_how`) land in a later task (RSE 6, swisseph-rs/73).
+    /// (`eclipse_where`, swecl.c:565-582, 640-886); local-circumstance attributes (`attr[]`) come
+    /// from [`Ephemeris::sol_eclipse_how`] instead.
     pub fn sol_eclipse_where(
         &self,
         tjd_ut: f64,
         ifl: CalcFlags,
     ) -> Result<crate::eclipse::EclipseWhere, Error> {
         crate::eclipse::sol_eclipse_where(self, tjd_ut, ifl)
+    }
+
+    /// Local circumstances of a solar eclipse at a specific observer: magnitude, obscuration,
+    /// contact geometry, azimuth/altitude. Port of `swe_sol_eclipse_how` (swecl.c:922-964).
+    /// `geopos` = [longitude, latitude, height above sea (m)], degrees/degrees/meters.
+    pub fn sol_eclipse_how(
+        &self,
+        tjd_ut: f64,
+        ifl: CalcFlags,
+        geopos: [f64; 3],
+    ) -> Result<crate::eclipse::EclipseHow, Error> {
+        crate::eclipse::sol_eclipse_how(self, tjd_ut, ifl, geopos)
     }
 
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic

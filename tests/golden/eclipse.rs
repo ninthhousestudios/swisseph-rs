@@ -12,8 +12,17 @@ struct SolWhereCase {
 }
 
 #[derive(Deserialize)]
+struct SolHowCase {
+    tjd_ut: f64,
+    geopos: [f64; 3],
+    retval: i32,
+    attr: [f64; 11],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
+    sol_how: Vec<SolHowCase>,
 }
 
 fn load() -> GoldenData {
@@ -114,6 +123,91 @@ fn sol_where() {
             &format!("{label}.cos_penumbra_half_angle"),
             c.dcore[6],
             result.cos_penumbra_half_angle,
+            1e-7,
+        );
+    }
+}
+
+/// `swe_sol_eclipse_how` (`Ephemeris::sol_eclipse_how`): local circumstances (magnitude,
+/// obscuration, contact geometry, az/alt, NASA magnitude, Saros series/member) at an observer.
+/// Same epochs as `sol_where` (incl. the no-eclipse epoch, exercising the horizon-visibility /
+/// "no eclipse here" clearing path) crossed with a near-central and an off-track observer.
+#[test]
+fn sol_how() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.sol_how.iter().enumerate() {
+        let label = format!("sol_how[{i}][tjd_ut={},geopos={:?}]", c.tjd_ut, c.geopos);
+        let result = ephe
+            .sol_eclipse_how(c.tjd_ut, CalcFlags::MOSEPH, c.geopos)
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.magnitude"),
+            c.attr[0],
+            result.magnitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.diameter_ratio"),
+            c.attr[1],
+            result.diameter_ratio,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.obscuration"),
+            c.attr[2],
+            result.obscuration,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.core_diameter_km"),
+            c.attr[3],
+            result.core_diameter_km,
+            1e-7,
+        );
+        super::assert_f64_eps(&format!("{label}.azimuth"), c.attr[4], result.azimuth, 1e-7);
+        super::assert_f64_eps(
+            &format!("{label}.true_altitude"),
+            c.attr[5],
+            result.true_altitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.apparent_altitude"),
+            c.attr[6],
+            result.apparent_altitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.elongation"),
+            c.attr[7],
+            result.elongation,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.nasa_magnitude"),
+            c.attr[8],
+            result.nasa_magnitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.saros_series"),
+            c.attr[9],
+            result.saros_series,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.saros_member"),
+            c.attr[10],
+            result.saros_member,
             1e-7,
         );
     }
