@@ -93,8 +93,16 @@ provenance = "checkpoint:swisseph-rs/8"
 # below are now live. Target globs corrected from the original "src/jpl.rs" /
 # "src/sweph_file.rs" single-file form to the directory globs "src/jpl/**" /
 # "src/sweph_file/**" (both became directories at swisseph-rs/8/43), matching the
-# active stars/ayanamsa constraints. eclipse/phenomena/heliacal remain commented
-# below — still empty stubs, would be inert dead_constraints.
+# active stars/ayanamsa constraints.
+#
+# ACTIVATED 2026-07-01 — eclipse (swisseph-rs/12 → /68–79, Phase 11): the
+# rise/set + eclipse + occultation port begins this phase, so eclipse.rs gets
+# real code (RSE 5/12, swisseph-rs/72). The three eclipse→backend constraints
+# below are now live, globs corrected to the directory form (src/jpl/**,
+# src/sweph_file/**). phenomena/heliacal remain commented — still empty stubs
+# (Phase 13/14), would be inert dead_constraints. The two NEW app modules this
+# phase, azalt.rs and riseset.rs, don't exist on disk yet; their constraints are
+# staged as deferred entries further below (uncomment when RSE 2/3 land).
 [[constraint]]
 kind = "forbidden_dep"
 name = "app-uses-calc-not-backends:houses→moshier"
@@ -119,27 +127,82 @@ to = "src/sweph_file/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
 
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:eclipse→moshier"
+from = "src/eclipse.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:eclipse→jpl"
+from = "src/eclipse.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:eclipse→sweph"
+from = "src/eclipse.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+# TRIGGER: uncomment when RSE 2/12 (swisseph-rs/69) lands src/azalt.rs with real
+# code. azalt = horizontal-coordinate transforms; goes through Ephemeris/calc and
+# shared math, never a backend directly. (Staged 2026-07-01, Phase 11 planning;
+# file does not exist yet, so binding now would be an inert dead_constraint.)
 # [[constraint]]
 # kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:eclipse→moshier"
-# from = "src/eclipse.rs"
+# name = "app-uses-calc-not-backends:azalt→moshier"
+# from = "src/azalt.rs"
 # to = "src/moshier/**"
 # severity = "blocking"
 # provenance = "yojana:swisseph-rs §module-tree"
 
 # [[constraint]]
 # kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:eclipse→jpl"
-# from = "src/eclipse.rs"
-# to = "src/jpl.rs"
+# name = "app-uses-calc-not-backends:azalt→jpl"
+# from = "src/azalt.rs"
+# to = "src/jpl/**"
 # severity = "blocking"
 # provenance = "yojana:swisseph-rs §module-tree"
 
 # [[constraint]]
 # kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:eclipse→sweph"
-# from = "src/eclipse.rs"
-# to = "src/sweph_file.rs"
+# name = "app-uses-calc-not-backends:azalt→sweph"
+# from = "src/azalt.rs"
+# to = "src/sweph_file/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# TRIGGER: uncomment when RSE 3/12 (swisseph-rs/70) lands src/riseset.rs with real
+# code. riseset calls calc_ut — a canonical app module that must go through calc,
+# not backends. (Staged 2026-07-01, Phase 11 planning; file does not exist yet.)
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:riseset→moshier"
+# from = "src/riseset.rs"
+# to = "src/moshier/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:riseset→jpl"
+# from = "src/riseset.rs"
+# to = "src/jpl/**"
+# severity = "blocking"
+# provenance = "yojana:swisseph-rs §module-tree"
+
+# [[constraint]]
+# kind = "forbidden_dep"
+# name = "app-uses-calc-not-backends:riseset→sweph"
+# from = "src/riseset.rs"
+# to = "src/sweph_file/**"
 # severity = "blocking"
 # provenance = "yojana:swisseph-rs §module-tree"
 
