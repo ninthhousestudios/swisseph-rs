@@ -12,7 +12,7 @@ src/
 ├── corrections.rs      — relativistic corrections: meff (lookup), aberr_light (Lorentz), deflect_light (GR bending)
 ├── flags.rs            — bitflags! structs: CalcFlags, SiderealBits, etc. (146 lines)
 ├── error.rs            — Error enum
-├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
+├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion, gauquelin_sector_geometric — swe_gauquelin_sector imeth 0/1 port: own ARMC/eps/nutation setup using the caller's flags directly (NOT houses_ex2's forced TIDAL_DEFAULT — swe_gauquelin_sector's C deltaT call genuinely carries the caller's ephemeris-source iflag), calc() the body, house_pos with hsys=Gauquelin; imeth 2-5 (rise/set) return Err, not yet ported), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
 ├── math.rs             — pure math functions: normalize, chebyshev, cartpol, cotrans, poly_eval
 ├── date.rs             — Julian Day ↔ calendar conversion, delta-T, UTC
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
@@ -25,6 +25,13 @@ src/
 │   ├── mod.rs          — router + 5 algorithms: IAU 1980, Herring 1987, IAU 2000A/B, Woolard
 │   └── data.rs         — generated nutation term tables (IAU 2000A, 2000B, 1980)
 ├── sidereal_time.rs    — swe_sidtime0/swe_sidtime port: 4 GMST models, 33-term EoE, long-term model
+│                          (sidtime_long_term, pre-1850/post-2050 dates) — its 2 internal deltaT
+│                          calls force TIDAL_DEFAULT via a local deltat_config override, matching
+│                          C's swe_deltat_ex(tjd, -1, NULL) sentinel (swephlib.c:3291,3301), which
+│                          always resolves SE_TIDAL_DEFAULT regardless of the actually-configured
+│                          ephemeris backend — the same deltaT/tid_acc-inconsistency pattern as
+│                          houses_ex2's; discovered via a gauquelin_sector golden-test mismatch at
+│                          1600/1800 AD epochs (swisseph-rs/66)
 ├── calc.rs             — calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut, extract_output, extract_ecl_nut, plaus_iflag, speed3_interval, denormalize_positions, calc_speed_3point: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline + SPEED3 helpers
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
@@ -59,7 +66,17 @@ src/
 │                          armc/eps then subtract ayanamsa from cusps/ascmc except armc; W routed
 │                          through Equal + re-fixed to 30° multiples; N re-fixed to (i-1)*30
 │                          unconditionally) — ayanamsa is passed in, kept pure; ECL_T0/SSY_PLANE
-│                          sidereal modes deferred (sub-task 9)
+│                          sidereal modes deferred (sub-task 9);
+│                          house_pos (swe_house_pos port: planet ecl.[lon,lat] → continuous house
+│                          position 1.0..13.0, all 25 HouseSystem variants incl. Alcabitius which
+│                          calc_h doesn't implement yet — house_pos's Alcabitius branch is
+│                          self-contained; Koch returns Err on circumpolar dfac-out-of-range;
+│                          Sunshine requires Some(sundec) in range or Err) — helpers:
+│                          armc_to_mc_house_pos (degnorm-before-and-after-+180 variant, distinct
+│                          from crate::math::armc_to_mc and mc_like — c-ref-houses.md §12.1),
+│                          mc_transform_raw (Morinus's un-normalized tand/cose transform),
+│                          bracket_interpolate_12 (shared J/default fallback), koch_house_pos,
+│                          topocentric_house_pos, sunshine_apc_house_pos (shared I/i/Y formula)
 ├── eclipse.rs          — EMPTY stub
 ├── ayanamsa.rs         — EMPTY stub
 ├── heliacal.rs         — EMPTY stub
@@ -108,7 +125,16 @@ tests/
 │                         eps 1e-7 cusps/ascmc, 1e-6 speeds via Ephemeris::houses_ex2 (compounds
 │                         deltaT/obliquity/nutation/sidtime — looser than the pure-armc tests);
 │                         sidereal_trad: 9 cases, systems P/W/E × 3 triples, SEFLG_SIDEREAL +
-│                         Lahiri, same tolerances)
+│                         Lahiri, same tolerances; house_pos: 150 cases, all 25 house-system chars
+│                         × 2 armc/geolat/eps triples (1 temperate, 1 polar — armc=105/geolat=67
+│                         chosen so 2/3 xpin succeed and 1/3 hits Koch's genuine hpos==0 circumpolar
+│                         failure) × 3 xpin, eps 1e-7 hpos, "err" cases (1: Koch) assert Err instead
+│                         (err is driven by hpos==0.0, not serr non-empty — several systems set an
+│                         informational serr on a valid nonzero hpos); gauquelin_sector: 36 cases,
+│                         6 (tjd_ut,ipl,imeth) combos × 3 bodies (Sun/Moon/Mars) × 2 imeth, eps 1e-6
+│                         dgsect via Ephemeris::gauquelin_sector_geometric — this test caught a
+│                         pre-existing sidtime_long_term deltaT/tid_acc bug at 1600/1800 AD epochs,
+│                         fixed in sidereal_time.rs (see that file's codebase-map entry))
 ├── golden-data/
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
@@ -127,7 +153,7 @@ tests/
 │   ├── sweph_eval.json — C-generated reference data for evaluate_body (raw Chebyshev eval + rot_back + ecl→equ rotation)
 │   ├── jpl_pleph.json  — C-generated reference data for jpl_pleph (84 cases via swi_pleph against de441.eph)
 │   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
-│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback; ut_wrapper key: swe_houses_ex2 (UT-based) over 6 (tjd_ut,geolat,geolon) triples × 6 systems, + a SEFLG_NONUT variant at 1 triple; sidereal_trad key: swe_houses_ex2 with SEFLG_SIDEREAL + swe_set_sid_mode(SE_SIDM_LAHIRI) over 3 triples × 3 systems P/W/E)
+│   └── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback; ut_wrapper key: swe_houses_ex2 (UT-based) over 6 (tjd_ut,geolat,geolon) triples × 6 systems, + a SEFLG_NONUT variant at 1 triple; sidereal_trad key: swe_houses_ex2 with SEFLG_SIDEREAL + swe_set_sid_mode(SE_SIDM_LAHIRI) over 3 triples × 3 systems P/W/E; house_pos key: swe_house_pos over all 25 house-system chars × 2 (armc,geolat,eps) triples × 3 xpin, "err" field is hpos==0.0 (Koch's real failure sentinel), NOT serr-non-empty (P/G/J/L/Q/default set an informational serr on valid results) — the static sundec cache 'I'/'i' need is primed via a preceding swe_houses_armc_ex2(ascmc[9]=sundec) call; gauquelin_sector key: swe_gauquelin_sector imeth∈{0,1} over 6 ut_triples × 3 bodies (Sun/Moon/Mars))
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
@@ -149,7 +175,11 @@ tests/
                             closed_form_misc, sunshine — sunshine key sets ascmc[9]=sundec before
                             calling, per c-ref-houses.md §11; ut_wrapper/sidereal_trad keys use
                             swe_houses_ex2 (UT-based) instead, over a 6-triple
-                            (tjd_ut,geolat,geolon) battery)
+                            (tjd_ut,geolat,geolon) battery; house_pos key: swe_house_pos over all
+                            25 house-system chars, primes the 'I'/'i' static sundec cache via a
+                            swe_houses_armc_ex2(ascmc[9]=sundec) call immediately before each
+                            swe_house_pos call; gauquelin_sector key: swe_gauquelin_sector
+                            imeth∈{0,1} reusing the ut_wrapper triples × 3 bodies)
 ```
 
 ## Key Types in types.rs

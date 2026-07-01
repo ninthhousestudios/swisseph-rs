@@ -353,6 +353,59 @@ impl Ephemeris {
         Ok(result)
     }
 
+    /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
+    /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
+    /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`
+    /// (from rise/set times) depend on the not-yet-ported rise/trans module and return `Err`.
+    /// See docs/c-ref-houses.md §10.
+    ///
+    /// Unlike [`Ephemeris::houses_ex2`], the deltaT/obliquity/nutation resolution here follows
+    /// `swe_deltat_ex(t_ut, iflag, ...)`'s actual C behavior: it uses the caller's `flags`
+    /// (ephemeris source and all), not a forced `TIDAL_DEFAULT` override — that override is
+    /// specific to `swe_houses_ex2`'s own deltaT call site, not this one.
+    pub fn gauquelin_sector_geometric(
+        &self,
+        t_ut: f64,
+        body: Body,
+        imeth: i32,
+        flags: CalcFlags,
+        geolon: f64,
+        geolat: f64,
+    ) -> Result<f64, Error> {
+        use crate::constants::RADTODEG;
+        use crate::types::HouseSystem;
+
+        if !(0..=1).contains(&imeth) {
+            return Err(Error::CError(
+                "gauquelin rise/set methods need rise_trans (not ported)".into(),
+            ));
+        }
+
+        let models = &self.config.astro_models;
+        let t_et = t_ut + crate::deltat::calc_deltat(t_ut, &self.config);
+        let eps = crate::obliquity::obliquity(t_et, flags, models).eps * RADTODEG;
+        let nut = crate::nutation::nutation(t_et, flags, models);
+        let dpsi_deg = nut.dpsi * RADTODEG;
+        let deps_deg = nut.deps * RADTODEG;
+        let eps_true = eps + deps_deg;
+        let armc = crate::math::normalize_degrees(
+            crate::sidereal_time::sidereal_time0(t_ut, eps_true, dpsi_deg, &self.config) * 15.0
+                + geolon,
+        );
+
+        let x0 = self.calc(t_et, body, flags)?;
+        let lat = if imeth == 1 { 0.0 } else { x0.data[1] };
+
+        crate::houses::house_pos(
+            armc,
+            geolat,
+            eps_true,
+            HouseSystem::Gauquelin,
+            [x0.data[0], lat],
+            None,
+        )
+    }
+
     fn extract_for_body(xreturn: &[f64; 24], body: Body, flags: CalcFlags) -> [f64; 6] {
         if body == Body::EclipticNutation {
             crate::calc::extract_ecl_nut(

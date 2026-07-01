@@ -156,7 +156,18 @@ fn gmst_era(tjd_ut: f64, config: &EphemerisConfig) -> f64 {
 fn sidtime_long_term(tjd_ut: f64, eps: f64, nut: f64, config: &EphemerisConfig) -> f64 {
     let flags = CalcFlags::empty();
     let models = &config.astro_models;
-    let tjd_et = tjd_ut + calc_deltat(tjd_ut, config);
+    // C's sidtime_long_term (swephlib.c:3291, 3301) resolves both of its deltaT calls via
+    // swe_deltat_ex(tjd, -1, NULL) -- the `-1` sentinel forces SE_TIDAL_DEFAULT, independent of
+    // whatever ephemeris source is actually configured (swi_get_tid_acc's iflag=0/denum=9999
+    // path falls straight to the `default:` case). Force the same override here — same
+    // deltaT-tid_acc-inconsistency pattern already documented for swe_houses_ex2 (see
+    // Ephemeris::houses_ex2's `deltat_config`).
+    let deltat_config = {
+        let mut c = config.clone();
+        c.tidal_acceleration = Some(TIDAL_DEFAULT);
+        c
+    };
+    let tjd_et = tjd_ut + calc_deltat(tjd_ut, &deltat_config);
     let t = (tjd_et - J2000) / 365250.0;
     let t2 = t * t;
     let t3 = t * t2;
@@ -167,7 +178,7 @@ fn sidtime_long_term(tjd_ut: f64, eps: f64, nut: f64, config: &EphemerisConfig) 
 
     let mut xs = polar_to_cartesian([dlon * DEGTORAD, 0.0, 1.0]);
 
-    let eps_j2000 = obliquity::obliquity(J2000 + calc_deltat(J2000, config), flags, models);
+    let eps_j2000 = obliquity::obliquity(J2000 + calc_deltat(J2000, &deltat_config), flags, models);
     xs = rotate_x(xs, -eps_j2000.eps);
 
     precession::precess(

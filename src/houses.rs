@@ -11,7 +11,6 @@ use crate::types::HouseSystem;
 
 const VERY_SMALL: f64 = 1e-10;
 const VERY_SMALL_PLAC_ITER: f64 = 1.0 / 360000.0;
-#[allow(dead_code)] // used by swe_house_pos (later sub-tasks)
 const MILLIARCSEC: f64 = 1.0 / 3600000.0;
 const SOLAR_YEAR: f64 = 365.242_198_93;
 const ARMCS: f64 = (SOLAR_YEAR + 1.0) / SOLAR_YEAR * 360.0;
@@ -200,8 +199,7 @@ fn apc_sector(n: i32, ph: f64, e: f64, az: f64) -> f64 {
 }
 
 /// Keeps the Ascendant on the eastern hemisphere near the poles. Port of `fix_asc_polar`
-/// (swehouse.c:2169-2177). Used by `swe_house_pos`, ported in a later sub-task.
-#[allow(dead_code)]
+/// (swehouse.c:2169-2177).
 fn fix_asc_polar(asc: f64, armc: f64, eps: f64, geolat: f64) -> f64 {
     let demc = atand(sind(armc) * tand(eps));
     let mut asc = asc;
@@ -1538,4 +1536,598 @@ pub fn sidereal_houses_trad(
     result.ascmc.polar_ascendant = normalize_degrees(result.ascmc.polar_ascendant - ayanamsa);
 
     Ok(result)
+}
+
+// ---------------------------------------------------------------------------
+// swe_house_pos — planet house position (swehouse.c:2216-2876)
+// ---------------------------------------------------------------------------
+
+/// Static `armc_to_mc` used by [`house_pos`]'s A/E/D/V/W and O/B/S branches
+/// (swehouse.c:2149-2166): normalizes the raw `atand` result *before* the conditional `+180`,
+/// then again after. A distinct bit pattern from `crate::math::armc_to_mc` (`swi_armc_to_mc`,
+/// which normalizes only once, unconditionally, at the end) and from `mc_like` (`CalcH`'s inline
+/// MC, which normalizes once unconditionally without the pre-normalize step) — see
+/// c-ref-houses.md §12.1.
+fn armc_to_mc_house_pos(armc: f64, eps: f64) -> f64 {
+    let cose = cosd(eps);
+    if (armc - 90.0).abs() > VERY_SMALL && (armc - 270.0).abs() > VERY_SMALL {
+        let tant = tand(armc);
+        let mut mc = normalize_degrees(atand(tant / cose));
+        if armc > 90.0 && armc <= 270.0 {
+            mc = normalize_degrees(mc + 180.0);
+        }
+        mc
+    } else if (armc - 90.0).abs() <= VERY_SMALL {
+        90.0
+    } else {
+        270.0
+    }
+}
+
+/// Morinus's inline `tand(a)/cose` transform on the planet's own ecliptic longitude
+/// (swehouse.c:2378-2390) — normalizes only inside the `+180` branch, unlike
+/// [`armc_to_mc_house_pos`]'s pre-normalize step. Same shape as `swi_armc_to_mc`, just inlined
+/// under a different case label with a different input.
+fn mc_transform_raw(a: f64, cose: f64) -> f64 {
+    if (a - 90.0).abs() > VERY_SMALL && (a - 270.0).abs() > VERY_SMALL {
+        let tant = tand(a);
+        let mut hpos = atand(tant / cose);
+        if a > 90.0 && a <= 270.0 {
+            hpos = normalize_degrees(hpos + 180.0);
+        }
+        hpos
+    } else if (a - 90.0).abs() <= VERY_SMALL {
+        90.0
+    } else {
+        270.0
+    }
+}
+
+/// Bracket-and-interpolate a value against a 12-entry house-cusp table, handling both prograde
+/// and retrograde cusp ordering (the `swe_difdeg2n(hcusp[6], hcusp[1])` sign test). Shared by the
+/// `'J'` (Savard-A) branch and the `default:` fallback (`'L'`/`'Q'`) of `swe_house_pos`
+/// (swehouse.c:2503-2531, 2842-2864). Returns the final house position directly — unlike most
+/// other branches, this result is NOT divided by 30 afterward; the interpolation already accounts
+/// for each house's (possibly non-uniform) angular span.
+fn bracket_interpolate_12(hcusp: &[f64; 37], value: f64) -> f64 {
+    let retrograde = diff_degrees(hcusp[6], hcusp[1]) <= 0.0;
+    let mut i = 1usize;
+    let mut c2 = 360.0;
+    let d = if retrograde {
+        normalize_degrees(hcusp[1] - value)
+    } else {
+        normalize_degrees(value - hcusp[1])
+    };
+    for k in 1..=12usize {
+        let j = k + 1;
+        c2 = if j > 12 {
+            360.0
+        } else if retrograde {
+            normalize_degrees(hcusp[1] - hcusp[j])
+        } else {
+            normalize_degrees(hcusp[j] - hcusp[1])
+        };
+        i = k;
+        if d < c2 {
+            break;
+        }
+    }
+    let c1 = if retrograde {
+        normalize_degrees(hcusp[1] - hcusp[i])
+    } else {
+        normalize_degrees(hcusp[i] - hcusp[1])
+    };
+    let hsize = c2 - c1;
+    if hsize == 0.0 {
+        i as f64
+    } else {
+        i as f64 + (d - c1) / hsize
+    }
+}
+
+/// Koch (`'K'`) inverse (swehouse.c:2398-2460): circumpolar-aware closed form. Can fail — returns
+/// `Err` (matching C's `hpos=0`/`serr="Koch house position failed in circumpolar area"` path)
+/// when the diurnal-arc factor falls outside `[0,2]`. The "doubtful result in circumpolar area"
+/// warning path (object or MC circumpolar but `dfac` still in range) is not an error in C either;
+/// we don't surface it since `house_pos` has no separate warning channel.
+fn koch_house_pos(armc: f64, geolat: f64, eps: f64, mdd: f64, de: f64) -> Result<f64, Error> {
+    let adp = if 90.0 - geolat < de || -90.0 - geolat > de {
+        90.0
+    } else if geolat - 90.0 > de || geolat + 90.0 < de {
+        -90.0
+    } else {
+        asind(tand(geolat) * tand(de))
+    };
+    let mut admc = tand(eps) * tand(geolat) * sind(armc);
+    if admc.abs() > 1.0 {
+        admc = if admc > 1.0 { 1.0 } else { -1.0 };
+    }
+    admc = asind(admc);
+    let samc = 90.0 + admc;
+    let mut is_invalid = samc == 0.0;
+    let mut xp0 = 0.0;
+    if samc.abs() > 0.0 {
+        let dfac;
+        if mdd >= 0.0 {
+            dfac = (mdd - adp + admc) / samc;
+            xp0 = normalize_degrees((dfac - 1.0) * 90.0);
+        } else {
+            dfac = (mdd + 180.0 + adp + admc) / samc;
+            xp0 = normalize_degrees((dfac + 1.0) * 90.0);
+        }
+        xp0 = normalize_degrees(xp0 + MILLIARCSEC);
+        if !(0.0..=2.0).contains(&dfac) {
+            is_invalid = true;
+        }
+    }
+    if is_invalid {
+        return Err(Error::CError(
+            "Koch house position failed in circumpolar area".into(),
+        ));
+    }
+    Ok(xp0 / 30.0 + 1.0)
+}
+
+/// Polich/Page "topocentric" (`'T'`) inverse (swehouse.c:2745-2801): binary search on the pole
+/// height, distinct from `CalcH`'s Newton loops for the same system. Mirrors below-horizon and
+/// western-hemisphere points into the canonical quadrant first, then mirrors the result back.
+fn topocentric_house_pos(armc: f64, geolat: f64, ra: f64, de: f64, mdd: f64) -> f64 {
+    let mut fh = geolat.clamp(-89.999, 89.999);
+    let mut mdd = normalize_degrees(mdd);
+    let mut de = de.clamp(-90.0 + VERY_SMALL, 90.0 - VERY_SMALL);
+    let sinad = (tand(de) * tand(fh)).clamp(-1.0, 1.0);
+    let is_above_hor = sinad + cosd(mdd) >= 0.0;
+    let mut ra = ra;
+    if !is_above_hor {
+        ra = normalize_degrees(ra + 180.0);
+        de = -de;
+        mdd = normalize_degrees(mdd + 180.0);
+    }
+    if mdd > 180.0 {
+        ra = normalize_degrees(armc - mdd);
+    }
+    let tanfi = tand(fh);
+    let mut ra0 = normalize_degrees(armc + 90.0);
+    let mut xp1 = 1.0f64;
+    let mut fac = 2.0f64;
+    let mut nloop = 0;
+    while xp1.abs() > 0.000_001 && nloop < 1000 {
+        if xp1 > 0.0 {
+            fh = atand(tand(fh) - tanfi / fac);
+            ra0 -= 90.0 / fac;
+        } else {
+            fh = atand(tand(fh) + tanfi / fac);
+            ra0 += 90.0 / fac;
+        }
+        let xeq0 = normalize_degrees(ra - ra0);
+        let xp = cotrans([xeq0, de, 1.0], 90.0 - fh);
+        xp1 = xp[1];
+        fac *= 2.0;
+        nloop += 1;
+    }
+    let mut hpos = normalize_degrees(ra0 - armc);
+    if mdd > 180.0 {
+        hpos = normalize_degrees(-hpos);
+    }
+    if !is_above_hor {
+        hpos = normalize_degrees(hpos + 180.0);
+    }
+    normalize_degrees(hpos - 90.0) / 30.0 + 1.0
+}
+
+/// Shared Sunshine (`'I'`/`'i'`)/APC (`'Y'`) geometric-approximation inverse
+/// (swehouse.c:2650-2744). `dsun` is the Sun's declination for Sunshine, or the ascendant's
+/// declination for APC. Seeds a Regiomontanus-style position line, then solves for where it
+/// crosses the relevant body's (Sun or ascendant) diurnal/nocturnal semiarc.
+fn sunshine_apc_house_pos(mdd: f64, de: f64, geolat: f64, dsun: f64) -> f64 {
+    let geolat = geolat.clamp(-90.0 + MILLIARCSEC, 90.0 - MILLIARCSEC);
+    let mut de = de;
+    if 90.0 - de.abs() < VERY_SMALL {
+        de = if de > 0.0 {
+            90.0 - VERY_SMALL
+        } else {
+            -90.0 + VERY_SMALL
+        };
+    }
+    let a = tand(geolat) * tand(de) + cosd(mdd);
+    let mut xp0 = normalize_degrees(atand(-a / sind(mdd)));
+    if mdd < 0.0 {
+        xp0 += 180.0;
+    }
+    xp0 = normalize_degrees(xp0);
+    let sinad = tand(de) * tand(geolat);
+    let is_above_hor = sinad + cosd(mdd) >= 0.0;
+    let harmc = if geolat < 0.0 {
+        90.0 + geolat
+    } else {
+        90.0 - geolat
+    };
+    let mut darmc = normalize_degrees(xp0 - 270.0);
+    let mut is_western_half = false;
+    if darmc > 180.0 {
+        is_western_half = true;
+        darmc = 360.0 - darmc;
+    }
+    let sinad2 = tand(dsun) * tand(geolat);
+    let ad = if sinad2 >= 1.0 {
+        90.0
+    } else if sinad2 <= -1.0 {
+        -90.0
+    } else {
+        asind(sinad2)
+    };
+    let sad = 90.0 + ad;
+    let san = 90.0 - ad;
+    if sad == 0.0 && is_above_hor {
+        xp0 = 270.0;
+    } else if san == 0.0 && !is_above_hor {
+        xp0 = 90.0;
+    } else {
+        let mut dsun = dsun;
+        let mut sa = sad;
+        if !is_above_hor {
+            dsun = -dsun;
+            sa = san;
+            darmc = 180.0 - darmc;
+            is_western_half = !is_western_half;
+        }
+        let mut a = acosd(cosd(harmc) * cosd(darmc));
+        if a < VERY_SMALL {
+            a = VERY_SMALL;
+        }
+        let sinpsi = (sind(harmc) / sind(a)).clamp(-1.0, 1.0);
+        let y = sind(dsun) / sinpsi;
+        let y = if y > 1.0 {
+            90.0 - VERY_SMALL
+        } else if y < -1.0 {
+            -(90.0 - VERY_SMALL)
+        } else {
+            asind(y)
+        };
+        let mut d = acosd(cosd(y) / cosd(dsun));
+        if dsun < 0.0 {
+            d = -d;
+        }
+        if geolat < 0.0 {
+            d = -d;
+        }
+        darmc += d;
+        xp0 = if is_western_half {
+            270.0 - (darmc / sa) * 90.0
+        } else {
+            270.0 + (darmc / sa) * 90.0
+        };
+        if !is_above_hor {
+            xp0 = normalize_degrees(xp0 + 180.0);
+        }
+    }
+    xp0 = normalize_degrees(xp0 + MILLIARCSEC);
+    xp0 / 30.0 + 1.0
+}
+
+/// Inverse problem: given `(armc, geolat, eps, hsys, xpin=[ecl.lon, ecl.lat])`, return a
+/// continuous house position `1.0..13.0`. Port of `swe_house_pos` (swehouse.c:2216-2876). See
+/// c-ref-houses.md §8.
+///
+/// Stateless departure from C: Sunshine's Sun declination and APC's ascendant declination are
+/// resolved explicitly (`sundec` parameter / the pre-check's own `houses_armc` call) rather than
+/// via C's `ascmc[9]==99` sentinel + `static double saved_sundec` cache (c-ref-houses.md §11).
+/// Sunshine requires a valid `sundec` and returns `Err` rather than silently falling back to a
+/// stale or zero value.
+pub fn house_pos(
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    hsys: HouseSystem,
+    xpin: [f64; 2],
+    sundec: Option<f64>,
+) -> Result<f64, Error> {
+    let sine = sind(eps);
+    let cose = cosd(eps);
+
+    // Pre-check (swehouse.c:2231-2266): does xpin exactly match a cusp? Also the only source of
+    // the ascendant needed for APC's declination-of-ascendant `dsun`. Best-effort: if `hsys` has
+    // no `houses_armc` support yet (currently only Alcabitius), the shortcut/APC path is simply
+    // unavailable here — matches C, which doesn't abort the whole call on this step's failure
+    // either (it just skips the shortcut and proceeds into the switch with dsun=0).
+    let precheck = houses_armc(armc, geolat, eps, hsys, sundec).ok();
+    if let Some(ref r) = precheck {
+        for i in 1..=12usize {
+            if diff_degrees(xpin[0], r.cusps[i]).abs() < MILLIARCSEC && xpin[1] == 0.0 {
+                return Ok(i as f64);
+            }
+        }
+    }
+
+    let xeq = cotrans([xpin[0], xpin[1], 1.0], -eps);
+    let ra = xeq[0];
+    let de = xeq[1];
+    let mdd_raw = normalize_degrees(ra - armc);
+    let mdn_raw = normalize_degrees(mdd_raw + 180.0);
+    let mdd = if mdd_raw >= 180.0 {
+        mdd_raw - 360.0
+    } else {
+        mdd_raw
+    };
+    let mdn = if mdn_raw >= 180.0 {
+        mdn_raw - 360.0
+    } else {
+        mdn_raw
+    };
+
+    let dsun = match hsys {
+        HouseSystem::Sunshine | HouseSystem::SunshineAlt => match sundec {
+            Some(d) if (-24.0..=24.0).contains(&d) => d,
+            _ => {
+                return Err(Error::CError(
+                    "House system Sunshine needs valid Sun declination".into(),
+                ));
+            }
+        },
+        HouseSystem::APC => {
+            let asc = precheck
+                .as_ref()
+                .map(|r| r.ascmc.ascendant)
+                .ok_or_else(|| {
+                    Error::CError("APC house position requires a computable ascendant".into())
+                })?;
+            cotrans([asc, 0.0, 1.0], -eps)[1]
+        }
+        _ => 0.0,
+    };
+
+    let hpos = match hsys {
+        HouseSystem::EqualAries => xpin[0] / 30.0 + 1.0,
+        HouseSystem::Equal
+        | HouseSystem::EqualMC
+        | HouseSystem::Vehlow
+        | HouseSystem::WholeSign => {
+            let mut asc = asc1(normalize_degrees(armc + 90.0), geolat, sine, cose);
+            let mc = armc_to_mc_house_pos(armc, eps);
+            asc = fix_asc_polar(asc, armc, eps, geolat);
+            let mut xp0 = normalize_degrees(xpin[0] - asc);
+            if hsys == HouseSystem::Vehlow {
+                xp0 = normalize_degrees(xp0 + 15.0);
+            }
+            if hsys == HouseSystem::WholeSign {
+                xp0 = normalize_degrees(xp0 + asc % 30.0);
+            }
+            if hsys == HouseSystem::EqualMC {
+                xp0 = normalize_degrees(xpin[0] - mc - 90.0);
+            }
+            xp0 = normalize_degrees(xp0 + MILLIARCSEC);
+            xp0 / 30.0 + 1.0
+        }
+        HouseSystem::Porphyry | HouseSystem::Sripati | HouseSystem::Alcabitius => {
+            let asc = fix_asc_polar(
+                asc1(normalize_degrees(armc + 90.0), geolat, sine, cose),
+                armc,
+                eps,
+                geolat,
+            );
+            if hsys == HouseSystem::Alcabitius {
+                let dek = asind(sind(asc) * sine);
+                let tanfi = tand(geolat);
+                let r = -tanfi * tand(dek);
+                let sda = acosd(r);
+                let sna = 180.0 - sda;
+                let mut hpos = if mdd > 0.0 {
+                    if mdd < sda {
+                        mdd * 90.0 / sda
+                    } else {
+                        90.0 + (mdd - sda) * 90.0 / sna
+                    }
+                } else if mdd > -sna {
+                    360.0 + mdd * 90.0 / sna
+                } else {
+                    270.0 + (mdd + sna) * 90.0 / sda
+                };
+                hpos = normalize_degrees(hpos - 90.0) / 30.0 + 1.0;
+                if hpos >= 13.0 {
+                    hpos -= 12.0;
+                }
+                hpos
+            } else {
+                let mc = armc_to_mc_house_pos(armc, eps);
+                let mut xp0 = normalize_degrees(xpin[0] - asc);
+                xp0 = normalize_degrees(xp0 + MILLIARCSEC);
+                let mut hpos;
+                if xp0 < 180.0 {
+                    hpos = 1.0;
+                } else {
+                    hpos = 7.0;
+                    xp0 -= 180.0;
+                }
+                let acmc = diff_degrees(asc, mc);
+                if xp0 < 180.0 - acmc {
+                    hpos += xp0 * 3.0 / (180.0 - acmc);
+                } else {
+                    hpos += 3.0 + (xp0 - 180.0 + acmc) * 3.0 / acmc;
+                }
+                if hsys == HouseSystem::Sripati {
+                    hpos += 0.5;
+                    if hpos > 12.0 {
+                        hpos = 1.0;
+                    }
+                }
+                hpos
+            }
+        }
+        HouseSystem::Meridian => normalize_degrees(mdd - 90.0) / 30.0 + 1.0,
+        HouseSystem::Carter => {
+            let mut x0 = asc1(normalize_degrees(armc + 90.0), geolat, sine, cose);
+            x0 = fix_asc_polar(x0, armc, eps, geolat);
+            let xeq0 = cotrans([x0, 0.0, 1.0], -eps);
+            normalize_degrees(ra - xeq0[0]) / 30.0 + 1.0
+        }
+        HouseSystem::Morinus => {
+            let hpos_mc = mc_transform_raw(xpin[0], cose);
+            normalize_degrees(hpos_mc - armc - 90.0) / 30.0 + 1.0
+        }
+        HouseSystem::Koch => koch_house_pos(armc, geolat, eps, mdd, de)?,
+        HouseSystem::Campanus => {
+            let xeq0 = normalize_degrees(mdd - 90.0);
+            let mut xp = cotrans([xeq0, de, 1.0], -geolat);
+            xp[0] = normalize_degrees(xp[0] + MILLIARCSEC);
+            xp[0] / 30.0 + 1.0
+        }
+        HouseSystem::Horizon => {
+            let xeq0 = normalize_degrees(mdd - 90.0);
+            let mut xp = cotrans([xeq0, de, 1.0], 90.0 - geolat);
+            xp[0] = normalize_degrees(xp[0] + MILLIARCSEC);
+            xp[0] / 30.0 + 1.0
+        }
+        HouseSystem::SavardA => {
+            let sinfi = sind(geolat);
+            let (mut xs2, mut xs1) = if geolat.abs() < VERY_SMALL {
+                (1.0 / 3.0, 2.0 / 3.0)
+            } else {
+                (sind(geolat / 3.0) / sinfi, sind(2.0 * geolat / 3.0) / sinfi)
+            };
+            xs2 = asind(xs2);
+            xs1 = asind(xs1);
+            let mut hcusp = [0.0; 37];
+            hcusp[1] = 0.0;
+            hcusp[2] = xs2;
+            hcusp[3] = xs1;
+            hcusp[4] = 90.0;
+            hcusp[5] = 180.0 - xs1;
+            hcusp[6] = 180.0 - xs2;
+            hcusp[7] = 180.0;
+            hcusp[8] = 180.0 + xs2;
+            hcusp[9] = 180.0 + xs1;
+            hcusp[10] = 270.0;
+            hcusp[11] = 360.0 - xs1;
+            hcusp[12] = 360.0 - xs2;
+            let xeq0 = normalize_degrees(mdd - 90.0);
+            let xp = cotrans([xeq0, de, 1.0], -geolat);
+            bracket_interpolate_12(&hcusp, xp[0])
+        }
+        HouseSystem::KrusinskiPisaGoelzer => {
+            let mut geolat = geolat;
+            if geolat.abs() < VERY_SMALL {
+                geolat = if geolat >= 0.0 {
+                    VERY_SMALL
+                } else {
+                    -VERY_SMALL
+                };
+            }
+            let mut asc = asc1(normalize_degrees(armc + 90.0), geolat, sine, cose);
+            asc = fix_asc_polar(asc, armc, eps, geolat);
+            // I. plane of the 'asc-zenith' great circle relative to the equator.
+            let mut x = cotrans([asc, 0.0, 1.0], -eps);
+            let raep = normalize_degrees(armc + 90.0);
+            x[0] = normalize_degrees(raep - x[0]);
+            x = cotrans(x, -(90.0 - geolat));
+            let tanx = tand(x[0]);
+            let mut xtemp = if geolat == 0.0 {
+                if tanx >= 0.0 { 90.0 } else { -90.0 }
+            } else {
+                atand(tanx / cosd(90.0 - geolat))
+            };
+            if x[0] > 90.0 && x[0] <= 270.0 {
+                xtemp = normalize_degrees(xtemp + 180.0);
+            }
+            x[0] = normalize_degrees(xtemp);
+            let raaz = normalize_degrees(raep - x[0]);
+            // Ib. obliquity to the equator of the house plane.
+            let mut xb = [raaz, 0.0, 1.0];
+            xb[0] = normalize_degrees(raep - xb[0]);
+            xb = cotrans(xb, -(90.0 - geolat));
+            xb[1] += 90.0;
+            xb = cotrans(xb, 90.0 - geolat);
+            let oblaz = xb[1];
+            // IIa. Asc on the house plane, relative to raaz.
+            let mut xasc = cotrans([asc, 0.0, 1.0], -eps);
+            xasc[0] = normalize_degrees(xasc[0] - raaz);
+            let mut xtemp2 = atand(tand(xasc[0]) / cosd(oblaz));
+            if xasc[0] > 90.0 && xasc[0] <= 270.0 {
+                xtemp2 = normalize_degrees(xtemp2 + 180.0);
+            }
+            xasc[0] = normalize_degrees(xtemp2);
+            // IIb. planet on the house plane, relative to raaz. (The declination-circle offset
+            // xp[1] that C computes next is vestigial — never read — so it's omitted here.)
+            let mut xp0 = normalize_degrees(ra - raaz);
+            let mut xtemp3 = atand(tand(xp0) / cosd(oblaz));
+            if xp0 > 90.0 && xp0 <= 270.0 {
+                xtemp3 = normalize_degrees(xtemp3 + 180.0);
+            }
+            xp0 = normalize_degrees(xtemp3);
+            xp0 = normalize_degrees(xp0 - xasc[0]);
+            xp0 = normalize_degrees(xp0 + MILLIARCSEC);
+            xp0 / 30.0 + 1.0
+        }
+        HouseSystem::Regiomontanus => {
+            let xp0 = if mdd.abs() < VERY_SMALL {
+                270.0
+            } else if 180.0 - mdd.abs() < VERY_SMALL {
+                90.0
+            } else {
+                let mut geolat = geolat;
+                if 90.0 - geolat.abs() < VERY_SMALL {
+                    geolat = if geolat > 0.0 {
+                        90.0 - VERY_SMALL
+                    } else {
+                        -90.0 + VERY_SMALL
+                    };
+                }
+                let mut de = de;
+                if 90.0 - de.abs() < VERY_SMALL {
+                    de = if de > 0.0 {
+                        90.0 - VERY_SMALL
+                    } else {
+                        -90.0 + VERY_SMALL
+                    };
+                }
+                let a = tand(geolat) * tand(de) + cosd(mdd);
+                let mut xp0 = normalize_degrees(atand(-a / sind(mdd)));
+                if mdd < 0.0 {
+                    xp0 += 180.0;
+                }
+                xp0 = normalize_degrees(xp0);
+                normalize_degrees(xp0 + MILLIARCSEC)
+            };
+            xp0 / 30.0 + 1.0
+        }
+        HouseSystem::Sunshine | HouseSystem::SunshineAlt | HouseSystem::APC => {
+            sunshine_apc_house_pos(mdd, de, geolat, dsun)
+        }
+        HouseSystem::PolichPage => topocentric_house_pos(armc, geolat, ra, de, mdd),
+        HouseSystem::Placidus | HouseSystem::Gauquelin => {
+            let mut xp0 = if 90.0 - de.abs() <= geolat.abs() {
+                if de * geolat < 0.0 {
+                    normalize_degrees(90.0 + mdn / 2.0)
+                } else {
+                    normalize_degrees(270.0 + mdd / 2.0)
+                }
+            } else {
+                let sinad = tand(de) * tand(geolat);
+                let ad = asind(sinad);
+                let is_above_hor = sinad + cosd(mdd) >= 0.0;
+                let sad = 90.0 + ad;
+                let san = 90.0 - ad;
+                let xp0 = if is_above_hor {
+                    (mdd / sad + 3.0) * 90.0
+                } else {
+                    (mdn / san + 1.0) * 90.0
+                };
+                normalize_degrees(xp0 + MILLIARCSEC)
+            };
+            if hsys == HouseSystem::Gauquelin {
+                xp0 = 360.0 - xp0;
+                xp0 / 10.0 + 1.0
+            } else {
+                xp0 / 30.0 + 1.0
+            }
+        }
+        HouseSystem::PullenSD | HouseSystem::PullenSR => {
+            let hcusp = match &precheck {
+                Some(r) => r.cusps,
+                None => houses_armc(armc, geolat, eps, hsys, sundec)?.cusps,
+            };
+            bracket_interpolate_12(&hcusp, xpin[0])
+        }
+    };
+
+    Ok(hpos)
 }

@@ -586,6 +586,111 @@ int main(void) {
             }
         }
     }
+    printf("\n  ],\n");
+
+    /* --- house_pos: swe_house_pos (planet -> continuous house position) across all house
+     * system chars, a couple of (armc, geolat, eps) triples (one temperate, one polar -- chosen
+     * to exercise Koch's genuine circumpolar-failure branch, confirmed by a targeted scan: at
+     * armc=105/geolat=67 two of the three xpin below succeed and one hits Koch's hpos=0
+     * sentinel), and a few planet positions. The static sundec cache used internally by 'I'/'i'
+     * (c-ref-houses.md S11) is primed via a swe_houses_armc_ex2 call with ascmc[9]=sundec set,
+     * immediately before each swe_house_pos call -- harmless for non-Sunshine systems.
+     *
+     * "err" is driven by hpos==0.0, NOT by serr being non-empty: several systems (P/G's "Otto
+     * Ludwig" circumpolar note, J/L/Q/default's "using simplified algorithm" note) set an
+     * informational serr on a perfectly valid, non-zero hpos. Koch's hpos==0.0 is the one
+     * genuine failure sentinel in this function -- no successful branch produces exactly 0.0. */
+    printf("  \"house_pos\": [\n");
+    first = 1;
+    {
+        static char hp_systems[] = {
+            'A', 'B', 'C', 'D', 'F', 'G', 'H', 'I', 'i', 'J', 'K', 'L', 'M', 'N',
+            'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y'
+        };
+        int n_hp_systems = sizeof(hp_systems) / sizeof(hp_systems[0]);
+        struct hp_triple { double armc, geolat, eps; };
+        struct hp_triple hp_triples[] = {
+            { 47.5,  51.5, 23.4392911 },
+            { 105.0, 67.0, 23.4392911 },
+        };
+        int n_hp_triples = sizeof(hp_triples) / sizeof(hp_triples[0]);
+        double hp_xpins[][2] = { { 10.0, 0.0 }, { 123.4, 2.5 }, { 280.0, -1.0 } };
+        int n_hp_xpins = sizeof(hp_xpins) / sizeof(hp_xpins[0]);
+        double sundec = 10.0;
+        int is3, it3, ix;
+
+        for (is3 = 0; is3 < n_hp_systems; is3++) {
+            char hsys = hp_systems[is3];
+            for (it3 = 0; it3 < n_hp_triples; it3++) {
+                double armc = hp_triples[it3].armc;
+                double geolat = hp_triples[it3].geolat;
+                double eps = hp_triples[it3].eps;
+                for (ix = 0; ix < n_hp_xpins; ix++) {
+                    double xpin[6];
+                    double hpos;
+                    int has_err;
+
+                    xpin[0] = hp_xpins[ix][0];
+                    xpin[1] = hp_xpins[ix][1];
+
+                    serr[0] = '\0';
+                    memset(cusp, 0, sizeof(cusp));
+                    memset(ascmc, 0, sizeof(ascmc));
+                    ascmc[9] = sundec;
+                    swe_houses_armc_ex2(armc, geolat, eps, hsys, cusp, ascmc, NULL, NULL, serr);
+
+                    serr[0] = '\0';
+                    hpos = swe_house_pos(armc, geolat, eps, hsys, xpin, serr);
+                    has_err = (hpos == 0.0);
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"hsys\": \"%c\", \"armc\": %.20e, \"geolat\": %.20e, \"eps\": %.20e, "
+                           "\"xpin\": [%.20e, %.20e], \"sundec\": %.20e, \"hpos\": %.20e, "
+                           "\"err\": %s}",
+                           hsys, armc, geolat, eps, xpin[0], xpin[1], sundec, hpos,
+                           has_err ? "true" : "false");
+                }
+            }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* --- gauquelin_sector: swe_gauquelin_sector, imeth in {0,1} (geometric, via house_pos 'G').
+     * imeth 2-5 (rise/set) depend on the not-yet-ported rise_trans module -- out of scope. */
+    printf("  \"gauquelin_sector\": [\n");
+    first = 1;
+    {
+        int gq_bodies[] = { SE_SUN, SE_MOON, SE_MARS };
+        int n_gq_bodies = sizeof(gq_bodies) / sizeof(gq_bodies[0]);
+        int it4, ib4, im4;
+
+        for (it4 = 0; it4 < N_UT_TRIPLE; it4++) {
+            for (ib4 = 0; ib4 < n_gq_bodies; ib4++) {
+                for (im4 = 0; im4 < 2; im4++) {
+                    double t_ut = ut_triples[it4].tjd_ut;
+                    double geopos[3];
+                    double dgsect;
+                    int32 retc;
+
+                    geopos[0] = ut_triples[it4].geolon;
+                    geopos[1] = ut_triples[it4].geolat;
+                    geopos[2] = 0.0;
+                    serr[0] = '\0';
+
+                    retc = swe_gauquelin_sector(t_ut, gq_bodies[ib4], NULL, SEFLG_MOSEPH,
+                                                 im4, geopos, 0, 0, &dgsect, serr);
+                    (void)retc;
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"tjd_ut\": %.20e, \"ipl\": %d, \"imeth\": %d, "
+                           "\"geolon\": %.20e, \"geolat\": %.20e, \"dgsect\": %.20e}",
+                           t_ut, gq_bodies[ib4], im4, geopos[0], geopos[1], dgsect);
+                }
+            }
+        }
+    }
     printf("\n  ]\n");
 
     printf("}\n");

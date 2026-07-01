@@ -109,6 +109,28 @@ struct SiderealTradCase {
 }
 
 #[derive(Deserialize)]
+struct HousePosCase {
+    hsys: String,
+    armc: f64,
+    geolat: f64,
+    eps: f64,
+    xpin: [f64; 2],
+    sundec: f64,
+    hpos: f64,
+    err: bool,
+}
+
+#[derive(Deserialize)]
+struct GauquelinSectorCase {
+    tjd_ut: f64,
+    ipl: i32,
+    imeth: i32,
+    geolon: f64,
+    geolat: f64,
+    dgsect: f64,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     angles_special: Vec<AnglesSpecialCase>,
     equal_family: Vec<EqualFamilyCase>,
@@ -120,6 +142,8 @@ struct GoldenData {
     sunshine: Vec<SunshineCase>,
     ut_wrapper: Vec<UtWrapperCase>,
     sidereal_trad: Vec<SiderealTradCase>,
+    house_pos: Vec<HousePosCase>,
+    gauquelin_sector: Vec<GauquelinSectorCase>,
 }
 
 fn load() -> GoldenData {
@@ -546,5 +570,62 @@ fn sidereal_trad() {
                 1e-6,
             );
         }
+    }
+}
+
+#[test]
+fn house_pos() {
+    let data = load();
+    assert_eq!(
+        data.house_pos.len(),
+        150,
+        "expected 150 golden cases (25 systems x 2 armc/geolat/eps triples x 3 xpin)"
+    );
+    for (i, c) in data.house_pos.iter().enumerate() {
+        let hsys = parse_hsys(&c.hsys);
+        let label = format!(
+            "case {i} ({} armc={:.6} geolat={:.6} eps={:.6} xpin=[{:.6},{:.6}])",
+            c.hsys, c.armc, c.geolat, c.eps, c.xpin[0], c.xpin[1]
+        );
+        let result =
+            swisseph::houses::house_pos(c.armc, c.geolat, c.eps, hsys, c.xpin, Some(c.sundec));
+        if c.err {
+            result
+                .err()
+                .unwrap_or_else(|| panic!("{label}: expected Err, got Ok"));
+        } else {
+            let hpos = result.unwrap_or_else(|e| panic!("{label}: house_pos failed: {e}"));
+            super::assert_f64_eps(&format!("{label} hpos"), c.hpos, hpos, 1e-7);
+        }
+    }
+}
+
+#[test]
+fn gauquelin_sector() {
+    let eph = Ephemeris::new(EphemerisConfig::default()).unwrap();
+    let data = load();
+    assert_eq!(
+        data.gauquelin_sector.len(),
+        36,
+        "expected 36 golden cases (6 tjd_ut/geolat/geolon triples x 3 bodies x 2 imeth)"
+    );
+    for (i, c) in data.gauquelin_sector.iter().enumerate() {
+        let body = swisseph::types::Body::try_from(c.ipl)
+            .unwrap_or_else(|e| panic!("case {i}: unknown body {}: {e}", c.ipl));
+        let label = format!(
+            "case {i} (ipl={} imeth={} tjd_ut={:.6} geolon={:.6} geolat={:.6})",
+            c.ipl, c.imeth, c.tjd_ut, c.geolon, c.geolat
+        );
+        let dgsect = eph
+            .gauquelin_sector_geometric(
+                c.tjd_ut,
+                body,
+                c.imeth,
+                CalcFlags::empty(),
+                c.geolon,
+                c.geolat,
+            )
+            .unwrap_or_else(|e| panic!("{label}: gauquelin_sector_geometric failed: {e}"));
+        super::assert_f64_eps(&format!("{label} dgsect"), c.dgsect, dgsect, 1e-6);
     }
 }
