@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use swisseph::{Body, CalcFlags, Ephemeris, EphemerisConfig, EphemerisSource};
 
@@ -10,6 +11,9 @@ struct NodeCase {
     flags: u32,
     flag_name: String,
     eph_name: String,
+    /// C `sid_mode` passed to `swe_set_sid_mode` (0 = tropical, no SEFLG_SIDEREAL).
+    #[serde(default)]
+    sid_mode: i32,
     retflag: i32,
     output: [f64; 6],
 }
@@ -37,41 +41,69 @@ fn body_from_c_id(id: i32) -> Body {
     }
 }
 
+/// Build an `Ephemeris` for a `(backend, sid_mode)` pair. `sid_mode == 0` is
+/// tropical; a non-zero value is the raw C `swe_set_sid_mode` argument (ayanamsa
+/// index OR'd with the SE_SIDBIT_* projection bits).
+fn make_eph(eph_name: &str, sid_mode: i32) -> Ephemeris {
+    let mut cfg = if eph_name == "SWIEPH" {
+        EphemerisConfig {
+            ephemeris_source: EphemerisSource::Swiss,
+            ephe_path: Some(ephe_path()),
+            ..EphemerisConfig::default()
+        }
+    } else {
+        EphemerisConfig::default()
+    };
+    if sid_mode != 0 {
+        cfg.set_sidereal_mode(sid_mode, 0.0, 0.0);
+    }
+    Ephemeris::new(cfg).expect("Ephemeris::new")
+}
+
 /// `SE_TRUE_NODE` / `SE_OSCU_APOG` through `Ephemeris::calc` (`lunar_osc_elem` +
-/// `swi_plan_for_osc_elem`): 168 cases — 2 bodies × {MOSEPH, SWIEPH} × 6 flag
-/// combos {SPEED, SPEED|EQUATORIAL, SPEED|XYZ, SPEED|NONUT, SPEED|J2000, no_speed}
-/// × the 7 gen_calc.c epochs. Positions eps 1e-9, speeds eps 1e-7 (the osculating
-/// elements are built from finite differences over 1e-4-day intervals, amplifying
-/// backend ULP noise into the speed components).
+/// `swi_plan_for_osc_elem`): 252 cases.
+///
+/// - 168 tropical: 2 bodies × {MOSEPH, SWIEPH} × 6 flag combos {SPEED,
+///   SPEED|EQUATORIAL, SPEED|XYZ, SPEED|NONUT, SPEED|J2000, no_speed} × 7 epochs.
+/// - 84 sidereal (SEFLG_SIDEREAL|SEFLG_SPEED): 2 bodies × {MOSEPH, SWIEPH} × 3
+///   sid_modes {Lahiri traditional, Lahiri|ECL_T0, Lahiri|SSY_PLANE} × 7 epochs.
+///   The ECL_T0 / SSY_PLANE "rigorous" projections read the J2000 equatorial
+///   vector `lunar_osc_elem` now threads through as `x2000` (swisseph-rs/84 review
+///   follow-up); before the fix they silently fell back to traditional ayanamsa
+///   subtraction because `calc_inner` returned an all-zero `x2000`.
+///
+/// Positions eps 1e-9, speeds eps 1e-7 — except MOSEPH speeds, relaxed to 5e-6:
+/// the osculating elements are built from a central difference over the wide
+/// 0.1-day Moshier interval whose off-center samples read C's global
+/// obliquity/nutation cache, a stateless-vs-stateful artifact (~0.013"/day) that
+/// the sidereal projection carries through from the tropical speed. See
+/// CLAUDE.md <stateless_tolerance> §3.
 #[test]
 fn golden_truenode() {
-    let moshier = Ephemeris::new(EphemerisConfig::default()).unwrap();
-    let sweph = Ephemeris::new(EphemerisConfig {
-        ephemeris_source: EphemerisSource::Swiss,
-        ephe_path: Some(ephe_path()),
-        ..EphemerisConfig::default()
-    })
-    .unwrap();
-
     let cases = load();
     assert!(
-        cases.len() >= 168,
-        "expected 168+ cases, got {}",
+        cases.len() >= 252,
+        "expected 252+ cases, got {}",
         cases.len()
     );
+
+    let mut ephemerides: HashMap<(String, i32), Ephemeris> = HashMap::new();
 
     let mut failures = Vec::new();
     for (i, c) in cases.iter().enumerate() {
         let body = body_from_c_id(c.body);
         let flags = CalcFlags::from_bits_truncate(c.flags);
-        let eph = if c.eph_name == "SWIEPH" {
-            &sweph
-        } else {
-            &moshier
-        };
+        let eph = ephemerides
+            .entry((c.eph_name.clone(), c.sid_mode))
+            .or_insert_with(|| make_eph(&c.eph_name, c.sid_mode));
 
+        let sid_label = if c.sid_mode == 0 {
+            String::new()
+        } else {
+            format!(" sid={}", c.sid_mode)
+        };
         let label = format!(
-            "case {i} {} tjd={:.1} {} {}",
+            "case {i} {} tjd={:.1} {} {}{sid_label}",
             c.body_name, c.jd, c.eph_name, c.flag_name
         );
 
@@ -91,15 +123,6 @@ fn golden_truenode() {
             ));
         }
 
-        // MOSEPH node/apogee SPEED carries a documented stateless-vs-stateful
-        // precision artifact (up to ~3.6e-6 deg/day ≈ 0.013"/day, astronomically
-        // negligible). C's `lunar_osc_elem` builds the speed from a central
-        // difference over the wide 0.1-day Moshier interval, and its off-center
-        // samples read C's GLOBAL obliquity/nutation cache, which rounds slightly
-        // differently than a clean recomputation — so C's own node speed does not
-        // even match a finite difference of C's own node POSITIONS. Positions are
-        // bit-accurate (1e-9); the Swiss backend (1e-4 interval) matches speed at
-        // 1e-7. Only the Moshier speed is relaxed. See CLAUDE.md <stateless_tolerance>.
         let moseph = c.eph_name == "MOSEPH";
         for k in 0..6 {
             let eps = if k >= 3 {

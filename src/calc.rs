@@ -218,30 +218,57 @@ pub(crate) fn nutate(
     nut: &NutationType,
     nutv: Option<&NutationType>,
     has_speed: bool,
+    backward: bool,
 ) {
+    // C `swi_nutate`: `backward=false` applies the nutation matrix as-is (mean ->
+    // true), `backward=true` applies its transpose (true -> mean, i.e. removes
+    // nutation). Our `nut_matrix` is the transpose of C's `swed.nut.matrix`, so the
+    // index orders below are the mirror of the C code's `backward` flag.
     let matrix = nut_matrix(eps, nut);
 
     let x = pos[0];
     let y = pos[1];
     let z = pos[2];
-    pos[0] = matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z;
-    pos[1] = matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z;
-    pos[2] = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2] * z;
+    if backward {
+        pos[0] = matrix[0][0] * x + matrix[1][0] * y + matrix[2][0] * z;
+        pos[1] = matrix[0][1] * x + matrix[1][1] * y + matrix[2][1] * z;
+        pos[2] = matrix[0][2] * x + matrix[1][2] * y + matrix[2][2] * z;
+    } else {
+        pos[0] = matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z;
+        pos[1] = matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z;
+        pos[2] = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2] * z;
+    }
 
     if has_speed {
         let vx = pos[3];
         let vy = pos[4];
         let vz = pos[5];
-        pos[3] = matrix[0][0] * vx + matrix[0][1] * vy + matrix[0][2] * vz;
-        pos[4] = matrix[1][0] * vx + matrix[1][1] * vy + matrix[1][2] * vz;
-        pos[5] = matrix[2][0] * vx + matrix[2][1] * vy + matrix[2][2] * vz;
+        if backward {
+            pos[3] = matrix[0][0] * vx + matrix[1][0] * vy + matrix[2][0] * vz;
+            pos[4] = matrix[0][1] * vx + matrix[1][1] * vy + matrix[2][1] * vz;
+            pos[5] = matrix[0][2] * vx + matrix[1][2] * vy + matrix[2][2] * vz;
+        } else {
+            pos[3] = matrix[0][0] * vx + matrix[0][1] * vy + matrix[0][2] * vz;
+            pos[4] = matrix[1][0] * vx + matrix[1][1] * vy + matrix[1][2] * vz;
+            pos[5] = matrix[2][0] * vx + matrix[2][1] * vy + matrix[2][2] * vz;
+        }
 
         // Apparent motion from nutation rate change (same obliquity, earlier nutation)
         if let Some(nv) = nutv {
             let matv = nut_matrix(eps, nv);
-            let xv0 = matv[0][0] * x + matv[0][1] * y + matv[0][2] * z;
-            let xv1 = matv[1][0] * x + matv[1][1] * y + matv[1][2] * z;
-            let xv2 = matv[2][0] * x + matv[2][1] * y + matv[2][2] * z;
+            let (xv0, xv1, xv2) = if backward {
+                (
+                    matv[0][0] * x + matv[1][0] * y + matv[2][0] * z,
+                    matv[0][1] * x + matv[1][1] * y + matv[2][1] * z,
+                    matv[0][2] * x + matv[1][2] * y + matv[2][2] * z,
+                )
+            } else {
+                (
+                    matv[0][0] * x + matv[0][1] * y + matv[0][2] * z,
+                    matv[1][0] * x + matv[1][1] * y + matv[1][2] * z,
+                    matv[2][0] * x + matv[2][1] * y + matv[2][2] * z,
+                )
+            };
             pos[3] += (pos[0] - xv0) / NUT_SPEED_INTV;
             pos[4] += (pos[1] - xv1) / NUT_SPEED_INTV;
             pos[5] += (pos[2] - xv2) / NUT_SPEED_INTV;
@@ -261,7 +288,7 @@ fn app_pos_rest(
 
     // Step 1: Nutation (equatorial cartesian)
     if !flags.contains(CalcFlags::NONUT) {
-        nutate(xx, eps, nut, nutv, has_speed);
+        nutate(xx, eps, nut, nutv, has_speed, false);
     }
     xreturn[18..24].copy_from_slice(xx);
 
@@ -916,7 +943,7 @@ pub(crate) fn plan_for_osc_elem(
 
     // Equatorial nutation matrix (pure rotation of pos + speed, no rate term).
     if let Some(nut_val) = nut_opt.as_ref() {
-        nutate(xx, &oe, nut_val, None, true);
+        nutate(xx, &oe, nut_val, None, true, false);
     }
 
     // Equatorial -> ecliptic (rotate by +obliquity), pos + speed.
@@ -935,19 +962,29 @@ pub(crate) fn plan_for_osc_elem(
     }
 }
 
+/// A `lunar_osc_elem` output half: the `xreturn[24]` output layout plus the
+/// `x2000` J2000 equatorial vector the SIDEREAL rigorous branches consume.
+type OscOutput = ([f64; 24], [f64; 6]);
+
 /// Assemble the `xreturn[24]` output layout from an ecliptic-of-date cartesian
 /// 6-vector `x` (node or apogee). Port of `lunar_osc_elem`'s D.4 output-frame
 /// stage (sweph.c:5487-5591). `oe` is obliquity-of-date. No physical effects
 /// here — light-time/precession/nutation already happened per-sample in D.1.
-/// The `SEFLG_SIDEREAL` branch is NOT handled here (no golden coverage; the
-/// caller's sidereal path mirrors the mean-node one via `apply_sidereal`).
+///
+/// Returns `(xreturn, x2000)`. `x2000` is the J2000 equatorial cartesian (pos +
+/// speed) that the `SEFLG_SIDEREAL` ECL_T0 / SSY_PLANE rigorous branches consume
+/// via the caller's `apply_sidereal` — C's `lunar_osc_elem` builds it by removing
+/// the full nutation matrix from the equatorial-of-date vector and precessing to
+/// J2000 (sweph.c:5527-5540). It is only populated when `SEFLG_SIDEREAL` is set
+/// (else `[0.0; 6]`; the traditional-ayanamsa and non-sidereal paths never read
+/// it, and `apply_sidereal` treats an all-zero `x2000` as "not available").
 fn osc_output_frame(
     x: &[f64; 6],
     flags: CalcFlags,
     oe: &Epsilon,
     tjd: f64,
     models: &AstroModels,
-) -> [f64; 24] {
+) -> OscOutput {
     let has_speed = flags.contains(CalcFlags::SPEED);
     let mut xr = [0.0; 24];
 
@@ -980,12 +1017,47 @@ fn osc_output_frame(
     let eq_pol = cartesian_to_polar_with_speed([xr[18], xr[19], xr[20], xr[21], xr[22], xr[23]]);
     xr[12..18].copy_from_slice(&eq_pol);
 
+    // J2000 equatorial vector for the SEFLG_SIDEREAL ECL_T0 / SSY_PLANE rigorous
+    // branches (applied by the caller's `apply_sidereal`). Mirrors C's
+    // lunar_osc_elem sweph.c:5527-5540: take the equatorial-of-date vector (its
+    // nutation-in-obliquity already removed above), remove the full nutation
+    // matrix, then precess to J2000. Captured here — before the J2000 re-projection
+    // below overwrites xr[18..24] — and only when SIDEREAL is requested.
+    let x2000 = if flags.contains(CalcFlags::SIDEREAL) {
+        let mut x = [xr[18], xr[19], xr[20], xr[21], xr[22], xr[23]];
+        if !flags.contains(CalcFlags::NONUT) {
+            let nut_val = nutation(tjd, flags, models);
+            let nutv = if has_speed {
+                Some(nutation(tjd - NUT_SPEED_INTV, flags, models))
+            } else {
+                None
+            };
+            nutate(&mut x, oe, &nut_val, nutv.as_ref(), has_speed, true);
+        }
+        let mut pos3 = [x[0], x[1], x[2]];
+        precess(
+            &mut pos3,
+            tjd,
+            flags,
+            models,
+            PrecessionDirection::DateToJ2000,
+        );
+        x[0..3].copy_from_slice(&pos3);
+        if has_speed {
+            precess_speed(&mut x, tjd, flags, models, PrecessionDirection::DateToJ2000);
+        }
+        x
+    } else {
+        [0.0; 6]
+    };
+
     // SEFLG_J2000 re-projection (sweph.c:5561-5577): the node/apogee are referred
     // to the equator/ecliptic of date; transform the equatorial vector to J2000.
     // Position via `precess`, speed via `precess_speed` (WITH the rate term —
     // unlike plan_for_osc_elem's pure rotation; this matches C's swi_precess +
-    // swi_precess_speed here).
-    if flags.contains(CalcFlags::J2000) {
+    // swi_precess_speed here). Skipped under SIDEREAL — C's D.4 makes the sidereal
+    // and plain-J2000 handling mutually exclusive (`if SIDEREAL ... else if J2000`).
+    if flags.contains(CalcFlags::J2000) && !flags.contains(CalcFlags::SIDEREAL) {
         let mut x6 = [xr[18], xr[19], xr[20], xr[21], xr[22], xr[23]];
         let mut pos3 = [x6[0], x6[1], x6[2]];
         precess(
@@ -1030,14 +1102,16 @@ fn osc_output_frame(
     }
     xr[0] = crate::math::normalize_degrees(xr[0]);
     xr[12] = crate::math::normalize_degrees(xr[12]);
-    xr
+    (xr, x2000)
 }
 
 /// Core of `lunar_osc_elem` (sweph.c:5360-5592, D.2-D.4). Given the three raw
 /// geocentric equatorial-J2000 moon samples (pos+vel, light-time corrected;
 /// only `[istart..=2]` valid), computes BOTH the osculating node and the
 /// osculating apogee together (the node is always needed to derive the apogee
-/// and vice versa), and returns `(node_xreturn, apogee_xreturn)`.
+/// and vice versa), and returns `((node_xreturn, node_x2000), (apogee_xreturn,
+/// apogee_x2000))`. The `x2000` companions carry the J2000 equatorial vector the
+/// `SEFLG_SIDEREAL` ECL_T0 / SSY_PLANE branches need (see `osc_output_frame`).
 ///
 /// Sample epochs: `raw_samples[0]` at `tjd - speed_intv`, `[1]` at
 /// `tjd + speed_intv`, `[2]` at `tjd`. `speed_intv` is the backend-specific
@@ -1049,7 +1123,7 @@ pub(crate) fn lunar_osc_elem(
     raw_samples: &[[f64; 6]; 3],
     istart: usize,
     speed_intv: f64,
-) -> ([f64; 24], [f64; 24]) {
+) -> (OscOutput, OscOutput) {
     let has_speed = flags.contains(CalcFlags::SPEED);
     let plan_flags = flags | CalcFlags::SPEED; // C always passes iflag|SEFLG_SPEED
 

@@ -718,11 +718,14 @@ impl Ephemeris {
             let (samples, istart, speed_intv, source) =
                 self.osc_moon_samples(jd_tt, flags, config)?;
             // D.2-D.4: node and apogee are computed together; keep the requested half.
-            let (node_xr, apog_xr) =
+            let (node_out, apog_out) =
                 crate::calc::lunar_osc_elem(jd_tt, flags, models, &samples, istart, speed_intv);
-            let mut xr = match body {
-                Body::TrueNode => node_xr,
-                Body::OscuApogee => apog_xr,
+            // `x2000` carries the J2000 equatorial vector for the SIDEREAL ECL_T0 /
+            // SSY_PLANE rigorous branches; `apply_sidereal` consumes it (all-zero
+            // for non-sidereal calls, which never read it).
+            let (mut xr, x2000) = match body {
+                Body::TrueNode => node_out,
+                Body::OscuApogee => apog_out,
                 _ => unreachable!(),
             };
             // D.5: the true node is on the ecliptic by definition — force exact
@@ -742,7 +745,7 @@ impl Ephemeris {
             } else {
                 (flags & !crate::calc::EPHMASK) | CalcFlags::MOSEPH
             };
-            return Ok((xr, [0.0; 6], flags_used));
+            return Ok((xr, x2000, flags_used));
         }
 
         // Heliocentric (SEFLG_HELCTR) is supported below (per-backend/-body branches in calc.rs);
@@ -1564,7 +1567,7 @@ impl Ephemeris {
         let nut_val = if !iflag.contains(CalcFlags::NONUT) {
             let nv = nutation(jd, iflag, models);
             let nutv = nutation(jd - NUT_SPEED_INTV, iflag, models);
-            nutate(&mut x, &eps_date, &nv, Some(&nutv), true);
+            nutate(&mut x, &eps_date, &nv, Some(&nutv), true, false);
             Some(nv)
         } else {
             None
