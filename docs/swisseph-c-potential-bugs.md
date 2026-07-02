@@ -88,3 +88,88 @@ C's actual (if seemingly accidental) behavior for the tested cases — this is t
 fidelity target regardless of whether the C behavior is intentional. Found via golden test
 `houses::ut_wrapper` (swisseph-rs/65); see that task's execution_record and the sutra lesson
 anchored on `houses_ex2`/`calc_deltat`/`resolve_tidal_acceleration` for the full account.
+
+## 3. Pluto uses Mercury's mass ratio in get_gmsm / nod_aps (stale ipl_to_elem mapping)
+
+**Location:** `swecl.c:5074` (`ipl_to_elem[]` table); consumed at `swecl.c:5715` and
+`swecl.c:5706–5711` (`get_gmsm`, orbital elements) and `swecl.c:5272` (`swe_nod_aps`
+osculating branch)
+
+**What:** `ipl_to_elem[15] = {2,0,0,1,3,4,5,6,7,0,0,0,0,0,2}` maps SE_* body ids to rows of
+the mean-element tables (`el_node[8][4]` etc., Mercury=0..Neptune=7). Those tables have no
+Pluto row — `swe_nod_aps`'s mean branch excludes Pluto — so `ipl_to_elem[SE_PLUTO] = 0`
+(Mercury). But `get_gmsm` and the `swe_nod_aps` osculating branch reuse the *same* table to
+index the 9-row `plmass[]` array (swecl.c:5063), which *does* have a Pluto row at index 8
+(1/136566000). Net effect:
+
+- **Two-body GM** (default): Pluto's `plm = 1/plmass[0] = 1/6023600` (Mercury's Sun/planet
+  mass ratio, ≈1.66e-7) instead of `1/plmass[8] ≈ 7.32e-9`. Relative error in `Gmsm` ≈1.6e-7.
+- **`SEFLG_ORBEL_AA` branch:** the descending summation loop
+  `for (j = ipl; j >= SE_MERCURY; j--) plm += 1/plmass[ipl_to_elem[j]]` double-counts
+  Mercury for Pluto (once via the stale mapping at j=SE_PLUTO, once at j=SE_MERCURY) instead
+  of adding Pluto's own mass. Same ~1.6e-7 scale.
+- **Osculating nodes/apsides** (swecl.c:5272): Pluto's `Gmsm` carries the same wrong mass.
+
+**Impact:** ~1.6e-7 relative in GM → same order in vis-viva semi-major axis; for Pluto at
+~39.5 AU that's ~6e-6 AU (≈900 km) in derived element distances. Real but astronomically
+negligible, far below any astrological use.
+
+**Cause:** Table reuse across mismatched shapes — a lookup table built for the 8-row mean-
+element arrays repurposed for the 9-row mass array without extending the Pluto entry. No
+comment suggests intent.
+
+**Our Rust code:** Replicated bit-for-bit (`constants::IPL_TO_ELEM` transcribed verbatim,
+PNOC 4/6 — swisseph-rs/85, /87). Golden-test fidelity requires it; see
+`docs/c-ref-orbital-elements.md` Constants § quirk note.
+
+## 4. swe_calc_pctr computes light deflection as observed from Earth, regardless of center body
+
+**Location:** `sweph.c:8150–8152` (`swe_calc_pctr` deflection step) vs. `sweph.c:8153–8168`
+(aberration step)
+
+**What:** In the planetocentric pipeline, `swi_deflect_light(xx, ...)` takes no observer
+parameter — it reads Earth's and the Sun's barycentric position/velocity from the global
+cache (`swed.pldat[SEI_EARTH].x`, `swed.pldat[SEI_SUNBARY].x`) and applies the standard
+Sun-deflection formula treating the planetocentric vector `xx` as if it were geocentric. So
+for "Mars as seen from Jupiter", gravitational light bending is computed as though the
+observer were Earth. Annual aberration in the very next step, by contrast, correctly uses
+the center body's velocity (`swi_aberr_light(xx, xxctr, ...)`) — the two relativistic
+corrections in the same function disagree about who the observer is.
+
+**Impact:** Deflection is ≤1.8 arcsec at the solar limb and typically micro-arcseconds away
+from it; the observer-geometry error is a fraction of that. Negligible for any published use
+of planetocentric positions, but it is physically wrong for non-Earth centers.
+
+**Cause:** Global-state architecture again — `swi_deflect_light` was written for the
+geocentric pipeline and hard-reads the Earth/Sun save slots; `swe_calc_pctr` (a much later
+addition) reuses it without threading the center body through.
+
+**Our Rust code:** Replicates the asymmetry deliberately: `calc_pctr` (PNOC 9 —
+swisseph-rs/90) calls `corrections::deflect_light` with Earth-observer geometry and
+`corrections::aberr_light` with the center body's velocity, per `docs/c-ref-pctr.md` §5–6.
+
+## 5. swe_orbit_max_min_true_distance rough scan covers only half the inner ellipse
+
+**Location:** `swecl.c:6207–6253` (rough grid scan in `swe_orbit_max_min_true_distance`)
+
+**What:** The rough scan samples the outer ellipse's eccentric anomaly at `eano = j*dstep`
+(`j=0..181`, `dstep=2` → 0..362°, one harmless duplicate step past 360°), but the inner
+ellipse at `eani = (double)i` — `dstep` is never applied — so the inner body is only sampled
+over 0..181°. Half the inner ellipse (182°–359°) is never visited in the rough scan. The
+asymmetry looks like a straightforward oversight (`dstep` presumably intended for both
+loops).
+
+**Impact:** Usually none — the subsequent block-coordinate refinement (swecl.c:6254–6282,
+up to 301 alternating passes, 1e-8 AU convergence) walks to a local extremum from whichever
+rough candidate was found, and for realistic near-coplanar, low-eccentricity orbit pairs
+the true extremes are recoverable from the sampled half. But for geometries whose extremum
+lies in the unsampled half of the inner ellipse with a competing local extremum elsewhere,
+the refinement can converge to the wrong local extremum. `dmax`/`dmin` would then be
+silently wrong in C and (by design) in our port.
+
+**Cause:** Apparent loop-variable oversight; no comment suggests the asymmetry is
+intentional.
+
+**Our Rust code:** Ported literally (PNOC 6 — swisseph-rs/87) so the refinement starts from
+the same rough candidates C finds; see `docs/c-ref-orbital-elements.md` §8.2's loop-bound
+quirk note.
