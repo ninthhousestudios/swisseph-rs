@@ -78,8 +78,9 @@ pub fn plaus_iflag(mut flags: CalcFlags, source: EphemerisSource) -> CalcFlags {
 /// Observer offset (position + velocity, AU / AU-day, J2000 mean equatorial)
 /// at `jd`, or the zero vector when TOPOCTR isn't requested. Stateless
 /// equivalent of C's `swed.topd.xobs` cache: recomputed fresh every call
-/// (docs/c-ref-topocentric.md §2).
-fn topo_offset(
+/// (docs/c-ref-topocentric.md §2). `pub(crate)`: also reused by
+/// `context::Ephemeris::calc_fixstar_*` (docs/c-ref-fixstar.md step 6).
+pub(crate) fn topo_offset(
     jd: f64,
     flags: CalcFlags,
     config: &EphemerisConfig,

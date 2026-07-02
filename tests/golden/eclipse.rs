@@ -84,6 +84,18 @@ struct OccWhenGlobCase {
 }
 
 #[derive(Deserialize)]
+struct OccWhenLocCase {
+    geopos: [f64; 3],
+    tjd_start: f64,
+    ipl: i32,
+    starname: Option<String>,
+    backward: bool,
+    retval: i32,
+    tret: [f64; 10],
+    attr: [f64; 11],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
     sol_how: Vec<SolHowCase>,
@@ -94,6 +106,7 @@ struct GoldenData {
     lun_when_loc: Vec<LunWhenLocCase>,
     occ_where: Vec<OccWhereCase>,
     occ_when_glob: Vec<OccWhenGlobCase>,
+    occ_when_loc: Vec<OccWhenLocCase>,
 }
 
 fn load() -> GoldenData {
@@ -956,6 +969,132 @@ fn occ_when_glob() {
             &format!("{label}.tret[7] (time_centerline_end)"),
             c.tret[7],
             result.time_centerline_end,
+            1e-5,
+        );
+    }
+}
+
+/// `swe_lun_occult_when_loc` (`Ephemeris::lun_occult_when_loc`): local occultation search visible
+/// from Zurich, for the same Venus (finite disc) and Aldebaran (point-source star) bodies as
+/// `occ_where`/`occ_when_glob`, both search directions. The star cases exercise the point-source
+/// contact-1/4-aliased-from-2/3 branch (swecl.c:2696-2699, c-ref-occultation.md §3 step 9); the
+/// Venus/forward case exercises `OCC_BEG_DAYLIGHT`/`OCC_END_DAYLIGHT` (retval bits 8192/16384).
+#[test]
+fn occ_when_loc() {
+    let data = load();
+    let ephe = make_eph();
+    for (i, c) in data.occ_when_loc.iter().enumerate() {
+        let label = format!(
+            "occ_when_loc[{i}][geopos={:?},tjd_start={},ipl={},starname={:?},backward={}]",
+            c.geopos, c.tjd_start, c.ipl, c.starname, c.backward
+        );
+        let body = Body::try_from(c.ipl).unwrap();
+        let result = ephe
+            .lun_occult_when_loc(
+                c.tjd_start,
+                body,
+                c.starname.as_deref(),
+                CalcFlags::MOSEPH,
+                c.geopos,
+                c.backward,
+            )
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[0] (time_maximum)"),
+            c.tret[0],
+            result.time_maximum,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[1] (time_first_contact)"),
+            c.tret[1],
+            result.time_first_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[2] (time_second_contact)"),
+            c.tret[2],
+            result.time_second_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[3] (time_third_contact)"),
+            c.tret[3],
+            result.time_third_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[4] (time_fourth_contact)"),
+            c.tret[4],
+            result.time_fourth_contact,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[5] (time_rise)"),
+            c.tret[5],
+            result.time_rise,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[6] (time_set)"),
+            c.tret[6],
+            result.time_set,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.magnitude"),
+            c.attr[0],
+            result.attr.magnitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.diameter_ratio"),
+            c.attr[1],
+            result.attr.diameter_ratio,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.obscuration"),
+            c.attr[2],
+            result.attr.obscuration,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.core_diameter_km"),
+            c.attr[3],
+            result.attr.core_diameter_km,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.azimuth"),
+            c.attr[4],
+            result.attr.azimuth,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.true_altitude"),
+            c.attr[5],
+            result.attr.true_altitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.apparent_altitude"),
+            c.attr[6],
+            result.attr.apparent_altitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr.elongation"),
+            c.attr[7],
+            result.attr.elongation,
             1e-5,
         );
     }

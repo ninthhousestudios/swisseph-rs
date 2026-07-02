@@ -12,7 +12,7 @@ src/
 ├── corrections.rs      — relativistic corrections: meff (lookup), aberr_light (Lorentz), deflect_light (GR bending)
 ├── flags.rs            — bitflags! structs: CalcFlags, SiderealBits, etc. (146 lines)
 ├── error.rs            — Error enum
-├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion, gauquelin_sector_geometric — swe_gauquelin_sector imeth 0/1 port: own ARMC/eps/nutation setup using the caller's flags directly (NOT houses_ex2's forced TIDAL_DEFAULT — swe_gauquelin_sector's C deltaT call genuinely carries the caller's ephemeris-source iflag), calc() the body, house_pos with hsys=Gauquelin; imeth 2-5 (rise/set) return Err, not yet ported), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
+├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_with_config (swisseph-rs/79, mirrors calc_with_config — threads an explicit &EphemerisConfig into calc_fixstar/calc_fixstar_moshier/_sweph/_jpl so TOPOCTR gets a per-call topographic override instead of always reading self.config; fixstar2 delegates to it with &self.config), fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion, gauquelin_sector_geometric — swe_gauquelin_sector imeth 0/1 port: own ARMC/eps/nutation setup using the caller's flags directly (NOT houses_ex2's forced TIDAL_DEFAULT — swe_gauquelin_sector's C deltaT call genuinely carries the caller's ephemeris-source iflag), calc() the body, house_pos with hsys=Gauquelin; imeth 2-5 (rise/set) return Err, not yet ported), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
 ├── math.rs             — pure math functions: normalize, chebyshev, cartpol, cotrans, poly_eval
 ├── date.rs             — Julian Day ↔ calendar conversion, delta-T, UTC
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
@@ -257,7 +257,36 @@ src/
 │                          `starname` presence rather than replicating C's `ipl<0`->0 sentinel
 │                          clamp; no `SE_ECL_ONE_TRY` support, matching sol_eclipse_when_glob's
 │                          bool-only `backward`). Ephemeris::lun_occult_where/lun_occult_when_glob
-│                          in context.rs delegate.
+│                          in context.rs delegate. OccultLocal (tret[0..6]: same slot semantics as
+│                          SolarEclipseLocal; for a fixed star, contacts 1/4 alias contacts 2/3);
+│                          occult_when_loc (swisseph-rs/79, swe_lun_occult_when_loc's worker port:
+│                          topocentric `iflag = TOPOCTR | ifl` WITHOUT EQUATORIAL — confirmed
+│                          against swecl.c directly since c-ref-occultation.md's phrasing reads
+│                          ambiguously here, a genuine literal divergence from solar's
+│                          eclipse_when_loc; rough-conjunction dl/13 bracket shared in spirit with
+│                          lun_occult_when_glob; contacts 2/3 always attempted, contacts 1/4
+│                          branch on `starname` — planet: independent find_zero refine, star:
+│                          `tret[1]=tret[2]`/`tret[4]=tret[3]` alias, matching swecl.c:2696-2699;
+│                          occultation-only rise/set block (no solar equivalent): occulted body's
+│                          own rise/set anchored at `tret[1]-0.1` (NOT solar's `-0.001`) fills
+│                          tret[5]/tret[6], plus two independent Sun rise/set pairs at tret[1]/
+│                          tret[4] set OCC_BEG_DAYLIGHT/OCC_END_DAYLIGHT — both quirks confirmed
+│                          against swecl.c directly, not documented precisely enough in the ref
+│                          doc's step 12 prose to port from the doc alone); lun_occult_when_loc
+│                          (public wrapper: occultation's own geoalt error string, distinct from
+│                          solar's). Ephemeris::lun_occult_when_loc in context.rs delegates.
+│                          **Arc complete** (Phase 11: Rise/Set, Eclipses, Occultations, 12/12).
+│                          Uncovered a pre-existing gap while implementing this: `eclipse_how`'s
+│                          topocentric az/alt for a fixed star silently fell back to geocentric
+│                          (fixstar2 had no per-call topographic override) — no golden test had
+│                          ever exercised topocentric fixstar before occ_when_loc's Aldebaran
+│                          case. Fixed by threading `config: &EphemerisConfig` through
+│                          `calc_fixstar`/`calc_fixstar_moshier`/`_sweph`/`_jpl` (new
+│                          `fixstar2_with_config`, mirrors `calc_with_config`) and adding the
+│                          topocentric observer offset (`calc::topo_offset`, widened to
+│                          `pub(crate)`) to `xobs`/`xobs_dt` when TOPOCTR is set — see
+│                          docs/c-ref-fixstar.md step 6. `calc_planet_star_topo` (this file) now
+│                          calls `fixstar2_with_config` instead of the geocentric-only `fixstar2`.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -367,7 +396,18 @@ tests/
 │                          swe_fixstar strcpy()s into its `starname` argument in place, so a
 │                          string-literal pointer segfaults — must copy into a local `char[]`
 │                          first, and `swe_set_ephe_path` needs an explicit path for the same
-│                          reason fixstar tests do), no escape-hatch escalation needed)
+│                          reason fixstar tests do), no escape-hatch escalation needed;
+│                          occ_when_loc: 4 cases — Venus (planet) + Aldebaran (star) × 2 backward,
+│                          geopos=(8.55,47.37,500) Zurich, tjd_start=2451545.0; asserts
+│                          tret[0..6] eps 1e-5 day + attr[0..7] eps 1e-5 + exact retval flags
+│                          bitmask (Venus/forward case exercises OCC_BEG_DAYLIGHT/
+│                          OCC_END_DAYLIGHT bits 8192/16384; star cases exercise the
+│                          contact-1/4-aliased-from-2/3 point-source branch); FIRST attempt
+│                          revealed the pre-existing fixstar-TOPOCTR gap (see eclipse.rs's map
+│                          entry) via ~4e-3° azimuth error on the star cases — root-caused by
+│                          diffing intermediate tret[]/attr[] against gen_eclipse.c's raw output
+│                          per-field, not by re-reading the C; fixed at the calc_fixstar level,
+│                          not worked around in the test)
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -440,8 +480,10 @@ tests/
 │                          swe_sol_eclipse_how (sol_how key), swe_sol_eclipse_when_glob
 │                          (sol_when_glob key), swe_sol_eclipse_when_loc (sol_when_loc key),
 │                          swe_lun_eclipse_how (lun_how key), swe_lun_eclipse_when (lun_when key),
-│                          and swe_lun_eclipse_when_loc (lun_when_loc key); later RSE tasks 11-12
-│                          add more keys to this same file
+│                          swe_lun_eclipse_when_loc (lun_when_loc key), swe_lun_occult_where
+│                          (occ_where key), swe_lun_occult_when_glob (occ_when_glob key), and
+│                          swe_lun_occult_when_loc (occ_when_loc key, swisseph-rs/79) — all keys
+│                          this module needs now, final RSE arc task
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -471,7 +513,13 @@ tests/
     │                       (2001/2021/2024) at their real maximum-eclipse UT instants × 1 observer
     │                       (near-central Zurich); swe_lun_eclipse_when: 2 tjd_start (2000/2019) ×
     │                       2 backward, ifltype=0; swe_lun_eclipse_when_loc: 1 geopos (near-central
-    │                       Zurich) × the same 2 tjd_start × 2 backward)
+    │                       Zurich) × the same 2 tjd_start × 2 backward; swe_lun_occult_where +
+    │                       swe_lun_occult_when_glob: 3 occulted bodies (Venus, Mars, Aldebaran
+    │                       starname) at tjd_ut/tjd_start=2451545.0 (where) or 2458800.5
+    │                       (when_glob) × 2 backward (when_glob only); swe_lun_occult_when_loc
+    │                       (swisseph-rs/79): 2 of those 3 bodies (Venus, Aldebaran — skips Mars
+    │                       to keep the battery small) × 1 geopos (near-central Zurich) × 1
+    │                       tjd_start=2451545.0 × 2 backward)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

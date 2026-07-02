@@ -3,9 +3,9 @@
  * (RSE 5, swisseph-rs/72), swe_sol_eclipse_how (RSE 6, swisseph-rs/73),
  * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74), swe_sol_eclipse_when_loc
  * (RSE 8, swisseph-rs/75), swe_lun_eclipse_how (RSE 9, swisseph-rs/76),
- * swe_lun_eclipse_when + swe_lun_eclipse_when_loc (RSE 10, swisseph-rs/77), and
- * swe_lun_occult_where + swe_lun_occult_when_glob (RSE 11, swisseph-rs/78). Later RSE
- * task (12) adds more keys to this same file.
+ * swe_lun_eclipse_when + swe_lun_eclipse_when_loc (RSE 10, swisseph-rs/77),
+ * swe_lun_occult_where + swe_lun_occult_when_glob (RSE 11, swisseph-rs/78), and
+ * swe_lun_occult_when_loc (RSE 12, swisseph-rs/79).
  *
  * The "dcore" field in each sol_where case comes from swi_test_eclipse_where_dcore, a
  * non-static test-only hook added to ../swisseph/swecl.c (right after calc_planet_star) that
@@ -347,6 +347,48 @@ int main(void) {
                    tjd_start, ipl, starname ? "\"Aldebaran\"" : "null",
                    backward ? "true" : "false", retval);
             for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+            printf("]}");
+        }
+    }
+    printf("\n  ],\n");
+
+    /* === occ_when_loc === */
+    /* Venus (planet, finite disc) + Aldebaran (star, point source) -- same two occulted-body
+     * shapes as occ_where/occ_when_glob's first and third entries, skipping Mars to keep the
+     * battery small (RSE 12 spec). */
+    struct occ_body occ_when_loc_bodies[] = { occ_bodies[0], occ_bodies[2] };
+    #define N_OCC_WHEN_LOC_BODIES \
+        (sizeof(occ_when_loc_bodies) / sizeof(occ_when_loc_bodies[0]))
+    static double occ_when_loc_geopos[3] = { 8.55, 47.37, 500.0 };
+    static double occ_when_loc_tjd_start = 2451545.0;
+    printf("  \"occ_when_loc\": [\n");
+    first = 1;
+    for (size_t i = 0; i < N_OCC_WHEN_LOC_BODIES; i++) {
+        for (int backward = 0; backward <= 1; backward++) {
+            double geopos[3] = {
+                occ_when_loc_geopos[0], occ_when_loc_geopos[1], occ_when_loc_geopos[2]
+            };
+            double tjd_start = occ_when_loc_tjd_start;
+            int32 ipl = occ_when_loc_bodies[i].ipl;
+            char starbuf[AS_MAXCH] = { 0 };
+            if (occ_when_loc_bodies[i].starname != NULL)
+                strcpy(starbuf, occ_when_loc_bodies[i].starname);
+            char *starname = occ_when_loc_bodies[i].starname != NULL ? starbuf : NULL;
+            double tret[10] = { 0 };
+            double attr[20] = { 0 };
+            char serr[256] = { 0 };
+            int32 retval = swe_lun_occult_when_loc(tjd_start, ipl, starname, SEFLG_MOSEPH,
+                                                     geopos, tret, attr, backward, serr);
+
+            if (!first) printf(",\n");
+            first = 0;
+            printf("    {\"geopos\": [%.17g, %.17g, %.17g], \"tjd_start\": %.17g, \"ipl\": %d, "
+                   "\"starname\": %s, \"backward\": %s, \"retval\": %d, \"tret\": [",
+                   geopos[0], geopos[1], geopos[2], tjd_start, ipl,
+                   starname ? "\"Aldebaran\"" : "null", backward ? "true" : "false", retval);
+            for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+            printf("], \"attr\": [");
+            for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
             printf("]}");
         }
     }

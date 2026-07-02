@@ -70,6 +70,14 @@ bitflags! {
         const PARTEND_VISIBLE   = 4096;
         const PENUMBBEG_VISIBLE = 8192;
         const PENUMBEND_VISIBLE = 16384;
+        /// Occultation begins during the day (swephexp.h:329). Numerically identical bit to
+        /// [`Self::PENUMBBEG_VISIBLE`] -- the two flag families are mutually exclusive by call
+        /// site (lunar-eclipse vs. occultation), not by bit layout; same "shared bit position,
+        /// different meaning by context" pattern as [`Self::ONE_TRY`]/`SEFLG_TOPOCTR`.
+        const OCC_BEG_DAYLIGHT  = 8192;
+        /// Occultation ends during the day (swephexp.h:330). Numerically identical bit to
+        /// [`Self::PENUMBEND_VISIBLE`]; see [`Self::OCC_BEG_DAYLIGHT`].
+        const OCC_END_DAYLIGHT  = 16384;
         const ONE_TRY           = 32768;
 
         const ALLTYPES_SOLAR = Self::CENTRAL.bits()

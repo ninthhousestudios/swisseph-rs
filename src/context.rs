@@ -570,6 +570,23 @@ impl Ephemeris {
         )
     }
 
+    /// Local occultation search: next/previous occultation of `body`/`starname` by the Moon
+    /// *visible from* `geopos` (topocentric), with local contact times and circumstances.
+    /// `starname` (if given, non-empty) takes precedence over `body`. Port of
+    /// `swe_lun_occult_when_loc` (swecl.c:2071-2098, 2412-2764).
+    #[allow(clippy::too_many_arguments)]
+    pub fn lun_occult_when_loc(
+        &self,
+        tjd_start: f64,
+        body: Body,
+        starname: Option<&str>,
+        ifl: CalcFlags,
+        geopos: [f64; 3],
+        backward: bool,
+    ) -> Result<crate::eclipse::OccultLocal, Error> {
+        crate::eclipse::lun_occult_when_loc(self, tjd_start, body, starname, ifl, geopos, backward)
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`
@@ -960,16 +977,31 @@ impl Ephemeris {
         jd_tt: f64,
         flags: CalcFlags,
     ) -> Result<(String, CalcResult), Error> {
+        self.fixstar2_with_config(star, jd_tt, flags, &self.config)
+    }
+
+    /// Same as [`fixstar2`](Self::fixstar2) but with an explicit config override -- see
+    /// [`calc_with_config`](Self::calc_with_config). Lets callers (e.g. `eclipse.rs`'s
+    /// `eclipse_how`/`occult_when_loc`) get a topocentric fixed-star position at a caller-supplied
+    /// `geopos` without requiring it to match the `Ephemeris`'s own configured topographic
+    /// position.
+    pub(crate) fn fixstar2_with_config(
+        &self,
+        star: &str,
+        jd_tt: f64,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<(String, CalcResult), Error> {
         // C's swe_fixstar2 returns the original input iflag unchanged (it passes
         // iflag by value to fixstar_calc_from_struct and ignores the return).
         let orig_flags = flags;
-        let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
+        let flags = crate::calc::plaus_iflag(flags, config.ephemeris_source);
         let resolved = if let Some(s) = crate::stars::builtin_star(star) {
             s
         } else {
             self.stars.search(star)?
         };
-        let data = self.calc_fixstar(&resolved, jd_tt, flags)?;
+        let data = self.calc_fixstar(&resolved, jd_tt, flags, config)?;
         let name = format!("{},{}", resolved.name, resolved.bayer);
         Ok((
             name,
@@ -999,42 +1031,60 @@ impl Ephemeris {
         Ok((name, resolved.mag))
     }
 
-    /// Dispatcher: routes fixed-star computation to the correct backend.
+    /// Dispatcher: routes fixed-star computation to the correct backend. `config` is threaded
+    /// explicitly (rather than always reading `self.config`) so callers needing a topocentric
+    /// position (e.g. `eclipse.rs`'s `eclipse_how`/`occult_when_loc`, which build a per-call
+    /// `topo_config` override) can get one -- mirrors `calc_with_config`'s pattern.
     fn calc_fixstar(
         &self,
         star: &crate::stars::Star,
         jd: f64,
         flags: CalcFlags,
+        config: &EphemerisConfig,
     ) -> Result<[f64; 6], Error> {
-        match self.config.ephemeris_source {
-            crate::types::EphemerisSource::Swiss => self.calc_fixstar_sweph(star, jd, flags),
-            crate::types::EphemerisSource::Jpl => self.calc_fixstar_jpl(star, jd, flags),
-            crate::types::EphemerisSource::Moshier => self.calc_fixstar_moshier(star, jd, flags),
+        match config.ephemeris_source {
+            crate::types::EphemerisSource::Swiss => {
+                self.calc_fixstar_sweph(star, jd, flags, config)
+            }
+            crate::types::EphemerisSource::Jpl => self.calc_fixstar_jpl(star, jd, flags, config),
+            crate::types::EphemerisSource::Moshier => {
+                self.calc_fixstar_moshier(star, jd, flags, config)
+            }
         }
     }
 
-    /// Moshier backend: computes heliocentric Earth via Moshier pipeline.
+    /// Moshier backend: computes heliocentric Earth via Moshier pipeline. `xobs`/`xobs_dt` get a
+    /// topocentric offset added when `TOPOCTR` is set (docs/c-ref-fixstar.md step 6) -- previously
+    /// silently ignored here (no golden coverage exercised it), matching the same offset-addition
+    /// pattern as `calc.rs`'s `apparent_planet`/`apparent_sun`/`apparent_moon`.
     fn calc_fixstar_moshier(
         &self,
         star: &crate::stars::Star,
         jd: f64,
         flags: CalcFlags,
+        config: &EphemerisConfig,
     ) -> Result<[f64; 6], Error> {
         use crate::constants::{FIXSTAR_DT, J2000};
         use crate::obliquity::obliquity;
 
-        let models = &self.config.astro_models;
+        let models = &config.astro_models;
         // Moshier returns heliocentric Earth, matching C's xearth for MOSEPH.
         let eps_j2000 = obliquity(J2000, CalcFlags::empty(), models);
         let pp =
             crate::moshier::backend::compute_pipeline(jd, crate::types::Body::Sun, &eps_j2000)?;
-        let xobs = pp.earth_helio;
+        let mut xobs = pp.earth_helio;
         let pp_dt = crate::moshier::backend::compute_pipeline(
             jd - FIXSTAR_DT,
             crate::types::Body::Sun,
             &eps_j2000,
         )?;
-        let xobs_dt = pp_dt.earth_helio;
+        let mut xobs_dt = pp_dt.earth_helio;
+        let offset = crate::calc::topo_offset(jd, flags, config, models);
+        let offset_dt = crate::calc::topo_offset(jd - FIXSTAR_DT, flags, config, models);
+        for i in 0..6 {
+            xobs[i] += offset[i];
+            xobs_dt[i] += offset_dt[i];
+        }
         // Moshier is heliocentric; Sun is at the origin, so sun_bary = 0.
         let sun_bary = [0.0f64; 6];
         self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
@@ -1046,6 +1096,7 @@ impl Ephemeris {
         star: &crate::stars::Star,
         jd: f64,
         flags: CalcFlags,
+        config: &EphemerisConfig,
     ) -> Result<[f64; 6], Error> {
         use crate::calc::{find_file_or_nearest, sweph_positions};
         use crate::constants::FIXSTAR_DT;
@@ -1067,7 +1118,7 @@ impl Ephemeris {
         )?;
         let pp = sweph_positions(planet_file, moon_file, SEI_EMB, jd, true)?;
         // C uses barycentric Earth (xearth) for parallax and aberration.
-        let xobs = pp.earth_bary;
+        let mut xobs = pp.earth_bary;
         let sun_bary = pp.sun_bary;
 
         let jd_dt = jd - FIXSTAR_DT;
@@ -1086,7 +1137,15 @@ impl Ephemeris {
             },
         )?;
         let pp_dt = sweph_positions(planet_file_dt, moon_file_dt, SEI_EMB, jd_dt, true)?;
-        let xobs_dt = pp_dt.earth_bary;
+        let mut xobs_dt = pp_dt.earth_bary;
+
+        let models = &config.astro_models;
+        let offset = crate::calc::topo_offset(jd, flags, config, models);
+        let offset_dt = crate::calc::topo_offset(jd_dt, flags, config, models);
+        for i in 0..6 {
+            xobs[i] += offset[i];
+            xobs_dt[i] += offset_dt[i];
+        }
 
         self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
     }
@@ -1097,6 +1156,7 @@ impl Ephemeris {
         star: &crate::stars::Star,
         jd: f64,
         flags: CalcFlags,
+        config: &EphemerisConfig,
     ) -> Result<[f64; 6], Error> {
         use crate::constants::FIXSTAR_DT;
         use crate::jpl::{J_EARTH, J_SBARY, J_SUN, jpl_pleph};
@@ -1108,9 +1168,16 @@ impl Ephemeris {
 
         // C uses barycentric Earth for parallax/aberration; deflection uses earth_helio
         // computed inside swi_deflect_light as earth_bary - sun_bary.
-        let xobs = jpl_pleph(file, jd, J_EARTH, J_SBARY, true)?;
+        let mut xobs = jpl_pleph(file, jd, J_EARTH, J_SBARY, true)?;
         let sun_bary = jpl_pleph(file, jd, J_SUN, J_SBARY, true)?;
-        let xobs_dt = jpl_pleph(file, jd - FIXSTAR_DT, J_EARTH, J_SBARY, true)?;
+        let mut xobs_dt = jpl_pleph(file, jd - FIXSTAR_DT, J_EARTH, J_SBARY, true)?;
+        let models = &config.astro_models;
+        let offset = crate::calc::topo_offset(jd, flags, config, models);
+        let offset_dt = crate::calc::topo_offset(jd - FIXSTAR_DT, flags, config, models);
+        for i in 0..6 {
+            xobs[i] += offset[i];
+            xobs_dt[i] += offset_dt[i];
+        }
 
         self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
     }

@@ -32,7 +32,7 @@ pub use config::{EphemerisConfig, TopoPosition};
 pub use context::{CalcResult, Ephemeris};
 pub use eclipse::{
     EclipseHow, EclipseWhere, LunarEclipseGlobal, LunarEclipseHow, LunarEclipseLocal, OccultGlobal,
-    SolarEclipseGlobal, SolarEclipseLocal,
+    OccultLocal, SolarEclipseGlobal, SolarEclipseLocal,
 };
 pub use error::Error;
 pub use flags::{CalcFlags, EclipseFlags, RiseSetFlags};

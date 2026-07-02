@@ -423,10 +423,11 @@ pub struct EclipseHow {
     pub flags: EclipseFlags,
 }
 
-/// [`calc_planet_star`] with a topocentric config override threaded through the planet branch
-/// (shared by [`eclipse_how`]). Stars don't yet have a per-call topographic override (`fixstar2`
-/// has no TOPOCTR path, matching riseset.rs's fixed-star note) -- only the planet branch uses
-/// `config`.
+/// [`calc_planet_star`] with a topocentric config override threaded through both branches
+/// (shared by [`eclipse_how`]/[`occult_when_loc`]) -- `fixstar2_with_config` (added for this;
+/// riseset.rs's fixed-star rise/set path still uses the plain geocentric `fixstar2_ut`, since
+/// stellar parallax/diurnal-aberration is below that module's tolerance, unlike occultation's
+/// azimuth/altitude output).
 fn calc_planet_star_topo(
     eph: &Ephemeris,
     config: &EphemerisConfig,
@@ -437,7 +438,7 @@ fn calc_planet_star_topo(
 ) -> Result<[f64; 6], Error> {
     match starname {
         Some(name) if !name.is_empty() => {
-            let (_, result) = eph.fixstar2(name, tjd_et, flags)?;
+            let (_, result) = eph.fixstar2_with_config(name, tjd_et, flags, config)?;
             Ok(result.data)
         }
         _ => Ok(eph.calc_with_config(tjd_et, ipl, flags, config)?.data),
@@ -2696,4 +2697,563 @@ pub(crate) fn lun_occult_when_glob(
             flags: retflag,
         });
     }
+}
+
+/// Local occultation search result: `tret[0..7]` per `swe_lun_occult_when_loc` +
+/// `occult_when_loc` (swecl.c:2071-2098, 2412-2764, docs/c-ref-occultation.md §3). Same slot
+/// semantics as [`SolarEclipseLocal`], with one addition: for a fixed star (point source),
+/// `time_first_contact`/`time_fourth_contact` are aliased from `time_second_contact`/
+/// `time_third_contact` rather than independently refined (§3 step 9).
+#[derive(Debug, Clone, Copy)]
+pub struct OccultLocal {
+    /// Time (UT) of maximum occultation as seen from this location. `tret[0]`.
+    pub time_maximum: f64,
+    /// Time (UT) of first contact (disc-edge tangency in; for a star, aliased from
+    /// `time_second_contact`). `tret[1]`.
+    pub time_first_contact: f64,
+    /// Time (UT) of second contact (full immersion begins; for a star, same instant as first
+    /// contact). `tret[2]`.
+    pub time_second_contact: f64,
+    /// Time (UT) of third contact (emersion begins; for a star, same instant as fourth contact).
+    /// `tret[3]`.
+    pub time_third_contact: f64,
+    /// Time (UT) of fourth contact (disc-edge tangency out; for a star, aliased from
+    /// `time_third_contact`). `tret[4]`.
+    pub time_fourth_contact: f64,
+    /// Time (UT) of the occulted body's rise, if within the [1st,4th]-contact window; `0.0`
+    /// otherwise (including circumpolar). `tret[5]`.
+    pub time_rise: f64,
+    /// Time (UT) of the occulted body's set, if within the [1st,4th]-contact window; `0.0`
+    /// otherwise (including circumpolar). `tret[6]`.
+    pub time_set: f64,
+    /// Local circumstances (`attr[]`) at whichever instant was written last in the descending
+    /// visibility scan (§3 step 10): the moment of maximum occultation. `core_diameter_km` is
+    /// filled in by [`lun_occult_when_loc`] from a geocentric `eclipse_where` call at
+    /// `time_maximum` (§3 "Public wrapper" step 5), same convention as `sol_eclipse_when_loc`.
+    pub attr: EclipseHow,
+    /// Occultation-type classification (TOTAL/ANNULAR/PARTIAL) OR'd with VISIBLE and whichever
+    /// of MAX/1ST/2ND/3RD/4TH_VISIBLE applied at some contact (the `1ST..4TH_VISIBLE` bits reuse
+    /// [`EclipseFlags::PARTBEG_VISIBLE`]/[`EclipseFlags::TOTBEG_VISIBLE`]/
+    /// [`EclipseFlags::TOTEND_VISIBLE`]/[`EclipseFlags::PARTEND_VISIBLE`] -- numerically
+    /// identical bits, different names by call-site context), plus
+    /// [`EclipseFlags::OCC_BEG_DAYLIGHT`]/[`EclipseFlags::OCC_END_DAYLIGHT`] (§3 step 12, no
+    /// solar equivalent) and `NONCENTRAL` merged in by [`lun_occult_when_loc`]. The search loop
+    /// retries internally until a visible occultation is found -- never empty.
+    pub flags: EclipseFlags,
+}
+
+/// Local occultation search: find the next (or, if `backward`, previous) occultation of
+/// `ipl`/`starname` by the Moon **visible from** `geopos` (topocentric). Port of the worker
+/// `occult_when_loc` (swecl.c:2412-2764, docs/c-ref-occultation.md §3 "Worker"). No
+/// `SE_ECL_ONE_TRY` support -- same choice already made for [`lun_occult_when_glob`]; this
+/// always searches until a matching occultation is found, matching the exposed `backward:
+/// bool`-only signature.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn occult_when_loc(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    ifl: CalcFlags,
+    geopos: [f64; 3],
+    backward: bool,
+) -> Result<OccultLocal, Error> {
+    let config = eph.config();
+    let direction = if backward { -1.0 } else { 1.0 };
+    let is_planet = starname.unwrap_or("").is_empty();
+
+    let topo_config = {
+        let mut c = config.clone();
+        c.topographic = Some(TopoPosition {
+            longitude: geopos[0],
+            latitude: geopos[1],
+            altitude: geopos[2],
+        });
+        c
+    };
+
+    // Setup (swecl.c:2441-2443): `iflag = SEFLG_TOPOCTR | ifl` -- deliberately NOT
+    // `SEFLG_EQUATORIAL`-augmented like solar's `eclipse_when_loc` (confirmed against the C
+    // source directly; the ref doc's phrasing is easy to misread as matching solar's
+    // convention -- it doesn't. Harmless: these calls only ever feed `dot_prod_unit` angle
+    // differences, which don't care which consistent frame the vectors are in). `iflaggeo`
+    // (swecl.c:2442) reduces to plain `ifl`, since callers never pass `TOPOCTR` in `ifl` here --
+    // reused directly as `ifl` below, matching `lun_occult_when_glob`'s step-1 pattern.
+    let iflag = CalcFlags::TOPOCTR | ifl;
+    let iflag_cart = iflag | CalcFlags::XYZ;
+
+    let mut t = tjd_start;
+
+    'next_try: loop {
+        // §3 step 1: rough conjunction in ecliptic longitude -- identical to
+        // `lun_occult_when_glob`'s step 1 (geocentric `ifl`, no TOPOCTR).
+        let ls0 = calc_planet_star(eph, t, ipl, starname, ifl)?;
+        if let Some(name) = starname
+            && !name.is_empty()
+            && ls0[1].abs() > 7.0
+        {
+            return Err(Error::CError(format!(
+                "occultation never occurs: star {name} has ecl. lat. {:.1}",
+                ls0[1]
+            )));
+        }
+        let mut ls = ls0;
+        let mut lm = eph.calc(t, Body::Moon, ifl)?.data;
+        let mut dl = normalize_degrees(ls[0] - lm[0]);
+        if backward {
+            dl -= 360.0;
+        }
+        while dl.abs() > 0.1 {
+            t += dl / 13.0;
+            ls = calc_planet_star(eph, t, ipl, starname, ifl)?;
+            lm = eph.calc(t, Body::Moon, ifl)?.data;
+            dl = normalize_degrees(ls[0] - lm[0]);
+            if dl > 180.0 {
+                dl -= 360.0;
+            }
+        }
+        let mut tjd = t;
+
+        // §3 step 2: latitude-difference gate.
+        if (ls[1] - lm[1]).abs() > 2.0 {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+
+        // §3 step 3: occulted-body angular radius.
+        let body_radius = body_radius_au(ipl, starname);
+
+        // §3 step 4: local-visibility bracket + refine time of maximum occultation.
+        // `dtstart = 1` fixed (no ET-range conditional, unlike solar); `dtdiv` stays `2` for the
+        // entire loop (swecl.c:2503-2504's `if (dt < 0.01) dtdiv = 2` is a no-op -- port
+        // faithfully, do not "fix" it to 3, matching solar's genuine 2-then-3 schedule). Mid-loop
+        // bailout for topocentric latitude gap (swecl.c:2516-2525): since we don't support
+        // `SE_ECL_ONE_TRY`, this always retries immediately rather than ever setting a
+        // `stop_after_this` flag to finish the current pass first.
+        let dtdiv = 2.0;
+        let mut dt = 1.0;
+        while dt > 0.00001 {
+            let mut dc = [0.0f64; 3];
+            let mut tt = tjd - dt;
+            for dc_i in dc.iter_mut() {
+                let xs = calc_planet_star_topo(eph, &topo_config, tt, ipl, starname, iflag_cart)?;
+                let ls2 = calc_planet_star_topo(eph, &topo_config, tt, ipl, starname, iflag)?;
+                let xm = eph
+                    .calc_with_config(tt, Body::Moon, iflag_cart, &topo_config)?
+                    .data;
+                let lm2 = eph
+                    .calc_with_config(tt, Body::Moon, iflag, &topo_config)?
+                    .data;
+                if dt < 0.1 && (ls2[1] - lm2[1]).abs() > 2.0 {
+                    t = tjd + direction * 20.0;
+                    continue 'next_try;
+                }
+                let rmoon = (RMOON / lm2[2]).asin() * RADTODEG;
+                let rsun = (body_radius / ls2[2]).asin() * RADTODEG;
+                *dc_i = dot_prod_unit([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]).acos()
+                    * RADTODEG
+                    - (rmoon + rsun);
+                tt += dt;
+            }
+            let (dtint, _) = crate::math::find_maximum(dc[0], dc[1], dc[2], dt);
+            tjd += dtint + dt;
+            dt /= dtdiv;
+        }
+
+        // §3 step 5 (post-convergence confirm) + "reject if not actually occulting"
+        // (swecl.c:2551-2560): a fresh sample at converged `tjd`, not a reuse of the loop's last
+        // sample.
+        let xs = calc_planet_star_topo(eph, &topo_config, tjd, ipl, starname, iflag_cart)?;
+        let ls = calc_planet_star_topo(eph, &topo_config, tjd, ipl, starname, iflag)?;
+        let xm = eph
+            .calc_with_config(tjd, Body::Moon, iflag_cart, &topo_config)?
+            .data;
+        let lm = eph
+            .calc_with_config(tjd, Body::Moon, iflag, &topo_config)?
+            .data;
+        let dctr = dot_prod_unit([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]).acos() * RADTODEG;
+        let rmoon = (RMOON / lm[2]).asin() * RADTODEG;
+        let rsun = (body_radius / ls[2]).asin() * RADTODEG;
+        let rsplusrm = rsun + rmoon;
+        let rsminusrm = rsun - rmoon;
+        if dctr > rsplusrm {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+
+        let mut tret = [0.0f64; 7];
+        // §3 step 6: two-step iterated deltaT (unlike `lun_occult_when_glob`'s single pass --
+        // this asymmetry between `_when_glob` and `_when_loc` is a literal C quirk, not a bug).
+        let t0_pass1 = tjd - crate::deltat::calc_deltat(tjd, config);
+        tret[0] = tjd - crate::deltat::calc_deltat(t0_pass1, config);
+        if (backward && tret[0] >= tjd_start - 0.0001)
+            || (!backward && tret[0] <= tjd_start + 0.0001)
+        {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+
+        // §3 step 7: type classification (ANNULAR is not structurally guarded here for
+        // `ipl != Body::Sun`, unlike `lun_occult_when_glob` -- see c-ref-occultation.md §3 step 7
+        // for why it's practically unreachable for a small occulted body anyway).
+        let mut retflag = if dctr < rsminusrm {
+            EclipseFlags::ANNULAR
+        } else if dctr < rsminusrm.abs() {
+            EclipseFlags::TOTAL
+        } else if dctr <= rsplusrm {
+            EclipseFlags::PARTIAL
+        } else {
+            EclipseFlags::empty()
+        };
+        let dctrmin = dctr;
+
+        // Contacts 2/3 (§3 step 8, swecl.c:2591-2646): skipped (tret[2]=tret[3]=0) if only a
+        // partial occultation is visible from this location (umbra never reaches here).
+        if dctrmin <= rsminusrm.abs() {
+            let twomin = 2.0 / 24.0 / 60.0;
+            let mut dc = [0.0f64; 3];
+            dc[1] = rsminusrm.abs() - dctrmin;
+            for &(i, t2) in &[(0usize, tjd - twomin), (2usize, tjd + twomin)] {
+                let xs = calc_planet_star_topo(eph, &topo_config, t2, ipl, starname, iflag_cart)?;
+                let xm = eph
+                    .calc_with_config(t2, Body::Moon, iflag_cart, &topo_config)?
+                    .data;
+                let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                let mut rmoon = (RMOON / dm).asin() * RADTODEG;
+                rmoon *= 0.99916; // "gives better accuracy for 2nd/3rd contacts" (swecl.c)
+                let rsun = (body_radius / ds).asin() * RADTODEG;
+                let dctr_i = topo_angular_separation([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]);
+                dc[i] = (rsun - rmoon).abs() - dctr_i;
+            }
+            if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], twomin) {
+                tret[2] = tjd + dt1 + twomin;
+                tret[3] = tjd + dt2 + twomin;
+                let tensec = 10.0 / 24.0 / 60.0 / 60.0;
+                let mut dt = tensec;
+                for _ in 0..2 {
+                    for &j in &[2usize, 3usize] {
+                        let mut xs = calc_planet_star_topo(
+                            eph,
+                            &topo_config,
+                            tret[j],
+                            ipl,
+                            starname,
+                            iflag_cart | CalcFlags::SPEED,
+                        )?;
+                        let mut xm = eph
+                            .calc_with_config(
+                                tret[j],
+                                Body::Moon,
+                                iflag_cart | CalcFlags::SPEED,
+                                &topo_config,
+                            )?
+                            .data;
+                        let mut dc2 = [0.0f64; 2];
+                        for (i2, dc2_i) in dc2.iter_mut().enumerate() {
+                            if i2 == 1 {
+                                for k in 0..3 {
+                                    xs[k] -= xs[k + 3] * dt;
+                                    xm[k] -= xm[k + 3] * dt;
+                                }
+                            }
+                            let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                            let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                            let mut rmoon = (RMOON / dm).asin() * RADTODEG;
+                            rmoon *= 0.99916;
+                            let rsun = (body_radius / ds).asin() * RADTODEG;
+                            let dctr_i = topo_angular_separation(
+                                [xs[0], xs[1], xs[2]],
+                                [xm[0], xm[1], xm[2]],
+                            );
+                            *dc2_i = (rsun - rmoon).abs() - dctr_i;
+                        }
+                        let dt1 = -dc2[0] / ((dc2[0] - dc2[1]) / dt);
+                        tret[j] += dt1;
+                    }
+                    dt /= 10.0;
+                }
+                tret[2] -= crate::deltat::calc_deltat(tret[2], config);
+                tret[3] -= crate::deltat::calc_deltat(tret[3], config);
+            }
+            // Divergence from C on `find_zero` failure, same precedent as
+            // `sol_eclipse_when_glob`/`lun_occult_when_glob`: leave `tret[2]/[3]` at 0.0 and
+            // skip refinement rather than refining around a stale/zero value -- unreachable here
+            // since `dc[1] = rsminusrm.abs() - dctrmin >= 0` guarantees real roots for a
+            // confirmed occultation.
+        }
+
+        // Contacts 1/4 (§3 step 9, swecl.c:2648-2708): the one occultation-specific structural
+        // fork. For a planet/asteroid, computed via the same `find_zero` + `rsplusrm` bracket as
+        // solar (no `0.99916` fudge, unlike contacts 2/3). For a fixed star (point source),
+        // contacts 1/4 are physically identical to contacts 2/3 and simply aliased rather than
+        // re-derived -- port this as a branch on `starname`, not a unification of the math.
+        if is_planet {
+            let twohr = 2.0 / 24.0;
+            let mut dc = [0.0f64; 3];
+            dc[1] = rsplusrm - dctrmin;
+            for &(i, t2) in &[(0usize, tjd - twohr), (2usize, tjd + twohr)] {
+                let xs = calc_planet_star_topo(eph, &topo_config, t2, ipl, starname, iflag_cart)?;
+                let xm = eph
+                    .calc_with_config(t2, Body::Moon, iflag_cart, &topo_config)?
+                    .data;
+                let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                let rmoon = (RMOON / dm).asin() * RADTODEG;
+                let rsun = (body_radius / ds).asin() * RADTODEG;
+                let dctr_i = topo_angular_separation([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]);
+                dc[i] = (rsun + rmoon) - dctr_i;
+            }
+            if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], twohr) {
+                tret[1] = tjd + dt1 + twohr;
+                tret[4] = tjd + dt2 + twohr;
+                let tenmin = 10.0 / 24.0 / 60.0;
+                let mut dt = tenmin;
+                for _ in 0..3 {
+                    for &j in &[1usize, 4usize] {
+                        let mut xs = calc_planet_star_topo(
+                            eph,
+                            &topo_config,
+                            tret[j],
+                            ipl,
+                            starname,
+                            iflag_cart | CalcFlags::SPEED,
+                        )?;
+                        let mut xm = eph
+                            .calc_with_config(
+                                tret[j],
+                                Body::Moon,
+                                iflag_cart | CalcFlags::SPEED,
+                                &topo_config,
+                            )?
+                            .data;
+                        let mut dc2 = [0.0f64; 2];
+                        for (i2, dc2_i) in dc2.iter_mut().enumerate() {
+                            if i2 == 1 {
+                                for k in 0..3 {
+                                    xs[k] -= xs[k + 3] * dt;
+                                    xm[k] -= xm[k + 3] * dt;
+                                }
+                            }
+                            let ds = (xs[0] * xs[0] + xs[1] * xs[1] + xs[2] * xs[2]).sqrt();
+                            let dm = (xm[0] * xm[0] + xm[1] * xm[1] + xm[2] * xm[2]).sqrt();
+                            let rmoon = (RMOON / dm).asin() * RADTODEG;
+                            let rsun = (body_radius / ds).asin() * RADTODEG;
+                            let dctr_i = topo_angular_separation(
+                                [xs[0], xs[1], xs[2]],
+                                [xm[0], xm[1], xm[2]],
+                            );
+                            *dc2_i = (rsun + rmoon).abs() - dctr_i;
+                        }
+                        let dt1 = -dc2[0] / ((dc2[0] - dc2[1]) / dt);
+                        tret[j] += dt1;
+                    }
+                    dt /= 10.0;
+                }
+                tret[1] -= crate::deltat::calc_deltat(tret[1], config);
+                tret[4] -= crate::deltat::calc_deltat(tret[4], config);
+            }
+            // Same "leave at 0.0, no retry" divergence-from-C on `find_zero` failure as contacts
+            // 2/3 above -- unreachable in practice (`dc[1] = rsplusrm - dctrmin >= 0` by the
+            // rejection guard).
+        } else {
+            tret[1] = tret[2];
+            tret[4] = tret[3];
+        }
+
+        // Visibility scan (§3 step 10, swecl.c:2710-2721): descending order so the i=0 (max)
+        // write survives last, matching every other eclipse/occultation search's shared-`attr[]`
+        // convention. Raw `ifl` (not `iflag`) -- `eclipse_how` ORs in its own
+        // EQUATORIAL|TOPOCTR internally.
+        let mut how: Option<EclipseHow> = None;
+        for i in (0..=4).rev() {
+            if tret[i] == 0.0 {
+                continue;
+            }
+            let h = eclipse_how(
+                eph, tret[i], ipl, starname, ifl, geopos[0], geopos[1], geopos[2],
+            )?;
+            if h.apparent_altitude > 0.0 {
+                retflag |= EclipseFlags::VISIBLE;
+                retflag |= match i {
+                    0 => EclipseFlags::MAX_VISIBLE,
+                    1 => EclipseFlags::PARTBEG_VISIBLE, // SE_ECL_1ST_VISIBLE, same bit
+                    2 => EclipseFlags::TOTBEG_VISIBLE,  // SE_ECL_2ND_VISIBLE, same bit
+                    3 => EclipseFlags::TOTEND_VISIBLE,  // SE_ECL_3RD_VISIBLE, same bit
+                    4 => EclipseFlags::PARTEND_VISIBLE, // SE_ECL_4TH_VISIBLE, same bit
+                    _ => unreachable!(),
+                };
+            }
+            how = Some(h);
+        }
+        if !retflag.contains(EclipseFlags::VISIBLE) {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+        let how = how.expect("tret[0] is always set, so the i=0 scan iteration always runs");
+
+        // §3 step 12 (swecl.c:2742-2772): occultation-specific rise/set handling, no solar
+        // equivalent at all.
+
+        // Occulted body's own rise/set within the [1st,4th]-contact window. Anchored at
+        // `tret[1] - 0.1` -- NOT `-0.001` like solar's sunrise/sunset anchor below; a literal
+        // quirk confirmed directly against the C source, since the ref doc doesn't spell out
+        // this offset. `retc == ERR` propagates; `retc == -2` (circumpolar) on either call just
+        // skips populating that slot -- no early return, no retry (unlike solar's own
+        // sunrise/sunset handling and unlike the Sun-daylight blocks below).
+        match eph.rise_trans(
+            tret[1] - 0.1,
+            ipl,
+            starname,
+            iflag,
+            RiseSetFlags::RISE | RiseSetFlags::DISC_BOTTOM,
+            geopos,
+            0.0,
+            0.0,
+        ) {
+            Ok(r) => {
+                let tjdr = r.time;
+                match eph.rise_trans(
+                    tret[1] - 0.1,
+                    ipl,
+                    starname,
+                    iflag,
+                    RiseSetFlags::SET | RiseSetFlags::DISC_BOTTOM,
+                    geopos,
+                    0.0,
+                    0.0,
+                ) {
+                    Ok(s) => {
+                        let tjds = s.time;
+                        if tjdr > tret[1] && tjdr < tret[4] {
+                            tret[5] = tjdr;
+                        }
+                        if tjds > tret[1] && tjds < tret[4] {
+                            tret[6] = tjds;
+                        }
+                    }
+                    Err(Error::CircumpolarBody) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(Error::CircumpolarBody) => {}
+            Err(e) => return Err(e),
+        }
+
+        // Is the actual Sun up at contact 1 / contact 4? `SE_CALC_RISE`/`SE_CALC_SET` here
+        // WITHOUT `DISC_BOTTOM` -- unlike the occulted-body pair above and unlike solar's
+        // sunrise/sunset check -- another literal quirk confirmed against the C source.
+        match eph.rise_trans(
+            tret[1],
+            Body::Sun,
+            None,
+            iflag,
+            RiseSetFlags::RISE,
+            geopos,
+            0.0,
+            0.0,
+        ) {
+            Ok(r) => {
+                match eph.rise_trans(
+                    tret[1],
+                    Body::Sun,
+                    None,
+                    iflag,
+                    RiseSetFlags::SET,
+                    geopos,
+                    0.0,
+                    0.0,
+                ) {
+                    Ok(s) => {
+                        if s.time < r.time {
+                            retflag |= EclipseFlags::OCC_BEG_DAYLIGHT;
+                        }
+                    }
+                    Err(Error::CircumpolarBody) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(Error::CircumpolarBody) => {}
+            Err(e) => return Err(e),
+        }
+        match eph.rise_trans(
+            tret[4],
+            Body::Sun,
+            None,
+            iflag,
+            RiseSetFlags::RISE,
+            geopos,
+            0.0,
+            0.0,
+        ) {
+            Ok(r) => {
+                match eph.rise_trans(
+                    tret[4],
+                    Body::Sun,
+                    None,
+                    iflag,
+                    RiseSetFlags::SET,
+                    geopos,
+                    0.0,
+                    0.0,
+                ) {
+                    Ok(s) => {
+                        if s.time < r.time {
+                            retflag |= EclipseFlags::OCC_END_DAYLIGHT;
+                        }
+                    }
+                    Err(Error::CircumpolarBody) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(Error::CircumpolarBody) => {}
+            Err(e) => return Err(e),
+        }
+
+        return Ok(OccultLocal {
+            time_maximum: tret[0],
+            time_first_contact: tret[1],
+            time_second_contact: tret[2],
+            time_third_contact: tret[3],
+            time_fourth_contact: tret[4],
+            time_rise: tret[5],
+            time_set: tret[6],
+            attr: how,
+            flags: retflag,
+        });
+    }
+}
+
+/// Public wrapper (`swe_lun_occult_when_loc`, swecl.c:2071-2098, docs/c-ref-occultation.md §3
+/// "Public wrapper"). `geopos` = [longitude, latitude, height above sea (m)],
+/// degrees/degrees/meters. Uses occultation's own error wording ("location for occultations must
+/// be...") rather than solar's ("location for eclipses..."), matching C's distinct error string
+/// at this call site.
+pub(crate) fn lun_occult_when_loc(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    ifl: CalcFlags,
+    geopos: [f64; 3],
+    backward: bool,
+) -> Result<OccultLocal, Error> {
+    if !(crate::constants::RISE_SET_GEOALT_MIN..=crate::constants::RISE_SET_GEOALT_MAX)
+        .contains(&geopos[2])
+    {
+        return Err(Error::CError(format!(
+            "location for occultations must be between {:.0} and {:.0} m above sea",
+            crate::constants::RISE_SET_GEOALT_MIN,
+            crate::constants::RISE_SET_GEOALT_MAX
+        )));
+    }
+    let ipl = normalize_occulted_body(ipl);
+    let ifl = ifl & crate::calc::EPHMASK;
+
+    let mut result = occult_when_loc(eph, tjd_start, ipl, starname, ifl, geopos, backward)?;
+    let where_result = eclipse_where(eph, result.time_maximum, ipl, starname, ifl)?;
+    result.flags |= where_result.flags & EclipseFlags::NONCENTRAL;
+    result.attr.core_diameter_km = where_result.core_diameter_km;
+
+    Ok(result)
 }
