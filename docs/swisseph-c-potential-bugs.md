@@ -208,3 +208,44 @@ every sample epoch (PNOC 3 — swisseph-rs/84, `calc::lunar_osc_elem` / `calc::p
 This matches C's node/apogee *positions* bit-for-bit (1e-9) but cannot reproduce the speed
 artifact without re-introducing the cache, so the Moshier speed golden tolerance is relaxed to
 5e-6 (Swiss stays 1e-7). See `CLAUDE.md <stateless_tolerance>` §3.
+
+## 7. swe_nod_aps mean descending-node distance singularity → ill-conditioned apparent position
+
+**Location:** `swecl.c`, `swe_nod_aps()` mean branch, node-distance block (lines ~5225–5240).
+
+**What:** For a mean node, the heliocentric *distance* of the node is derived from the eccentric
+anomaly and then divided by the cosine of the node's argument:
+
+```c
+ea  = atan(tan(-parg * DEGTORAD / 2) * sqrt((1-ecce)/(1+ecce))) * 2;
+xna[2] = sema * (cos(ea) - ecce) / cos(parg * DEGTORAD);          /* ascending node  */
+ea  = atan(tan((180 - parg) * DEGTORAD / 2) * sqrt((1-ecce)/(1+ecce))) * 2;
+xnd[2] = sema * (cos(ea) - ecce) / cos((180 - parg) * DEGTORAD);  /* descending node */
+```
+
+`parg` is the argument of perihelion measured from the ascending node. When `parg` (ascending) or
+`180 − parg` (descending) approaches ±90°, the divisor `cos(...)` approaches zero and the node
+"distance" blows up. For the low-inclination outer planets this happens in practice — e.g.
+**Jupiter**: `parg ≈ 273.9°`, so `cos((180 − parg)°) = cos(−93.9°) ≈ −0.067`, and the descending
+node comes out at a spurious **6.19 AU — larger than Jupiter's 5.45 AU aphelion**. The point is a
+mathematical artifact of the tangent-of-half-angle formula near its pole, not a physical location.
+
+**Impact:** The *raw geometry* is still well-defined and reproducible (a stateless port matches C
+bit-for-bit under `SEFLG_TRUEPOS` for every body and every point, descending node included). The
+problem only surfaces in the **apparent** output: `swe_nod_aps` then applies light deflection and
+aberration to this ill-conditioned vector. Deflection alone and aberration alone each remain
+bit-exact, but their *combination* amplifies a ~5e-10 floating-point-ordering difference (from the
+deflection speed branch) into a visible divergence — up to ~3.5e-4° in longitude and ~1.2e-2°/day
+in longitude speed for Jupiter's descending node. Because the seed is FP-ordering, C's own
+reference digits there are not reproducible across compilers/optimizers; the *value itself* is
+degraded, independent of any port.
+
+**Cause:** The closed-form node-distance formula has an unguarded `1 / cos(θ)` singularity at
+θ → 90°. A distance clamp, or computing the node radius from the orbit's semi-latus rectum instead
+(`r = a(1−e²)/(1 + e·cos(ν_node))`), would be numerically stable; C does neither.
+
+**Our Rust code:** Ports the formula verbatim (`nodaps::mean_branch`), so it reproduces C's raw
+geometry bit-for-bit but inherits the same ill-conditioning in the apparent output. The
+`tests/golden/nodaps.rs` tolerances reflect this: `TRUEPOS` geometry is asserted tight (1e-9 / 1e-8),
+apparent ascending-node / perihelion / aphelion at 1e-6, and the apparent descending node relaxed
+to 1e-3° / 2e-2°/day. (swisseph-rs/85)

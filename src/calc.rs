@@ -276,7 +276,7 @@ pub(crate) fn nutate(
     }
 }
 
-fn app_pos_rest(
+pub(crate) fn app_pos_rest(
     xx: &mut [f64; 6],
     flags: CalcFlags,
     eps: &Epsilon,
@@ -852,6 +852,15 @@ fn mean_element_pipeline(
         app_pos_rest(xx, flags, &eps, &nut_val, nutv.as_ref()),
         x2000,
     )
+}
+
+/// Mean lunar node & perigee longitudes + speeds (degrees, degrees/day) for
+/// `swe_nod_aps`'s Moon/MEAN branch. Thin re-export of
+/// [`crate::moshier::moon::mean_lunar_elements`] so the `nodaps` app module
+/// reaches it through `calc` rather than depending on a backend directly
+/// (`app-uses-calc-not-backends`).
+pub fn mean_lunar_elements(tjd: f64) -> (f64, f64, f64, f64) {
+    crate::moshier::moon::mean_lunar_elements(tjd)
 }
 
 pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result<OscOutput, Error> {

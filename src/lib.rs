@@ -18,6 +18,7 @@ pub mod houses;
 pub mod jpl;
 pub mod math;
 pub mod moshier;
+pub mod nodaps;
 pub mod nutation;
 pub mod obliquity;
 pub mod phenomena;
@@ -37,6 +38,7 @@ pub use eclipse::{
 pub use error::Error;
 pub use flags::{CalcFlags, EclipseFlags, RiseSetFlags};
 pub use houses::{AscMc, HouseResult};
+pub use nodaps::{NodApsMethod, NodesApsides};
 pub use phenomena::Phenomena;
 pub use riseset::RiseSetResult;
 pub use stars::{Star, StarCatalog};

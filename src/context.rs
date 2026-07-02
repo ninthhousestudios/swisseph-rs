@@ -499,6 +499,72 @@ impl Ephemeris {
         crate::phenomena::pheno_ut(self, tjd_ut, body, flags)
     }
 
+    /// Nodes & apsides of `body` at `tjd_et` (TT). Port of `swe_nod_aps`
+    /// (swecl.c:5075-5654). `method` selects mean vs osculating elements
+    /// ([`NodApsMethod`](crate::NodApsMethod)); the mean branch (Sun..Neptune,
+    /// Earth, Moon) is implemented, osculating is not yet (PNOC 5).
+    pub fn nod_aps(
+        &self,
+        tjd_et: f64,
+        body: Body,
+        flags: CalcFlags,
+        method: crate::nodaps::NodApsMethod,
+    ) -> Result<crate::nodaps::NodesApsides, Error> {
+        crate::nodaps::nod_aps(self, tjd_et, body, flags, method)
+    }
+
+    /// UT-based [`nod_aps`](Self::nod_aps). Port of `swe_nod_aps_ut`
+    /// (swecl.c:5656-5665): converts UT→TT via deltaT, then delegates.
+    pub fn nod_aps_ut(
+        &self,
+        tjd_ut: f64,
+        body: Body,
+        flags: CalcFlags,
+        method: crate::nodaps::NodApsMethod,
+    ) -> Result<crate::nodaps::NodesApsides, Error> {
+        let tjde = tjd_ut + crate::deltat::calc_deltat(tjd_ut, &self.config);
+        self.nod_aps(tjde, body, flags, method)
+    }
+
+    /// Observer / origin geometry for the nodes-&-apsides pipeline at epoch `t`
+    /// (TT), in equatorial-J2000 cartesian. Replaces C's `xsun`/`xear`/`xobs`
+    /// globals (swecl.c A.5.1) with an explicit per-epoch computation.
+    ///
+    /// Currently the Moshier backend only (the mean-branch golden coverage);
+    /// Swiss/JPL observer frames come with PNOC 5's osculating branch.
+    pub(crate) fn nodaps_observer(
+        &self,
+        t: f64,
+        flags: CalcFlags,
+    ) -> Result<crate::nodaps::ObsFrame, Error> {
+        let config = &self.config;
+        let models = &config.astro_models;
+        match config.ephemeris_source {
+            EphemerisSource::Moshier => {
+                let eps_j2000 = crate::obliquity::obliquity(
+                    crate::constants::J2000,
+                    CalcFlags::empty(),
+                    models,
+                );
+                let pp = crate::moshier::backend::compute_pipeline(t, Body::Sun, &eps_j2000)?;
+                let earth_helio = pp.earth_helio;
+                let offset = crate::calc::topo_offset(t, flags, config, models);
+                let mut xobs = earth_helio;
+                for i in 0..6 {
+                    xobs[i] += offset[i];
+                }
+                Ok(crate::nodaps::ObsFrame {
+                    sun_bary: [0.0; 6],
+                    xear: earth_helio,
+                    xobs,
+                })
+            }
+            other => Err(Error::CError(format!(
+                "swe_nod_aps mean branch currently supports the Moshier backend only (got {other:?})"
+            ))),
+        }
+    }
+
     /// Global eclipse search: next/previous solar eclipse anywhere on Earth from `tjd_start`
     /// (UT), restricted to eclipse types in `ifltype` (empty = all types). Port of
     /// `swe_sol_eclipse_when_glob` (swecl.c:1185-1515).
@@ -1073,7 +1139,7 @@ impl Ephemeris {
         })
     }
 
-    fn apply_sidereal(
+    pub(crate) fn apply_sidereal(
         &self,
         xreturn: &mut [f64; 24],
         x2000: &[f64; 6],

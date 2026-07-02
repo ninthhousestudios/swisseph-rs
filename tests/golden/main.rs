@@ -20,6 +20,7 @@ mod mean_elements;
 mod moshier_backend;
 mod moshier_moon;
 mod moshier_planet;
+mod nodaps;
 mod nutation;
 mod obliquity_bias;
 mod pheno;
