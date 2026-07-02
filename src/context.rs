@@ -971,6 +971,12 @@ impl Ephemeris {
             return Err(Error::CError(format!("invalid method: {imeth}")));
         }
 
+        // §1: asteroid-numbered Pluto → Body::Pluto (swecl.c:6344-6345)
+        let body = match body {
+            Body::Asteroid(id) if id.mpc_number() == 134340 => Body::Pluto,
+            _ => body,
+        };
+
         if imeth <= 1 {
             self.gauquelin_sector_geometric(t_ut, body, imeth, flags, geopos[0], geopos[1])
         } else {
