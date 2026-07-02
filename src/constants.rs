@@ -181,6 +181,40 @@ pub const NODE_CALC_INTV: f64 = 0.0001;
 /// moon's short-period terms make the node/apogee oscillate wildly within small
 /// intervals, so a coarser finite difference is used.
 pub const NODE_CALC_INTV_MOSH: f64 = 0.1;
+/// Distance threshold (AU) above which `SE_NODBIT_OSCU_BAR` computes the
+/// osculating ellipse about the barycenter rather than the Sun (C's hardcoded
+/// `x[2] > 6` test in `swe_nod_aps`, swecl.c:5256 — sits between Jupiter ~5.2 AU
+/// and Saturn ~9.5 AU). Used by `orbit.rs` (PNOC 6) and `nodaps.rs`.
+pub const OSCU_BAR_DISTANCE_THRESHOLD_AU: f64 = 6.0;
+
+/// Sun-mass / planet-mass ratios, indexed 0..8 = Mercury, Venus, EMB, Mars,
+/// Jupiter, Saturn, Uranus, Neptune, Pluto (C `plmass[9]`, swecl.c:5040-5050).
+/// Used by `swe_nod_aps`'s osculating branch and `swe_get_orbital_elements`
+/// (`orbit.rs`, PNOC 6) — lives here because both app modules need it and they
+/// must not import each other.
+pub const PLMASS: [f64; 9] = [
+    6023600.0,   // Mercury
+    408523.719,  // Venus
+    328900.5,    // Earth and Moon (EMB)
+    3098703.59,  // Mars
+    1047.348644, // Jupiter
+    3497.9018,   // Saturn
+    22902.98,    // Uranus
+    19412.26,    // Neptune
+    136566000.0, // Pluto
+];
+
+/// Maps a body number (indexed directly by the raw `SE_*` id, NOT a contiguous
+/// planet count) to a row index into the VSOP mean-element tables
+/// (`EL_NODE`/`EL_PERI`/… rows 0..7 = Mercury..Neptune) and, reused, into
+/// [`PLMASS`] (rows 0..8, same order + Pluto=8). C `ipl_to_elem[15]`
+/// (swecl.c:5052). Transcribed verbatim including its quirks:
+/// `IPL_TO_ELEM[0]`=2 (Sun→Earth's row), and `IPL_TO_ELEM[9]`=0 (Pluto→Mercury's
+/// row, a stale C mapping used only for a negligible `plm` perturbation — MUST be
+/// preserved bit-for-bit, see c-ref-orbital-elements.md's Pluto note).
+/// `SE_EARTH`=14 sits far outside the planet range.
+pub const IPL_TO_ELEM: [usize; 15] = [2, 0, 0, 1, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 2];
+
 pub const CORR_MNODE_JD_T0GREG: f64 = -3063616.5;
 pub const JPL_DE431_START: f64 = -3027215.5;
 pub const JPL_DE431_END: f64 = 7930192.5;

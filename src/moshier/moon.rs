@@ -2,10 +2,12 @@ use std::f64::consts::PI;
 
 use crate::constants::{
     AUNIT, CORR_MNODE_JD_T0GREG, DEGTORAD, J2000, JPL_DE431_END, JPL_DE431_START, MOON_MEAN_DIST,
-    MOON_MEAN_ECC, MOON_MEAN_INCL, MOSHNDEPH_END, MOSHNDEPH_START, STR,
+    MOON_MEAN_ECC, MOON_MEAN_INCL, MOSHNDEPH_END, MOSHNDEPH_START, RADTODEG, STR,
 };
 use crate::error::Error;
-use crate::math::{cartesian_to_polar, mod_2pi, mods3600, polar_to_cartesian, rotate_x};
+use crate::math::{
+    cartesian_to_polar, mod_2pi, mods3600, normalize_degrees, polar_to_cartesian, rotate_x,
+};
 
 use super::moon_tables::*;
 
@@ -45,7 +47,16 @@ struct MoonState {
 }
 
 pub fn mean_elements(t: f64) -> MeanElements {
-    let t2 = t * t;
+    mean_elements_t2(t, t * t)
+}
+
+/// [`mean_elements`] with an explicitly-supplied `t2` for the higher-degree
+/// secular terms. Exists because C's `mean_elements()` reads a *global* `T2`
+/// that `swi_mean_lunar_elements` does NOT refresh after `T -= 1/36525` — its
+/// one-day-earlier evaluation multiplies the secular terms by the ORIGINAL
+/// `T2`, not `(T−1day)²`. [`mean_lunar_elements`] relies on this to reproduce
+/// C's node/perigee speeds bit-for-bit; every other caller passes `t2 = t*t`.
+fn mean_elements_t2(t: f64, t2: f64) -> MeanElements {
     let frac_t = t % 1.0;
 
     let m = mods3600(129600000.0 * frac_t - 3418.961646 * t + 1287104.76154)
@@ -682,4 +693,38 @@ pub fn mean_apogee(jd: f64) -> Result<[f64; 3], Error> {
 
     pol[0] = mod_2pi(pol[0] + node);
     Ok(pol)
+}
+
+/// Mean lunar node & perigee longitudes (degrees) plus their daily speeds, for
+/// `swe_nod_aps`'s Moon/MEAN branch. Port of `swi_mean_lunar_elements`
+/// (swemmoon.c:1742-1761) — distinct from [`mean_node`]/[`mean_apogee`] (used by
+/// `SE_MEAN_NODE`/`SE_MEAN_APOG`) in that it returns numerical speeds in one call.
+///
+/// Returns `(node, dnode, peri, dperi)`: node longitude, node speed, perigee
+/// longitude, perigee speed — all degrees / degrees-per-day.
+///
+/// **Known C inconsistency (ported verbatim):** the correction-table subtraction
+/// is applied only to the current-epoch `node`/`peri`, never to the one-day-earlier
+/// values used for the speed estimate — so `dnode`/`dperi` are speeds of the *raw*
+/// (uncorrected) mean longitude. Golden-test parity requires this asymmetry.
+pub fn mean_lunar_elements(tjd: f64) -> (f64, f64, f64, f64) {
+    let t = (tjd - J2000) / 36525.0;
+    let t2 = t * t;
+    let me = mean_elements_t2(t, t2);
+    let mut node = normalize_degrees((me.swelp - me.nf) * STR * RADTODEG);
+    let mut peri = normalize_degrees((me.swelp - me.mp) * STR * RADTODEG);
+
+    // Step back exactly one day (1/36525 centuries) for the speed estimate.
+    // NOTE: C reuses the ORIGINAL `T2` here (its global is not refreshed after
+    // `T -= 1/36525`), so the secular terms multiply by `t2`, not `(t-1day)²`.
+    let me_prev = mean_elements_t2(t - 1.0 / 36525.0, t2);
+    let mut dnode = normalize_degrees(node - (me_prev.swelp - me_prev.nf) * STR * RADTODEG);
+    // Fold into (-360, 0] so dnode is the small negative daily node rate, not a
+    // degnorm-wrapped value near 360.
+    dnode -= 360.0;
+    let dperi = normalize_degrees(peri - (me_prev.swelp - me_prev.mp) * STR * RADTODEG);
+
+    node = normalize_degrees(node - corr_mean_node(tjd));
+    peri = normalize_degrees(peri - corr_mean_apog(tjd));
+    (node, dnode, peri, dperi)
 }
