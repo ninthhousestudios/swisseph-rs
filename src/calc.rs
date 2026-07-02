@@ -327,6 +327,33 @@ fn app_pos_rest(
     xreturn
 }
 
+/// Common tail for every `SEFLG_HELCTR` path: `xx` is the heliocentric position (light-time
+/// corrected, in the ICRS/J2000-equatorial frame — no aberration/deflection, which plaus_iflag
+/// forced off, and no geocenter conversion). Applies the shared bias → precession/nutation →
+/// `app_pos_rest` finish, exactly like the geocentric paths' tail. Zeroes velocity when SPEED is
+/// off. Returns `(xreturn[24], x2000[6])`.
+fn finish_helctr(
+    mut xx: [f64; 6],
+    jd: f64,
+    flags: CalcFlags,
+    models: &AstroModels,
+) -> ([f64; 24], [f64; 6]) {
+    if !flags.contains(CalcFlags::SPEED) {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+    if !flags.contains(CalcFlags::ICRS) {
+        frame_bias(&mut xx, jd, flags, models, FrameTransform::GcrsToJ2000);
+    }
+    let x2000 = xx;
+    let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
+    (
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    )
+}
+
 pub fn calc_planet(
     jd: f64,
     body: Body,
@@ -340,6 +367,21 @@ pub fn calc_planet(
         planet_helio,
         earth_helio,
     } = pp;
+
+    // Heliocentric (Moshier): observer is the Sun (xobs = 0 in the Moshier heliocentric frame),
+    // so the position is just `planet_helio`, light-time retarded with niter=0 (single analytic
+    // pass, no re-evaluation — sweph.c:2659-2664). No aberration/deflection/geocenter conversion.
+    if flags.contains(CalcFlags::HELCTR) {
+        let mut xx = planet_helio;
+        if !flags.contains(CalcFlags::TRUEPOS) {
+            let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+            let dt = dist * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xx[i] = planet_helio[i] - dt * planet_helio[i + 3];
+            }
+        }
+        return Ok(finish_helctr(xx, jd, flags, models));
+    }
 
     // Observer: geocenter, or geocenter + topocentric offset (§1 "xobs replaces
     // the geocenter"). Moshier has no separate bary/helio frame, so the offset
@@ -526,6 +568,29 @@ pub fn calc_moon(
 ) -> Result<([f64; 24], [f64; 6]), Error> {
     let pp = compute_pipeline(jd, Body::Moon, eps_j2000)?;
     let earth_helio = pp.earth_helio;
+
+    // Heliocentric Moon (Moshier): heliocentric Moon = moon_geo (pp.planet_helio) + earth_helio.
+    // The Moon path computes light-time dt ONCE from the heliocentric distance (no iteration loop
+    // — sweph.c:4147-4152, `xxm`), then retards analytically with the heliocentric velocity
+    // (Moshier's barycentric frame == heliocentric; observer Sun == 0, so no final subtraction).
+    if flags.contains(CalcFlags::HELCTR) {
+        let mut moon_helio = [0.0; 6];
+        for i in 0..6 {
+            moon_helio[i] = pp.planet_helio[i] + earth_helio[i];
+        }
+        let mut xx = moon_helio;
+        if !flags.contains(CalcFlags::TRUEPOS) {
+            let dist = (moon_helio[0] * moon_helio[0]
+                + moon_helio[1] * moon_helio[1]
+                + moon_helio[2] * moon_helio[2])
+                .sqrt();
+            let dt = dist * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xx[i] = moon_helio[i] - dt * moon_helio[i + 3];
+            }
+        }
+        return Ok(finish_helctr(xx, jd, flags, models));
+    }
 
     let offset = topo_offset(jd, flags, config, models);
     let mut xobs = earth_helio;
@@ -968,6 +1033,41 @@ fn apparent_planet<P: PositionProvider>(
 
     let pos = p.positions(body, jd, true)?;
 
+    // Heliocentric (Swiss/JPL): heliocentric = planet_bary - sun_bary, light-time retarded with
+    // niter=1 (two analytic passes to converge dt, then re-evaluate the ephemeris at t-dt —
+    // sweph.c:2648-2696). No aberration/deflection/geocenter conversion.
+    if flags.contains(CalcFlags::HELCTR) {
+        let mut planet_helio = [0.0; 6];
+        for (i, ph) in planet_helio.iter_mut().enumerate() {
+            *ph = pos.planet_bary[i] - pos.sun_bary[i];
+        }
+        let mut xx = planet_helio;
+        if !flags.contains(CalcFlags::TRUEPOS) {
+            // C quirk (sweph.c:2513-2594): the light-time loop's initial dx is the *heliocentric*
+            // position (so the first dt uses the Sun-planet distance), but the analytic
+            // extrapolation base `xx0` is the *barycentric* position/velocity (xx0 is saved
+            // before the SUNBARY subtraction). So the converged dt comes from the barycentric
+            // distance, not the heliocentric one -- a ~1% difference that matters at 1e-9.
+            let xx0 = pos.planet_bary;
+            let mut dt = 0.0;
+            for _ in 0..=1 {
+                let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+                dt = dist * AUNIT / CLIGHT / 86400.0;
+                for i in 0..3 {
+                    xx[i] = xx0[i] - dt * xx0[i + 3];
+                }
+            }
+            // C re-evaluates the planet at t-dt with NO_SAVE, so the cached SEI_SUNBARY it then
+            // subtracts is still the ORIGINAL-epoch Sun (sweph.c:2692-2695) -- not the retarded
+            // one. Mixed-epoch heliocentric: planet_bary(t-dt) - sun_bary(t).
+            let pos_ret = p.positions(body, jd - dt, true)?;
+            for (i, x) in xx.iter_mut().enumerate() {
+                *x = pos_ret.planet_bary[i] - pos.sun_bary[i];
+            }
+        }
+        return Ok(finish_helctr(xx, jd, flags, models));
+    }
+
     // Observer: barycentric Earth, or Earth + topocentric offset (§1 "xobs
     // replaces the geocenter"), evaluated once at the current (un-retarded)
     // epoch. `xobs_helio` is the same offset applied to the heliocentric frame
@@ -1176,6 +1276,33 @@ fn apparent_moon<P: PositionProvider>(
     // Earth context for aberration (body=Earth maps to EMB file entry, same as
     // the original sweph_positions call with body_id=0)
     let pos = p.positions(Body::Earth, jd, true)?;
+
+    // Heliocentric Moon (Swiss/JPL): heliocentric Moon at jd = moon_geo + earth_bary - sun_bary.
+    // Light-time dt is computed ONCE from this heliocentric distance (sweph.c:4138-4152, `xxm`),
+    // then the ephemeris is re-evaluated at t-dt to barycentric moon(t-dt) = moon_geo(t-dt) +
+    // earth_bary(t-dt), minus the ORIGINAL-epoch Sun (xobs = SUNBARY(teval), cached across the
+    // NO_SAVE re-eval — sweph.c:4168-4206). No deflection/aberration.
+    if flags.contains(CalcFlags::HELCTR) {
+        let moon_geo = p.moon_geo(jd, true)?;
+        let mut moon_helio = [0.0; 6];
+        for i in 0..6 {
+            moon_helio[i] = moon_geo[i] + pos.earth_bary[i] - pos.sun_bary[i];
+        }
+        let mut xx = moon_helio;
+        if !flags.contains(CalcFlags::TRUEPOS) {
+            let dist = (moon_helio[0] * moon_helio[0]
+                + moon_helio[1] * moon_helio[1]
+                + moon_helio[2] * moon_helio[2])
+                .sqrt();
+            let dt = dist * AUNIT / CLIGHT / 86400.0;
+            let pos_ret = p.positions(Body::Earth, jd - dt, true)?;
+            let moon_geo_ret = p.moon_geo(jd - dt, true)?;
+            for i in 0..6 {
+                xx[i] = moon_geo_ret[i] + pos_ret.earth_bary[i] - pos.sun_bary[i];
+            }
+        }
+        return Ok(finish_helctr(xx, jd, flags, models));
+    }
 
     // Observer, evaluated once at the current (un-retarded) epoch.
     let offset = topo_offset(jd, flags, config, models);

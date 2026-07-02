@@ -32,7 +32,7 @@ src/
 │                          ephemeris backend — the same deltaT/tid_acc-inconsistency pattern as
 │                          houses_ex2's; discovered via a gauquelin_sector golden-test mismatch at
 │                          1600/1800 AD epochs (swisseph-rs/66)
-├── calc.rs             — calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut, extract_output, extract_ecl_nut, plaus_iflag, speed3_interval, denormalize_positions, calc_speed_3point: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline + SPEED3 helpers; apparent_planet/apparent_sun/apparent_moon (generic over PositionProvider, used by the sweph/JPL backends); topo_offset helper — computes the observer offset (zero vector when TOPOCTR isn't set) and threads it through both the Moshier pipeline (calc_planet/calc_sun/calc_moon, added to earth_helio directly) and the generic pipeline (added to earth_bary/earth_helio as `xobs`/`xobs_helio`) in place of the plain geocenter wherever it functions as "the observer" (light-time, parallax, aberration, deflection)
+├── calc.rs             — calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut, extract_output, extract_ecl_nut, plaus_iflag, speed3_interval, denormalize_positions, calc_speed_3point: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline + SPEED3 helpers; apparent_planet/apparent_sun/apparent_moon (generic over PositionProvider, used by the sweph/JPL backends); topo_offset helper — computes the observer offset (zero vector when TOPOCTR isn't set) and threads it through both the Moshier pipeline (calc_planet/calc_sun/calc_moon, added to earth_helio directly) and the generic pipeline (added to earth_bary/earth_helio as `xobs`/`xobs_helio`) in place of the plain geocenter wherever it functions as "the observer" (light-time, parallax, aberration, deflection); SEFLG_HELCTR support (added for phenomena, swisseph-rs/83): finish_helctr (shared bias->precess/nutation->app_pos_rest tail) plus a HELCTR early-branch in each of calc_planet (Moshier, niter=0 analytic), apparent_planet (Swiss/JPL, niter=1 + re-eval; the light-time loop's initial dx is heliocentric but its extrapolation base xx0 is BARYCENTRIC, a literal sweph.c:2513-2594 quirk), calc_moon (Moshier) and apparent_moon (Swiss/JPL) — the Moon computes light-time dt ONCE from the heliocentric distance (no loop, sweph.c:4147-4152) and, for Swiss/JPL, re-evaluates moon_geo+earth_bary at t-dt minus the ORIGINAL-epoch sun_bary; plaus_iflag forces NOABERR|NOGDEFL for HELCTR so the heliocentric position is purely geometric+light-time. BARYCTR still unimplemented (calc_inner returns UnsupportedFlags)
 ├── topocentric.rs      — get_observer: swi_get_observer port (NONUT-forced mean-frame path only, docs/c-ref-topocentric.md §3), geodetic→geocentric flattening + diurnal rotation + precession to J2000, returns observer position+velocity offset (AU/AU-day) from the geocenter
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
@@ -330,7 +330,20 @@ src/
 │                          §4 eligibility gate (not fixstar, RISE/SET only, !FORCE_SLOW, no
 │                          twilight, body in Sun..=TrueNode, |geolat|≤60 or Sun≤65).
 ├── heliacal.rs         — EMPTY stub
-├── phenomena.rs        — EMPTY stub
+├── phenomena.rs        — swe_pheno/swe_pheno_ut port (swisseph-rs/83): Phenomena output struct
+│                          (phase_angle, phase, elongation, apparent_diameter, apparent_magnitude,
+│                          horizontal_parallax = attr[0..5]); MAG_ELEM[21][4] table + EULER/
+│                          EULER_SATURN literals (kept distinct from f64::consts::E for FP
+│                          fidelity); pheno core (§1 body remap incl. asteroid-134340->Pluto and
+│                          Ceres..Vesta offset; two masked flag copies iflag/iflagp with iflagp
+│                          forcing HELCTR; §3 light-time-lagged heliocentric via calc(HELCTR);
+│                          magnitude branch cascade 5a-5j — Bowell §5k asteroid branch present but
+│                          returns Err(EphemerisNotAvailable) for numbered asteroids, same
+│                          swed.ast_H/G gap as eclipse::body_radius_au); pheno_ut deltaT re-call
+│                          wrapper. Returns (Phenomena, CalcFlags) — the second is C's "flags
+│                          actually used". Everything goes through Ephemeris::calc (constraint
+│                          app-uses-calc-not-backends:phenomena). Ephemeris::pheno/pheno_ut
+│                          delegates in context.rs; Phenomena re-exported in lib.rs.
 └── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
 
 tests/
@@ -408,6 +421,16 @@ tests/
 │                          diffing intermediate tret[]/attr[] against gen_eclipse.c's raw output
 │                          per-field, not by re-reading the C; fixed at the calc_fixstar level,
 │                          not worked around in the test)
+│   ├── pheno.rs       — golden tests for swe_pheno (swisseph-rs/83): 120 cases, Sun..Pluto (10) ×
+│                          4 epochs (J2000/2024/1950/1800-Jan-5) × {MOSEPH, MOSEPH|TRUEPOS, SWIEPH},
+│                          picks moshier vs sweph Ephemeris by the SWIEPH flag bit, asserts
+│                          attr[0..5] eps 1e-9 (Moon magnitude 1e-8) + exact retflag. Exercises
+│                          magnitude branches 5a-5j; the Bowell §5k asteroid branch is
+│                          golden-uncovered (no backend computes asteroid positions yet — Ceres
+│                          omitted). Transitively validates the new SEFLG_HELCTR calc paths
+│                          (planets+Moon, Moshier+Swiss) at 1e-9. Pre-1900 epoch nudged to
+│                          1800-Jan-5 (off sepl_18's tfstart) to avoid a documented C stateless
+│                          file-boundary artifact in swe_pheno's elongation.
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -484,6 +507,7 @@ tests/
 │                          (occ_where key), swe_lun_occult_when_glob (occ_when_glob key), and
 │                          swe_lun_occult_when_loc (occ_when_loc key, swisseph-rs/79) — all keys
 │                          this module needs now, final RSE arc task
+│   ├── pheno.json      — C-generated reference data for swe_pheno (120 cases; see tests/golden/pheno.rs)
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -520,6 +544,8 @@ tests/
     │                       (swisseph-rs/79): 2 of those 3 bodies (Venus, Aldebaran — skips Mars
     │                       to keep the battery small) × 1 geopos (near-central Zurich) × 1
     │                       tjd_start=2451545.0 × 2 backward)
+    ├── gen_pheno.c     — C harness to regenerate pheno.json (swe_pheno: Sun..Pluto × 4 epochs ×
+    │                       {MOSEPH, MOSEPH|TRUEPOS, SWIEPH}; asteroids omitted, boundary-safe 1800 epoch)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

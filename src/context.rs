@@ -472,6 +472,29 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_how(self, tjd_ut, ifl, geopos)
     }
 
+    /// Planetary phenomena (phase angle, illuminated fraction, elongation, apparent diameter,
+    /// apparent magnitude, Moon horizontal parallax) at `tjd_et` (ET). Port of `swe_pheno`
+    /// (swecl.c:3802-4123). Returns the [`Phenomena`](crate::phenomena::Phenomena) plus the flags
+    /// actually used.
+    pub fn pheno(
+        &self,
+        tjd_et: f64,
+        body: Body,
+        flags: CalcFlags,
+    ) -> Result<(crate::phenomena::Phenomena, CalcFlags), Error> {
+        crate::phenomena::pheno(self, tjd_et, body, flags)
+    }
+
+    /// UT-based [`pheno`](Self::pheno). Port of `swe_pheno_ut` (swecl.c:4125-4142).
+    pub fn pheno_ut(
+        &self,
+        tjd_ut: f64,
+        body: Body,
+        flags: CalcFlags,
+    ) -> Result<(crate::phenomena::Phenomena, CalcFlags), Error> {
+        crate::phenomena::pheno_ut(self, tjd_ut, body, flags)
+    }
+
     /// Global eclipse search: next/previous solar eclipse anywhere on Earth from `tjd_start`
     /// (UT), restricted to eclipse types in `ifltype` (empty = all types). Port of
     /// `swe_sol_eclipse_when_glob` (swecl.c:1185-1515).
@@ -681,10 +704,10 @@ impl Ephemeris {
             return Ok((xr, [0.0; 6], flags));
         }
 
-        if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
-            return Err(Error::UnsupportedFlags(
-                flags & (CalcFlags::HELCTR | CalcFlags::BARYCTR),
-            ));
+        // Heliocentric (SEFLG_HELCTR) is supported below (per-backend/-body branches in calc.rs);
+        // plaus_iflag has already forced NOABERR|NOGDEFL for it. Barycentric is still unported.
+        if flags.contains(CalcFlags::BARYCTR) {
+            return Err(Error::UnsupportedFlags(flags & CalcFlags::BARYCTR));
         }
 
         let eps_j2000 =

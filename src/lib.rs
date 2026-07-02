@@ -37,6 +37,7 @@ pub use eclipse::{
 pub use error::Error;
 pub use flags::{CalcFlags, EclipseFlags, RiseSetFlags};
 pub use houses::{AscMc, HouseResult};
+pub use phenomena::Phenomena;
 pub use riseset::RiseSetResult;
 pub use stars::{Star, StarCatalog};
 pub use types::{
