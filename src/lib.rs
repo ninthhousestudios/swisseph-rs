@@ -10,6 +10,7 @@ pub mod azalt;
 pub mod bias;
 pub mod calc;
 pub mod corrections;
+pub mod crossings;
 pub mod date;
 pub mod deltat;
 pub mod eclipse;
@@ -32,6 +33,7 @@ pub mod topocentric;
 
 pub use config::{EphemerisConfig, TopoPosition};
 pub use context::{CalcResult, Ephemeris};
+pub use crossings::MoonCrossing;
 pub use eclipse::{
     EclipseHow, EclipseWhere, LunarEclipseGlobal, LunarEclipseHow, LunarEclipseLocal, OccultGlobal,
     OccultLocal, SolarEclipseGlobal, SolarEclipseLocal,

@@ -585,6 +585,73 @@ impl Ephemeris {
         crate::orbit::orbit_max_min_true_distance(self, tjd_et, body, flags)
     }
 
+    // -----------------------------------------------------------------------
+    // Crossings (swe_solcross / mooncross / mooncross_node / helio_cross)
+    // -----------------------------------------------------------------------
+
+    /// Next JD (ET) at which the Sun's ecliptic longitude equals `x2cross`.
+    pub fn solcross(&self, x2cross: f64, jd_et: f64, flags: CalcFlags) -> Result<f64, Error> {
+        crate::crossings::solcross(self, x2cross, jd_et, flags)
+    }
+
+    /// UT-based [`solcross`](Self::solcross).
+    pub fn solcross_ut(&self, x2cross: f64, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error> {
+        crate::crossings::solcross_ut(self, x2cross, jd_ut, flags)
+    }
+
+    /// Next JD (ET) at which the Moon's ecliptic longitude equals `x2cross`.
+    pub fn mooncross(&self, x2cross: f64, jd_et: f64, flags: CalcFlags) -> Result<f64, Error> {
+        crate::crossings::mooncross(self, x2cross, jd_et, flags)
+    }
+
+    /// UT-based [`mooncross`](Self::mooncross).
+    pub fn mooncross_ut(&self, x2cross: f64, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error> {
+        crate::crossings::mooncross_ut(self, x2cross, jd_ut, flags)
+    }
+
+    /// Next JD (ET) at which the Moon crosses its node (latitude = 0).
+    pub fn mooncross_node(
+        &self,
+        jd_et: f64,
+        flags: CalcFlags,
+    ) -> Result<crate::crossings::MoonCrossing, Error> {
+        crate::crossings::mooncross_node(self, jd_et, flags)
+    }
+
+    /// UT-based [`mooncross_node`](Self::mooncross_node).
+    pub fn mooncross_node_ut(
+        &self,
+        jd_ut: f64,
+        flags: CalcFlags,
+    ) -> Result<crate::crossings::MoonCrossing, Error> {
+        crate::crossings::mooncross_node_ut(self, jd_ut, flags)
+    }
+
+    /// Next JD (ET) at which `body`'s heliocentric longitude equals `x2cross`.
+    /// `dir >= 0` searches forward, `dir < 0` searches backward.
+    pub fn helio_cross(
+        &self,
+        body: Body,
+        x2cross: f64,
+        jd_et: f64,
+        flags: CalcFlags,
+        dir: i32,
+    ) -> Result<f64, Error> {
+        crate::crossings::helio_cross(self, body, x2cross, jd_et, flags, dir)
+    }
+
+    /// UT-based [`helio_cross`](Self::helio_cross).
+    pub fn helio_cross_ut(
+        &self,
+        body: Body,
+        x2cross: f64,
+        jd_ut: f64,
+        flags: CalcFlags,
+        dir: i32,
+    ) -> Result<f64, Error> {
+        crate::crossings::helio_cross_ut(self, body, x2cross, jd_ut, flags, dir)
+    }
+
     /// Observer / origin geometry for the nodes-&-apsides pipeline at epoch `t`
     /// (TT), in equatorial-J2000 cartesian. Replaces C's `xsun`/`xear`/`xobs`
     /// globals (swecl.c A.5.1) with an explicit per-epoch computation. The

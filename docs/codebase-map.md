@@ -446,6 +446,19 @@ src/
 │                          get_orbital_elements/orbit_max_min_true_distance in context.rs delegate.
 │                          OrbitalElements re-exported in lib.rs. PLMASS/IPL_TO_ELEM/
 │                          OSCU_BAR_DISTANCE_THRESHOLD_AU in constants.rs (shared with nodaps.rs).
+├── crossings.rs        — swe_solcross / mooncross / mooncross_node / helio_cross + UT variants
+│                          (swisseph-rs/88, PNOC 7): MoonCrossing struct (jd + longitude + latitude);
+│                          solcross/solcross_ut (Sun longitude crossing via Newton iteration,
+│                          mean-speed 360/365.24 initial estimate); mooncross/mooncross_ut (Moon
+│                          longitude crossing, mean-speed 360/27.32); mooncross_node/mooncross_node_ut
+│                          (Moon latitude zero-crossing: day-stepping bracket with fixed-reference
+│                          xlat comparison, then Newton refinement jd -= lat/lat_speed);
+│                          helio_cross/helio_cross_ut (heliocentric longitude crossing for any planet
+│                          except Sun/Moon/nodes/apsides, Chiron uses hardcoded 0.01971 mean-speed
+│                          for initial estimate only, dir≥0 forward / dir<0 backward). All go through
+│                          Ephemeris::calc/calc_ut (app-uses-calc-not-backends:crossings), NOT backends.
+│                          Convergence threshold CROSS_PRECISION = 1 milliarcsecond (1/3600000°).
+│                          MoonCrossing re-exported in lib.rs. Ephemeris delegates in context.rs.
 └── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
 
 tests/
@@ -596,6 +609,13 @@ tests/
 │                          descending-node singularity). maxmin: 30 Moshier cases — Mercury/Venus/
 │                          Mars/Jupiter/Pluto × 3 epochs × {geocentric two-ellipse, heliocentric};
 │                          dmax/dmin 1e-8 (actual ~1e-10 after the 300-iter refine), dtrue 1e-9.
+│   ├── crossings.rs      — golden tests for swe_solcross / mooncross / mooncross_node / helio_cross
+│                          (swisseph-rs/88, PNOC 7). 66 Moshier cases total. solcross: 18 cases —
+│                          x2cross {0,180,359.5} × jd_start {2451500,2440000,2460600} × {ET,UT}.
+│                          mooncross: 18 cases — same shape. mooncross_node: 6 cases — jd_start
+│                          {2451545,2440000,2460600} × {ET,UT}, asserts jd+lon+lat. helio_cross:
+│                          24 cases — ipl {Mercury,Mars,Jupiter} × x2cross {0,120.5} × dir {1,-1}
+│                          × {ET,UT}. Crossing times eps 1e-6 day, lon eps 1e-7, node lat eps 5e-9.
 │   ├── moshier_backend.rs — golden tests for backend::compute (110 cases: 10 bodies × 11 epochs + Earth zero-check)
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   ├── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
@@ -684,7 +704,8 @@ tests/
 │   ├── fixstar.json    — C-generated reference data for swe_fixstar2 (196 position cases + 4 mag cases, 7 stars × 4 epochs × 7 flags)
 │   ├── azalt.json      — C-generated reference data for swe_refrac/swe_refrac_extended/swe_azalt/swe_azalt_rev (refrac: 28, refrac_ext: 56, azalt: 8, azalt_rev: 8)
 │   ├── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback; ut_wrapper key: swe_houses_ex2 (UT-based) over 6 (tjd_ut,geolat,geolon) triples × 6 systems, + a SEFLG_NONUT variant at 1 triple; sidereal_trad key: swe_houses_ex2 with SEFLG_SIDEREAL + swe_set_sid_mode(SE_SIDM_LAHIRI) over 3 triples × 3 systems P/W/E; house_pos key: swe_house_pos over all 25 house-system chars × 2 (armc,geolat,eps) triples × 3 xpin, "err" field is hpos==0.0 (Koch's real failure sentinel), NOT serr-non-empty (P/G/J/L/Q/default set an informational serr on valid results) — the static sundec cache 'I'/'i' need is primed via a preceding swe_houses_armc_ex2(ascmc[9]=sundec) call; gauquelin_sector key: swe_gauquelin_sector imeth∈{0,1} over 6 ut_triples × 3 bodies (Sun/Moon/Mars))
-│   └── riseset.json    — C-generated reference data for swe_rise_trans_true_hor + swe_rise_trans (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err; dip key: 6 cases, horhgt=-100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: 12 cases, NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key: 24 cases via swe_rise_trans, 3 geopos all \|lat\|≤60 × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
+│   ├── riseset.json    — C-generated reference data for swe_rise_trans_true_hor + swe_rise_trans (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err; dip key: 6 cases, horhgt=-100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: 12 cases, NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key: 24 cases via swe_rise_trans, 3 geopos all \|lat\|≤60 × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
+│   └── crossings.json  — C-generated reference data for swe_solcross/mooncross/mooncross_node/helio_cross (66 cases: 18 solcross + 18 mooncross + 6 mooncross_node + 24 helio_cross, all Moshier)
 └── c-gen/
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_eclipse.c   — C harness to regenerate eclipse.json (swe_sol_eclipse_where: 3 known
@@ -734,14 +755,16 @@ tests/
     │                       swe_houses_armc_ex2(ascmc[9]=sundec) call immediately before each
     │                       swe_house_pos call; gauquelin_sector key: swe_gauquelin_sector
     │                       imeth∈{0,1} reusing the ut_wrapper triples × 3 bodies)
-    └── gen_riseset.c    — C harness to regenerate riseset.json (swe_rise_trans_true_hor: full
-                            key, 3 geopos × 2 bodies (Sun/Moon) × 2 epochs × 3 rsmi
-                            (RISE/SET/MTRANSIT, | SE_BIT_FORCE_SLOW_METHOD), SEFLG_MOSEPH,
-                            records retval so circumpolar -2 cases assert Err; dip key: horhgt=
-                            -100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: NONUT|
-                            TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key:
-                            swe_rise_trans (swisseph-rs/71), 3 geopos all |lat|≤60 (Zurich/Null
-                            Island/Tokyo) × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
+    ├── gen_riseset.c    — C harness to regenerate riseset.json (swe_rise_trans_true_hor: full
+    │                       key, 3 geopos × 2 bodies (Sun/Moon) × 2 epochs × 3 rsmi
+    │                       (RISE/SET/MTRANSIT, | SE_BIT_FORCE_SLOW_METHOD), SEFLG_MOSEPH,
+    │                       records retval so circumpolar -2 cases assert Err; dip key: horhgt=
+    │                       -100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: NONUT|
+    │                       TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key:
+    │                       swe_rise_trans (swisseph-rs/71), 3 geopos all |lat|≤60 (Zurich/Null
+    │                       Island/Tokyo) × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
+    └── gen_cross.c      — C harness to regenerate crossings.json (66 cases: solcross 18,
+                            mooncross 18, mooncross_node 6, helio_cross 24, all SEFLG_MOSEPH)
 ```
 
 ## Key Types in types.rs
