@@ -8,10 +8,11 @@
 //! since the algorithm interleaves many `calc`/`azalt`/`azalt_rev` calls.
 
 use crate::azalt::{AzAltDir, HorDir, RefracDir};
+use crate::config::{EphemerisConfig, TopoPosition};
 use crate::constants::{
     AUNIT, DEGTORAD, LAPSE_RATE, RADTODEG, RISE_SET_GEOALT_MAX, RISE_SET_GEOALT_MIN,
 };
-use crate::context::{Ephemeris, EphemerisConfig, TopoPosition};
+use crate::context::Ephemeris;
 use crate::error::Error;
 use crate::flags::{CalcFlags, RiseSetFlags};
 use crate::types::Body;

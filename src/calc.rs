@@ -1,6 +1,6 @@
 use crate::bias::frame_bias;
+use crate::config::EphemerisConfig;
 use crate::constants::*;
-use crate::context::EphemerisConfig;
 use crate::corrections::{aberr_light, deflect_light};
 use crate::error::Error;
 use crate::flags::CalcFlags;

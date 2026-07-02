@@ -1,14 +1,16 @@
+use crate::config::EphemerisConfig;
 use crate::constants::{
     B1950, DEGTORAD, J1900, J2000, RADTODEG, SSY_PLANE_INCL, SSY_PLANE_NODE_E2000,
 };
-use crate::context::EphemerisConfig;
 use crate::error::Error;
 use crate::flags::{CalcFlags, SiderealBits};
 use crate::math::{
     cartesian_to_polar, cartesian_to_polar_with_speed, normalize_degrees, normalize_radians,
     polar_to_cartesian, polar_to_cartesian_with_speed, rotate_x, rotate_x_sincos,
 };
-use crate::types::{AstroModels, PrecessionDirection, SiderealMode};
+use crate::types::{
+    AstroModels, NutationModel, PrecessionDirection, PrecessionModel, SiderealMode,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AyaInit {
@@ -302,6 +304,64 @@ pub(crate) const AYANAMSA: [AyaInit; 47] = [
         prec_offset: 11,
     }, // 46 LAHIRI_ICRC
 ];
+
+impl EphemerisConfig {
+    pub fn set_sidereal_mode(&mut self, mut sid_mode: i32, t0: f64, ayan_t0: f64) {
+        if sid_mode < 0 {
+            sid_mode = 0;
+        }
+        let mut index = (sid_mode % 256) as usize;
+
+        let mut bits = if matches!(index, 18 | 19 | 20 | 34) {
+            SiderealBits::ECL_T0
+        } else if matches!(
+            index,
+            17 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 35 | 36 | 39 | 40
+        ) {
+            SiderealBits::empty()
+        } else {
+            SiderealBits::from_bits_truncate((sid_mode as u32) & !0xFF_u32)
+        };
+
+        if index >= 47 && index != 255 {
+            index = 0;
+            bits = SiderealBits::empty();
+        }
+
+        if index == 255 {
+            self.sidereal_t0 = t0;
+            self.sidereal_ayan_t0 = ayan_t0;
+            self.sidereal_t0_is_ut = bits.contains(SiderealBits::USER_UT);
+        } else {
+            let a = AYANAMSA[index];
+            self.sidereal_t0 = a.t0;
+            self.sidereal_ayan_t0 = a.ayan_t0;
+            self.sidereal_t0_is_ut = a.t0_is_ut;
+        }
+
+        if bits.contains(SiderealBits::PREC_ORIG) && index != 255 {
+            let prec_offset = AYANAMSA[index].prec_offset;
+            if prec_offset > 0 {
+                let prec_model = match prec_offset {
+                    1 => PrecessionModel::IAU1976,
+                    11 => PrecessionModel::Newcomb,
+                    _ => unreachable!(),
+                };
+                self.astro_models.prec_longterm = prec_model;
+                self.astro_models.prec_shortterm = prec_model;
+                self.astro_models.nutation = match prec_offset {
+                    11 => NutationModel::Woolard,
+                    1 => NutationModel::IAU1980,
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        self.sidereal_mode =
+            Some(SiderealMode::try_from(index as i32).unwrap_or(SiderealMode::FaganBradley));
+        self.sidereal_bits = bits;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Fixed-star ayanamsa indices: require star catalog, deferred.
@@ -614,7 +674,7 @@ pub(crate) fn trop_ra2sid_lon_sosy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::EphemerisConfig;
+    use crate::config::EphemerisConfig;
     use crate::flags::SiderealBits;
 
     #[test]

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use swisseph::ayanamsa;
-use swisseph::context::EphemerisConfig;
+use swisseph::config::EphemerisConfig;
 use swisseph::flags::CalcFlags;
 use swisseph::types::AstroModels;
 

@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use swisseph::context::EphemerisConfig;
+use swisseph::config::EphemerisConfig;
 use swisseph::deltat;
 use swisseph::types::*;
 

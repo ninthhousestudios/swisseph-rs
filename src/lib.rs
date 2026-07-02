@@ -1,3 +1,4 @@
+pub mod config;
 pub mod constants;
 pub mod context;
 pub mod error;
@@ -27,7 +28,8 @@ pub mod stars;
 pub mod sweph_file;
 pub mod topocentric;
 
-pub use context::{CalcResult, Ephemeris, EphemerisConfig, TopoPosition};
+pub use config::{EphemerisConfig, TopoPosition};
+pub use context::{CalcResult, Ephemeris};
 pub use eclipse::{
     EclipseHow, EclipseWhere, LunarEclipseGlobal, LunarEclipseHow, LunarEclipseLocal,
     SolarEclipseGlobal, SolarEclipseLocal,

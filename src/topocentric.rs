@@ -1,5 +1,5 @@
+use crate::config::{EphemerisConfig, TopoPosition};
 use crate::constants::*;
-use crate::context::{EphemerisConfig, TopoPosition};
 use crate::flags::CalcFlags;
 use crate::math::{cartesian_to_polar, polar_to_cartesian_with_speed};
 use crate::precession::precess;

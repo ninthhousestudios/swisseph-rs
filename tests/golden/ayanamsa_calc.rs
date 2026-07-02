@@ -1,5 +1,6 @@
 use serde::Deserialize;
-use swisseph::context::{Ephemeris, EphemerisConfig};
+use swisseph::config::EphemerisConfig;
+use swisseph::context::Ephemeris;
 use swisseph::flags::CalcFlags;
 use swisseph::types::Body;
 

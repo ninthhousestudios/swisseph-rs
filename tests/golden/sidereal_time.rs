@@ -1,6 +1,6 @@
 use serde::Deserialize;
+use swisseph::config::EphemerisConfig;
 use swisseph::constants::TIDAL_DEFAULT;
-use swisseph::context::EphemerisConfig;
 use swisseph::sidereal_time;
 use swisseph::types::*;
 

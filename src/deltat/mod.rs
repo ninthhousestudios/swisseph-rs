@@ -1,7 +1,7 @@
 pub mod data;
 
+use crate::config::EphemerisConfig;
 use crate::constants::*;
-use crate::context::EphemerisConfig;
 use crate::types::*;
 use data::*;
 

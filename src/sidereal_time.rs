@@ -1,5 +1,5 @@
+use crate::config::EphemerisConfig;
 use crate::constants::*;
-use crate::context::EphemerisConfig;
 use crate::deltat::calc_deltat;
 use crate::flags::CalcFlags;
 use crate::math::{cartesian_to_polar, normalize_degrees, polar_to_cartesian, rotate_x};

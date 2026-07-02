@@ -5,11 +5,12 @@
 
 use std::f64::consts::PI;
 
+use crate::config::{EphemerisConfig, TopoPosition};
 use crate::constants::{
     AUNIT, DEARTH, DEGTORAD, DSUN, EARTH_OBLATENESS, J2000, LAPSE_RATE, PLANETARY_DIAMETERS,
     RADTODEG, REARTH, RMOON, RSUN,
 };
-use crate::context::{Ephemeris, EphemerisConfig, TopoPosition};
+use crate::context::Ephemeris;
 use crate::error::Error;
 use crate::flags::{CalcFlags, EclipseFlags, RiseSetFlags};
 use crate::math::{cartesian_to_polar, dot_prod_unit, normalize_degrees, polar_to_cartesian};
