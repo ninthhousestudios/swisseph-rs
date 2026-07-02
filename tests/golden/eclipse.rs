@@ -38,11 +38,20 @@ struct SolWhenLocCase {
 }
 
 #[derive(Deserialize)]
+struct LunHowCase {
+    tjd_ut: f64,
+    geopos: [f64; 3],
+    retval: i32,
+    attr: [f64; 11],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
     sol_how: Vec<SolHowCase>,
     sol_when_glob: Vec<SolWhenGlobCase>,
     sol_when_loc: Vec<SolWhenLocCase>,
+    lun_how: Vec<LunHowCase>,
 }
 
 fn load() -> GoldenData {
@@ -446,6 +455,86 @@ fn sol_when_loc() {
             c.attr[10],
             result.attr.saros_member,
             1e-5,
+        );
+    }
+}
+
+/// `swe_lun_eclipse_how` (`Ephemeris::lun_eclipse_how`): geocentric shadow-cone geometry plus the
+/// Moon's azimuth/altitude at a single observer (Zurich). Three epochs: a total eclipse visible
+/// from Zurich, a total eclipse geocentrically but with the Moon below Zurich's horizon
+/// (exercises the horizon-visibility "no eclipse here" clearing path -- `retval == 0` while
+/// `umbral_magnitude`/`saros_*` stay populated from the geocentric geometry), and a small partial
+/// eclipse.
+#[test]
+fn lun_how() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.lun_how.iter().enumerate() {
+        let label = format!("lun_how[{i}][tjd_ut={},geopos={:?}]", c.tjd_ut, c.geopos);
+        let result = ephe
+            .lun_eclipse_how(c.tjd_ut, CalcFlags::MOSEPH, c.geopos)
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[0] (umbral_magnitude)"),
+            c.attr[0],
+            result.umbral_magnitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[1] (penumbral_magnitude)"),
+            c.attr[1],
+            result.penumbral_magnitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[4] (azimuth)"),
+            c.attr[4],
+            result.azimuth,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[5] (true_altitude)"),
+            c.attr[5],
+            result.true_altitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[6] (apparent_altitude)"),
+            c.attr[6],
+            result.apparent_altitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[7] (distance_from_opposition)"),
+            c.attr[7],
+            result.distance_from_opposition,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[8] (umbral_magnitude duplicate)"),
+            c.attr[8],
+            result.umbral_magnitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[9] (saros_series)"),
+            c.attr[9],
+            result.saros_series,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[10] (saros_member)"),
+            c.attr[10],
+            result.saros_member,
+            1e-7,
         );
     }
 }

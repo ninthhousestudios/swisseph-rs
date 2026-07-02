@@ -603,6 +603,19 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_when_loc(self, tjd_start, ifl, geopos, backward)
     }
 
+    /// Local circumstances of a lunar eclipse at `geopos`: umbral/penumbral magnitude, Saros
+    /// series/member, and the Moon's azimuth/true/apparent altitude. Port of
+    /// `swe_lun_eclipse_how` (swecl.c:3190-3239). `geopos` = [longitude, latitude, height above
+    /// sea (m)], degrees/degrees/meters.
+    pub fn lun_eclipse_how(
+        &self,
+        tjd_ut: f64,
+        ifl: CalcFlags,
+        geopos: [f64; 3],
+    ) -> Result<crate::eclipse::LunarEclipseHow, Error> {
+        crate::eclipse::swe_lun_eclipse_how(self, tjd_ut, ifl, geopos)
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`

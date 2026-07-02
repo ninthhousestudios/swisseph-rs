@@ -6,8 +6,8 @@
 use std::f64::consts::PI;
 
 use crate::constants::{
-    AUNIT, DEGTORAD, EARTH_OBLATENESS, J2000, LAPSE_RATE, PLANETARY_DIAMETERS, RADTODEG, REARTH,
-    RMOON, RSUN,
+    AUNIT, DEARTH, DEGTORAD, DSUN, EARTH_OBLATENESS, J2000, LAPSE_RATE, PLANETARY_DIAMETERS,
+    RADTODEG, REARTH, RMOON, RSUN,
 };
 use crate::context::{Ephemeris, EphemerisConfig, TopoPosition};
 use crate::error::Error;
@@ -61,6 +61,74 @@ const SAROS_DATA_SOLAR: [(i32, f64); 181] = [
     (175, 2669780.5), (176, 2673766.5), (177, 2690924.5), (178, 2721252.5), (179, 2718653.5),
     (180, 2729226.5),
 ];
+
+/// `(series_no, tstart)` pairs for the 180 lunar-eclipse Saros series (swecl.c:306-486), parallel
+/// to but distinct from [`SAROS_DATA_SOLAR`]. `tstart` is the JD (UT) of each series' initial
+/// eclipse.
+#[rustfmt::skip]
+const SAROS_DATA_LUNAR: [(i32, f64); 180] = [
+    (1, 782437.5), (2, 799593.5), (3, 783824.5), (4, 754884.5), (5, 824724.5),
+    (6, 762857.5), (7, 773430.5), (8, 810343.5), (9, 807743.5), (10, 824901.5),
+    (11, 855229.5), (12, 859215.5), (13, 876373.5), (14, 906701.5), (15, 910687.5),
+    (16, 927845.5), (17, 958173.5), (18, 962159.5), (19, 979317.5), (20, 1009645.5),
+    (21, 1007046.5), (22, 1017618.5), (23, 1054531.5), (24, 979493.5), (25, 976895.5),
+    (26, 1020394.5), (27, 1017794.5), (28, 1028367.5), (29, 1058695.5), (30, 1062681.5),
+    (31, 1073253.5), (32, 1110167.5), (33, 1114153.5), (34, 1131311.5), (35, 1161639.5),
+    (36, 1165625.5), (37, 1176197.5), (38, 1213111.5), (39, 1217097.5), (40, 1221084.5),
+    (41, 1257997.5), (42, 1255398.5), (43, 1186946.5), (44, 1283128.5), (45, 1227845.5),
+    (46, 1225247.5), (47, 1255575.5), (48, 1272732.5), (49, 1276719.5), (50, 1307047.5),
+    (51, 1317619.5), (52, 1328191.5), (53, 1358519.5), (54, 1375676.5), (55, 1379663.5),
+    (56, 1409991.5), (57, 1420562.5), (58, 1424549.5), (59, 1461463.5), (60, 1465449.5),
+    (61, 1436509.5), (62, 1493179.5), (63, 1457653.5), (64, 1435298.5), (65, 1452456.5),
+    (66, 1476198.5), (67, 1480184.5), (68, 1503928.5), (69, 1527670.5), (70, 1531656.5),
+    (71, 1548814.5), (72, 1579142.5), (73, 1583128.5), (74, 1600286.5), (75, 1624028.5),
+    (76, 1628015.5), (77, 1651758.5), (78, 1675500.5), (79, 1672901.5), (80, 1683474.5),
+    (81, 1713801.5), (82, 1645349.5), (83, 1649336.5), (84, 1686249.5), (85, 1683650.5),
+    (86, 1694222.5), (87, 1731136.5), (88, 1735122.5), (89, 1745694.5), (90, 1776022.5),
+    (91, 1786594.5), (92, 1797166.5), (93, 1827494.5), (94, 1838066.5), (95, 1848638.5),
+    (96, 1878966.5), (97, 1882952.5), (98, 1880354.5), (99, 1923853.5), (100, 1881741.5),
+    (101, 1852801.5), (102, 1889715.5), (103, 1893701.5), (104, 1897688.5), (105, 1928016.5),
+    (106, 1938588.5), (107, 1942575.5), (108, 1972903.5), (109, 1990059.5), (110, 1994046.5),
+    (111, 2024375.5), (112, 2034946.5), (113, 2045518.5), (114, 2075847.5), (115, 2086418.5),
+    (116, 2083820.5), (117, 2120733.5), (118, 2124719.5), (119, 2062852.5), (120, 2086596.5),
+    (121, 2103752.5), (122, 2094568.5), (123, 2118311.5), (124, 2142054.5), (125, 2146040.5),
+    (126, 2169783.5), (127, 2186940.5), (128, 2197512.5), (129, 2214670.5), (130, 2238412.5),
+    (131, 2242398.5), (132, 2266142.5), (133, 2289884.5), (134, 2287285.5), (135, 2311028.5),
+    (136, 2334770.5), (137, 2292659.5), (138, 2276890.5), (139, 2326974.5), (140, 2304619.5),
+    (141, 2308606.5), (142, 2345520.5), (143, 2349506.5), (144, 2360078.5), (145, 2390406.5),
+    (146, 2394392.5), (147, 2411550.5), (148, 2441878.5), (149, 2445864.5), (150, 2456437.5),
+    (151, 2486765.5), (152, 2490751.5), (153, 2501323.5), (154, 2538236.5), (155, 2529052.5),
+    (156, 2473771.5), (157, 2563367.5), (158, 2508085.5), (159, 2505486.5), (160, 2542400.5),
+    (161, 2546386.5), (162, 2556958.5), (163, 2587287.5), (164, 2597858.5), (165, 2601845.5),
+    (166, 2632173.5), (167, 2649330.5), (168, 2653317.5), (169, 2683645.5), (170, 2694217.5),
+    (171, 2698203.5), (172, 2728532.5), (173, 2739103.5), (174, 2683822.5), (175, 2740492.5),
+    (176, 2724722.5), (177, 2708952.5), (178, 2732695.5), (179, 2749852.5), (180, 2753839.5),
+];
+
+/// Saros series/member lookup shared by the solar (`eclipse_how`) and lunar (`lun_eclipse_how`)
+/// eclipse cores -- identical scan algorithm over two distinct Saros tables
+/// ([`SAROS_DATA_SOLAR`]/[`SAROS_DATA_LUNAR`]), swecl.c:1112-1144 / 3352-3372. Returns
+/// `(series_no, member_no)`, or `(-99999999.0, -99999999.0)` if no series matches.
+fn saros_lookup(tjd_ut: f64, table: &[(i32, f64)]) -> (f64, f64) {
+    for &(series_no, tstart) in table {
+        let mut d = (tjd_ut - tstart) / SAROS_CYCLE;
+        if d < 0.0 && d * SAROS_CYCLE > -2.0 {
+            d = 0.0000001;
+        }
+        if d < 0.0 {
+            continue;
+        }
+        let j = d as i32;
+        if (d - j as f64) * SAROS_CYCLE < 2.0 {
+            return (series_no as f64, (j + 1) as f64);
+        }
+        let k = j + 1;
+        if (k as f64 - d) * SAROS_CYCLE < 2.0 {
+            return (series_no as f64, (k + 1) as f64);
+        }
+    }
+    (-99999999.0, -99999999.0)
+}
 
 /// Geographic + shadow-cone geometry of a solar eclipse (or lunar occultation) at a given
 /// geocentric instant. Mirrors C's `geopos[0..1]` + `dcore[0..6]` outputs of `eclipse_where`
@@ -500,34 +568,9 @@ pub(crate) fn eclipse_how(
             magnitude
         };
 
-        let mut found = false;
-        for &(series_no, tstart) in SAROS_DATA_SOLAR.iter() {
-            let mut d = (tjd_ut - tstart) / SAROS_CYCLE;
-            if d < 0.0 && d * SAROS_CYCLE > -2.0 {
-                d = 0.0000001;
-            }
-            if d < 0.0 {
-                continue;
-            }
-            let j = d as i32;
-            if (d - j as f64) * SAROS_CYCLE < 2.0 {
-                saros_series = series_no as f64;
-                saros_member = (j + 1) as f64;
-                found = true;
-                break;
-            }
-            let k = j + 1;
-            if (k as f64 - d) * SAROS_CYCLE < 2.0 {
-                saros_series = series_no as f64;
-                saros_member = (k + 1) as f64;
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            saros_series = -99999999.0;
-            saros_member = -99999999.0;
-        }
+        let (s, m) = saros_lookup(tjd_ut, &SAROS_DATA_SOLAR);
+        saros_series = s;
+        saros_member = m;
     }
 
     Ok(EclipseHow {
@@ -1526,4 +1569,232 @@ pub(crate) fn sol_eclipse_when_loc(
     result.attr.core_diameter_km = where_result.core_diameter_km;
 
     Ok(result)
+}
+
+/// Result of `lun_eclipse_how`'s static core geometry pass (swecl.c:3248-3372,
+/// docs/c-ref-eclipse-lunar.md §2): the `attr[]` subset it computes directly -- everything except
+/// azimuth/altitude, which only the public wrapper adds. The `dcore[]` fundamental-plane
+/// shadow-cone geometry (`r0`/`d0`/`D0`/`cosf1`/`cosf2`) that `swe_lun_eclipse_when`'s
+/// contact-time refinement needs is computed internally by [`lun_eclipse_how`] but not exposed
+/// here -- out of scope until that search module is ported.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LunarEclipseCore {
+    /// `attr[0]`/`attr[8]` -- umbral magnitude: fraction of the Moon's diameter covered by the
+    /// umbra. `0.0` for a penumbral-only eclipse or no eclipse.
+    pub umbral_magnitude: f64,
+    /// `attr[1]` -- penumbral magnitude, always computed regardless of eclipse type.
+    pub penumbral_magnitude: f64,
+    /// `attr[7]` -- Moon's distance from exact opposition, degrees; `0.0` unless an eclipse is
+    /// occurring (`flags` non-empty).
+    pub distance_from_opposition: f64,
+    /// `attr[9]` -- Saros series number, or `-99999999.0` if none found.
+    pub saros_series: f64,
+    /// `attr[10]` -- Saros series member number (1-based), or `-99999999.0` if none found.
+    pub saros_member: f64,
+    /// Eclipse-type classification: empty (no eclipse), or exactly one of TOTAL/PARTIAL/
+    /// PENUMBRAL (`retc`, §2.10).
+    pub flags: EclipseFlags,
+}
+
+/// Selenocentric shadow-cone geometry core (`lun_eclipse_how`, swecl.c:3248-3372, ref doc §2).
+/// Computes the Earth-shadow-cone geometry and eclipse magnitudes for one geocentric instant
+/// `tjd_ut` (UT). This is the mirror image of [`eclipse_where`]'s geometry: here the Moon is the
+/// "screen" and the Earth casts the shadow, whereas `eclipse_where` casts the Moon's shadow onto
+/// the Earth.
+pub(crate) fn lun_eclipse_how(
+    eph: &Ephemeris,
+    tjd_ut: f64,
+    ifl: CalcFlags,
+) -> Result<LunarEclipseCore, Error> {
+    let config = eph.config();
+    let tjd = tjd_ut + crate::deltat::calc_deltat(tjd_ut, config);
+
+    let iflag = CalcFlags::SPEED | CalcFlags::EQUATORIAL | ifl | CalcFlags::XYZ;
+    let rm0 = {
+        let d = eph.calc(tjd, Body::Moon, iflag)?.data;
+        [d[0], d[1], d[2]]
+    };
+    let dm = (rm0[0] * rm0[0] + rm0[1] * rm0[1] + rm0[2] * rm0[2]).sqrt();
+    let rs0 = {
+        let d = eph.calc(tjd, Body::Sun, iflag)?.data;
+        [d[0], d[1], d[2]]
+    };
+    let ds = (rs0[0] * rs0[0] + rs0[1] * rs0[1] + rs0[2] * rs0[2]).sqrt();
+
+    let x1 = [rs0[0] / ds, rs0[1] / ds, rs0[2] / ds];
+    let x2 = [rm0[0] / dm, rm0[1] / dm, rm0[2] / dm];
+    let dctr = dot_prod_unit(x1, x2).acos() * RADTODEG;
+
+    // Change of origin: selenocentric frame (§2.2).
+    let rs = [rs0[0] - rm0[0], rs0[1] - rm0[1], rs0[2] - rm0[2]];
+    let rm = [-rm0[0], -rm0[1], -rm0[2]];
+
+    let e_raw = [rm[0] - rs[0], rm[1] - rs[1], rm[2] - rs[2]];
+    let dsm = (e_raw[0] * e_raw[0] + e_raw[1] * e_raw[1] + e_raw[2] * e_raw[2]).sqrt();
+    let e = [e_raw[0] / dsm, e_raw[1] / dsm, e_raw[2] / dsm];
+
+    let f1 = (RSUN - REARTH) / dsm;
+    let cosf1 = (1.0 - f1 * f1).sqrt();
+    let f2 = (RSUN + REARTH) / dsm;
+    let cosf2 = (1.0 - f2 * f2).sqrt();
+
+    // Position of the Moon relative to the shadow axis (§2.4). `dm` here is the Moon's
+    // geocentric distance from before the frame change (magnitude unchanged by negation) --
+    // reused directly rather than recomputed, matching the C source's own reuse.
+    let s0 = -(rm[0] * e[0] + rm[1] * e[1] + rm[2] * e[2]);
+    let r0 = (dm * dm - s0 * s0).sqrt();
+
+    // Shadow diameters on the fundamental plane, with atmospheric enlargement (§2.5). Ordering
+    // and the doubled cosf1/cosf2 division are literal C, not simplified -- see ref doc §2.5.
+    let mut d0 = (s0 / dsm * (DSUN - DEARTH) - DEARTH).abs() * (1.0 + 1.0 / 50.0) / cosf1;
+    let mut cap_d0 = (s0 / dsm * (DSUN + DEARTH) + DEARTH) * (1.0 + 1.0 / 50.0) / cosf2;
+    d0 /= cosf1;
+    cap_d0 /= cosf2;
+    d0 *= 0.99405;
+    cap_d0 *= 0.98813;
+
+    let rmoon = RMOON;
+    let dmoon = 2.0 * rmoon;
+
+    // Phase / umbral magnitude (§2.6).
+    let mut flags = EclipseFlags::empty();
+    let mut umbral_magnitude = 0.0;
+    if d0 / 2.0 >= r0 + rmoon / cosf1 {
+        flags = EclipseFlags::TOTAL;
+        umbral_magnitude = (d0 / 2.0 - r0 + rmoon) / dmoon;
+    } else if d0 / 2.0 >= r0 - rmoon / cosf1 {
+        flags = EclipseFlags::PARTIAL;
+        umbral_magnitude = (d0 / 2.0 - r0 + rmoon) / dmoon;
+    } else if cap_d0 / 2.0 >= r0 - rmoon / cosf2 {
+        flags = EclipseFlags::PENUMBRAL;
+    }
+
+    // Penumbral magnitude, always computed regardless of `flags` (§2.7).
+    let penumbral_magnitude = (cap_d0 / 2.0 - r0 + rmoon) / dmoon;
+
+    // Distance from opposition (§2.8).
+    let distance_from_opposition = if !flags.is_empty() {
+        180.0 - dctr.abs()
+    } else {
+        0.0
+    };
+
+    // Saros series lookup (§2.9).
+    let (saros_series, saros_member) = saros_lookup(tjd_ut, &SAROS_DATA_LUNAR);
+
+    Ok(LunarEclipseCore {
+        umbral_magnitude,
+        penumbral_magnitude,
+        distance_from_opposition,
+        saros_series,
+        saros_member,
+        flags,
+    })
+}
+
+/// Local circumstances of a lunar eclipse at a given instant, plus the Moon's azimuth/altitude
+/// at an observer. Mirrors C's `attr[0..10]` output of `swe_lun_eclipse_how`/`lun_eclipse_how`
+/// (swecl.c:3172-3239, ref doc §1/§3). `attr[2]`/`attr[3]` are solar-only slots (vestigial
+/// index-parity padding in C), omitted here; `attr[8]` (documented as a duplicate of `attr[0]`)
+/// is likewise omitted -- callers needing exact `attr[]` index parity should reuse
+/// `umbral_magnitude` for both `attr[0]` and `attr[8]`.
+#[derive(Debug, Clone, Copy)]
+pub struct LunarEclipseHow {
+    /// `attr[0]`/`attr[8]` -- umbral magnitude.
+    pub umbral_magnitude: f64,
+    /// `attr[1]` -- penumbral magnitude.
+    pub penumbral_magnitude: f64,
+    /// `attr[4]` -- azimuth of the Moon, degrees, measured from south, clockwise via west.
+    pub azimuth: f64,
+    /// `attr[5]` -- true (geometric) altitude of the Moon above the horizon, degrees.
+    pub true_altitude: f64,
+    /// `attr[6]` -- apparent (refraction-corrected) altitude of the Moon above the horizon,
+    /// degrees.
+    pub apparent_altitude: f64,
+    /// `attr[7]` -- Moon's distance from exact opposition, degrees.
+    pub distance_from_opposition: f64,
+    /// `attr[9]` -- Saros series number, or `-99999999.0` if none found.
+    pub saros_series: f64,
+    /// `attr[10]` -- Saros series member number, 1-based, or `-99999999.0` if none found.
+    pub saros_member: f64,
+    /// Eclipse-type classification: empty (no eclipse, or Moon below the horizon at `geopos`),
+    /// or exactly one of TOTAL/PARTIAL/PENUMBRAL.
+    pub flags: EclipseFlags,
+}
+
+/// Public wrapper (`swe_lun_eclipse_how`, swecl.c:3190-3239, ref doc §3): geocentric eclipse
+/// attributes at `tjd_ut` (UT) plus the Moon's topocentric azimuth/altitude at `geopos`. Unlike C
+/// (where `geopos` may be `NULL` for a geocentric-only query), this port always requires
+/// `geopos` -- callers needing the geocentric-only core directly should call [`lun_eclipse_how`]
+/// (used internally by the eclipse-search module, a later task).
+///
+/// If the Moon's apparent altitude at `geopos` is `<= 0` (below the horizon), `flags` is forced
+/// empty even if the geocentric geometry found a real eclipse in progress --
+/// `umbral_magnitude`/`penumbral_magnitude`/`saros_series`/`saros_member` stay populated from the
+/// geocentric calculation regardless (§3 step 6, matching C exactly).
+pub(crate) fn swe_lun_eclipse_how(
+    eph: &Ephemeris,
+    tjd_ut: f64,
+    ifl: CalcFlags,
+    geopos: [f64; 3],
+) -> Result<LunarEclipseHow, Error> {
+    if !(crate::constants::RISE_SET_GEOALT_MIN..=crate::constants::RISE_SET_GEOALT_MAX)
+        .contains(&geopos[2])
+    {
+        return Err(Error::CError(format!(
+            "location for eclipses must be between {:.0} and {:.0} m above sea",
+            crate::constants::RISE_SET_GEOALT_MIN,
+            crate::constants::RISE_SET_GEOALT_MAX
+        )));
+    }
+
+    // Strip TOPOCTR/JPLHOR/JPLHOR_APPROX before the geocentric core runs (swecl.c:3219-3220) --
+    // those refinements apply only to the separate topocentric az/alt call below.
+    let ifl = ifl & !CalcFlags::TOPOCTR & !(CalcFlags::DPSIDEPS_1980 | CalcFlags::JPLHOR_APPROX);
+
+    let core = lun_eclipse_how(eph, tjd_ut, ifl)?;
+    let mut flags = core.flags;
+
+    let topo_config = {
+        let mut c = eph.config().clone();
+        c.topographic = Some(TopoPosition {
+            longitude: geopos[0],
+            latitude: geopos[1],
+            altitude: geopos[2],
+        });
+        c
+    };
+    let lm = eph
+        .calc_ut_with_config(
+            tjd_ut,
+            Body::Moon,
+            ifl | CalcFlags::TOPOCTR | CalcFlags::EQUATORIAL,
+            &topo_config,
+        )?
+        .data;
+    let xaz = eph.azalt(
+        tjd_ut,
+        crate::azalt::AzAltDir::EquToHor,
+        geopos,
+        0.0,
+        10.0,
+        LAPSE_RATE,
+        [lm[0], lm[1]],
+    );
+
+    if xaz[2] <= 0.0 {
+        flags = EclipseFlags::empty();
+    }
+
+    Ok(LunarEclipseHow {
+        umbral_magnitude: core.umbral_magnitude,
+        penumbral_magnitude: core.penumbral_magnitude,
+        azimuth: xaz[0],
+        true_altitude: xaz[1],
+        apparent_altitude: xaz[2],
+        distance_from_opposition: core.distance_from_opposition,
+        saros_series: core.saros_series,
+        saros_member: core.saros_member,
+        flags,
+    })
 }

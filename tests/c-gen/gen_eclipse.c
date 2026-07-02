@@ -1,8 +1,9 @@
 /*
  * Generates golden reference data for the eclipse module: swe_sol_eclipse_where
  * (RSE 5, swisseph-rs/72), swe_sol_eclipse_how (RSE 6, swisseph-rs/73),
- * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74), and swe_sol_eclipse_when_loc
- * (RSE 8, swisseph-rs/75). Later RSE tasks (9-12) add more keys to this same file.
+ * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74), swe_sol_eclipse_when_loc
+ * (RSE 8, swisseph-rs/75), and swe_lun_eclipse_how (RSE 9, swisseph-rs/76). Later RSE
+ * tasks (10-12) add more keys to this same file.
  *
  * The "dcore" field in each sol_where case comes from swi_test_eclipse_where_dcore, a
  * non-static test-only hook added to ../swisseph/swecl.c (right after calc_planet_star) that
@@ -168,6 +169,37 @@ int main(void) {
                 for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
                 printf("]}");
             }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* === lun_how === */
+    static double lun_how_tjd_uts[] = {
+        2451919.347916667,   /* 2001-01-09 20:21 UT, total */
+        2459360.971527778,   /* 2021-05-26 11:19 UT, total */
+        2460571.613888889,   /* 2024-09-18 02:44 UT, partial */
+    };
+    #define N_LUN_HOW (sizeof(lun_how_tjd_uts) / sizeof(lun_how_tjd_uts[0]))
+    static double lun_how_geopos[][3] = {
+        { 8.55, 47.37, 500.0 },
+    };
+    #define N_LUN_HOW_GEOPOS (sizeof(lun_how_geopos) / sizeof(lun_how_geopos[0]))
+    printf("  \"lun_how\": [\n");
+    first = 1;
+    for (size_t i = 0; i < N_LUN_HOW; i++) {
+        for (size_t g = 0; g < N_LUN_HOW_GEOPOS; g++) {
+            double tjd_ut = lun_how_tjd_uts[i];
+            double geopos[3] = { lun_how_geopos[g][0], lun_how_geopos[g][1], lun_how_geopos[g][2] };
+            double attr[20] = { 0 };
+            char serr[256] = { 0 };
+            int32 retval = swe_lun_eclipse_how(tjd_ut, SEFLG_MOSEPH, geopos, attr, serr);
+
+            if (!first) printf(",\n");
+            first = 0;
+            printf("    {\"tjd_ut\": %.17g, \"geopos\": [%.17g, %.17g, %.17g], \"retval\": %d, \"attr\": [",
+                   tjd_ut, geopos[0], geopos[1], geopos[2], retval);
+            for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
+            printf("]}");
         }
     }
     printf("\n  ]\n");
