@@ -311,29 +311,35 @@ to = "src/sweph_file/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:heliacal→moshier"
-# from = "src/heliacal.rs"
-# to = "src/moshier/**"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+# ACTIVATED 2026-07-02 — bound ahead of Phase 14 (heliacal is the final app
+# module; asteroid arc ~16 adds no new modules). heliacal.rs exists on disk as an
+# empty stub, so these are intentionally inert (dead_constraint) until the
+# heliacal port lands — same pre-pointing precedent as the src/jpl/** globs.
+# Target globs corrected from the stale single-file form (src/jpl.rs,
+# src/sweph_file.rs) to the directory form while activating.
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:heliacal→moshier"
+from = "src/heliacal.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:heliacal→jpl"
-# from = "src/heliacal.rs"
-# to = "src/jpl.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:heliacal→jpl"
+from = "src/heliacal.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:heliacal→sweph"
-# from = "src/heliacal.rs"
-# to = "src/sweph_file.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:heliacal→sweph"
+from = "src/heliacal.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
 [[constraint]]
 kind = "forbidden_dep"
@@ -383,14 +389,517 @@ to = "src/sweph_file/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
 
-# TRIGGER: at Phase 8+ (first application module implementation)
-# Application modules are independent of each other
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-modules-independent:houses↔eclipse"
-# from = "src/houses.rs"
-# to = "src/eclipse.rs"
-# severity = "blocking"
-# provenance = "skill default"
+# =============================================================================
+# FIRED 2026-07-02 — app-modules-independent (trigger: "Phase 8+, first
+# application module implementation"; overdue since houses landed 2026-06-30).
+# Bound now, at asteroid-arc planning (swisseph-rs/95): heliacal is the last
+# remaining app module (Phase 14), so the module set below is final and the
+# matrix is expanded once, bidirectionally, for all pairs.
+#
+# App modules: houses, eclipse, azalt, riseset, phenomena, nodaps, orbit,
+# crossings, heliacal. All cross-module needs route through context.rs
+# (Ephemeris methods) / calc.rs / lib.rs re-exports — never sibling imports.
+#
+# Exemptions (3, mirroring C's own internal call graph — swecl.c and swehel.c
+# call swe_azalt/swe_refrac_extended/calc_dip directly): azalt is also a
+# refraction/horizontal-coords SERVICE, so eclipse→azalt and riseset→azalt are
+# live legitimate edges (eclipse.rs:494 etc., riseset.rs:10) and heliacal→azalt
+# is pre-exempted for the Phase 14 port. The reverse directions (azalt→*) stay
+# forbidden. stars.rs/ayanamsa.rs are services, not app modules — they keep
+# their app-uses-calc-not-backends rules above but are not in this matrix.
+#
+# heliacal.rs is an empty stub until Phase 14 — its rows are intentionally
+# inert (dead_constraint), same pre-pointing precedent as src/jpl/**.
+# =============================================================================
 
-# ... expand bidirectionally for all app module pairs at trigger time
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→eclipse"
+from = "src/houses.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→azalt"
+from = "src/houses.rs"
+to = "src/azalt.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→riseset"
+from = "src/houses.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→phenomena"
+from = "src/houses.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→nodaps"
+from = "src/houses.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→orbit"
+from = "src/houses.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→crossings"
+from = "src/houses.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:houses→heliacal"
+from = "src/houses.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:eclipse→houses"
+from = "src/eclipse.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:eclipse→riseset"
+from = "src/eclipse.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:eclipse→phenomena"
+from = "src/eclipse.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:eclipse→nodaps"
+from = "src/eclipse.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:eclipse→orbit"
+from = "src/eclipse.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:eclipse→crossings"
+from = "src/eclipse.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:eclipse→heliacal"
+from = "src/eclipse.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→houses"
+from = "src/azalt.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→eclipse"
+from = "src/azalt.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→riseset"
+from = "src/azalt.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→phenomena"
+from = "src/azalt.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→nodaps"
+from = "src/azalt.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→orbit"
+from = "src/azalt.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→crossings"
+from = "src/azalt.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:azalt→heliacal"
+from = "src/azalt.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:riseset→houses"
+from = "src/riseset.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:riseset→eclipse"
+from = "src/riseset.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:riseset→phenomena"
+from = "src/riseset.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:riseset→nodaps"
+from = "src/riseset.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:riseset→orbit"
+from = "src/riseset.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:riseset→crossings"
+from = "src/riseset.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:riseset→heliacal"
+from = "src/riseset.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→houses"
+from = "src/phenomena.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→eclipse"
+from = "src/phenomena.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→azalt"
+from = "src/phenomena.rs"
+to = "src/azalt.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→riseset"
+from = "src/phenomena.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→nodaps"
+from = "src/phenomena.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→orbit"
+from = "src/phenomena.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→crossings"
+from = "src/phenomena.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:phenomena→heliacal"
+from = "src/phenomena.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→houses"
+from = "src/nodaps.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→eclipse"
+from = "src/nodaps.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→azalt"
+from = "src/nodaps.rs"
+to = "src/azalt.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→riseset"
+from = "src/nodaps.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→phenomena"
+from = "src/nodaps.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→orbit"
+from = "src/nodaps.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→crossings"
+from = "src/nodaps.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:nodaps→heliacal"
+from = "src/nodaps.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→houses"
+from = "src/orbit.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→eclipse"
+from = "src/orbit.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→azalt"
+from = "src/orbit.rs"
+to = "src/azalt.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→riseset"
+from = "src/orbit.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→phenomena"
+from = "src/orbit.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→nodaps"
+from = "src/orbit.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→crossings"
+from = "src/orbit.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:orbit→heliacal"
+from = "src/orbit.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→houses"
+from = "src/crossings.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→eclipse"
+from = "src/crossings.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→azalt"
+from = "src/crossings.rs"
+to = "src/azalt.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→riseset"
+from = "src/crossings.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→phenomena"
+from = "src/crossings.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→nodaps"
+from = "src/crossings.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→orbit"
+from = "src/crossings.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:crossings→heliacal"
+from = "src/crossings.rs"
+to = "src/heliacal.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:heliacal→houses"
+from = "src/heliacal.rs"
+to = "src/houses.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:heliacal→eclipse"
+from = "src/heliacal.rs"
+to = "src/eclipse.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:heliacal→riseset"
+from = "src/heliacal.rs"
+to = "src/riseset.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:heliacal→phenomena"
+from = "src/heliacal.rs"
+to = "src/phenomena.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:heliacal→nodaps"
+from = "src/heliacal.rs"
+to = "src/nodaps.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:heliacal→orbit"
+from = "src/heliacal.rs"
+to = "src/orbit.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-modules-independent:heliacal→crossings"
+from = "src/heliacal.rs"
+to = "src/crossings.rs"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
