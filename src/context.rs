@@ -652,6 +652,140 @@ impl Ephemeris {
         crate::crossings::helio_cross_ut(self, body, x2cross, jd_ut, flags, dir)
     }
 
+    /// Position of `body` as seen from `center` (planetocentric coordinates).
+    /// Ports `swe_calc_pctr` (sweph.c:8042–8283).
+    pub fn calc_pctr(
+        &self,
+        jd_tt: f64,
+        body: Body,
+        center: Body,
+        flags: CalcFlags,
+    ) -> Result<CalcResult, Error> {
+        if body == center {
+            return Err(Error::CError(
+                "ipl and iplctr must not be identical".to_string(),
+            ));
+        }
+        let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
+
+        // C's swe_calc_pctr internally calls swe_calc with SEFLG_BARYCTR.
+        // Moshier doesn't support barycentric positions → propagate the error.
+        if self.config.ephemeris_source == EphemerisSource::Moshier {
+            return Err(Error::CError(
+                "barycentric Moshier positions are not supported".to_string(),
+            ));
+        }
+
+        // Strip HELCTR/BARYCTR from user flags (sweph.c:8059)
+        let flags = flags & !(CalcFlags::HELCTR | CalcFlags::BARYCTR);
+        let models = &self.config.astro_models;
+        let has_speed = flags.contains(CalcFlags::SPEED);
+
+        // §1: Prime obliquity/nutation at tjd + Δt(tjd) — a third, distinct epoch
+        let dt_prime = crate::deltat::calc_deltat(jd_tt, &self.config);
+        let eps = crate::obliquity::obliquity(jd_tt + dt_prime, flags, models);
+        let nut_val = crate::nutation::nutation(jd_tt + dt_prime, flags, models);
+
+        // §2: Barycentric J2000-equatorial states of both bodies at tjd
+        let (xx0, _, _) = self.pctr_bary_state(jd_tt, body)?;
+        let (xxctr, _, _) = self.pctr_bary_state(jd_tt, center)?;
+
+        // §3: Light-time iteration + re-eval at retarded time
+        let (t, xxsp, xx, xxctr2, eb_defl, sb_defl) = if flags.contains(CalcFlags::TRUEPOS) {
+            // No light-time; deflection/aberration also gated on !TRUEPOS, so
+            // earth_bary/sun_bary values are unused — zero placeholders.
+            (jd_tt, [0.0; 3], xx0, xxctr, [0.0; 6], [0.0; 6])
+        } else {
+            let (t, _dt, xxsp) = crate::calc::pctr_light_time(jd_tt, &xx0, &xxctr, has_speed);
+
+            // §3d: Re-evaluate both bodies at retarded time
+            let (xx_t, eb_t, sb_t) = self.pctr_bary_state(t, body)?;
+            let (xxctr2_t, _, _) = self.pctr_bary_state(t, center)?;
+
+            (t, xxsp, xx_t, xxctr2_t, eb_t, sb_t)
+        };
+
+        // §4–§9: Planetocentric subtraction, deflection, aberration, bias, precess, output
+        // Note: §4 subtracts xxctr (center at tjd, NOT xxctr2 at t) — see c-ref-pctr §4.
+        let nut_epoch = jd_tt + dt_prime;
+        let (mut xreturn, x2000) = crate::calc::pctr_pipeline(
+            &xx, &xxctr, &xxctr2, &xxsp, t, jd_tt, nut_epoch, &eb_defl, &sb_defl, flags, &eps,
+            &nut_val, models,
+        );
+
+        // §9 sidereal tail
+        if flags.contains(CalcFlags::SIDEREAL) {
+            self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags)?;
+        }
+
+        Ok(CalcResult {
+            data: crate::calc::extract_output(&xreturn, flags),
+            flags_used: flags,
+        })
+    }
+
+    /// Barycentric J2000-equatorial state of `body` at epoch `t`, plus Earth and
+    /// Sun barycentric states (always populated by the provider regardless of the
+    /// queried body). Swiss/JPL only — Moshier is rejected before reaching here.
+    fn pctr_bary_state(&self, t: f64, body: Body) -> Result<([f64; 6], [f64; 6], [f64; 6]), Error> {
+        let eps_j2000 = crate::obliquity::obliquity(
+            crate::constants::J2000,
+            CalcFlags::empty(),
+            &self.config.astro_models,
+        );
+
+        match self.config.ephemeris_source {
+            EphemerisSource::Moshier => Err(Error::CError(
+                "barycentric Moshier positions are not supported".to_string(),
+            )),
+            EphemerisSource::Swiss => {
+                let provider = SwephProvider {
+                    planet_files: &self.planet_files,
+                    moon_files: &self.moon_files,
+                };
+                self.pctr_bary_from_provider(&provider, t, body, &eps_j2000)
+            }
+            EphemerisSource::Jpl => {
+                let provider = JplProvider {
+                    file: self.jpl_file.as_ref().unwrap(),
+                };
+                self.pctr_bary_from_provider(&provider, t, body, &eps_j2000)
+            }
+        }
+    }
+
+    fn pctr_bary_from_provider<P: crate::calc::PositionProvider>(
+        &self,
+        provider: &P,
+        t: f64,
+        body: Body,
+        _eps_j2000: &crate::types::Epsilon,
+    ) -> Result<([f64; 6], [f64; 6], [f64; 6]), Error> {
+        match body {
+            Body::Moon => {
+                let moon_geo = provider.moon_geo(t, true)?;
+                let pos = provider.positions(Body::Sun, t, true)?;
+                let mut body_bary = [0.0; 6];
+                for i in 0..6 {
+                    body_bary[i] = moon_geo[i] + pos.earth_bary[i];
+                }
+                Ok((body_bary, pos.earth_bary, pos.sun_bary))
+            }
+            Body::Earth => {
+                let pos = provider.positions(Body::Sun, t, true)?;
+                Ok((pos.earth_bary, pos.earth_bary, pos.sun_bary))
+            }
+            Body::Sun => {
+                let pos = provider.positions(Body::Sun, t, true)?;
+                Ok((pos.sun_bary, pos.earth_bary, pos.sun_bary))
+            }
+            _ => {
+                let pos = provider.positions(body, t, true)?;
+                Ok((pos.planet_bary, pos.earth_bary, pos.sun_bary))
+            }
+        }
+    }
+
     /// Observer / origin geometry for the nodes-&-apsides pipeline at epoch `t`
     /// (TT), in equatorial-J2000 cartesian. Replaces C's `xsun`/`xear`/`xobs`
     /// globals (swecl.c A.5.1) with an explicit per-epoch computation. The

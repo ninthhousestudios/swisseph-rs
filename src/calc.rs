@@ -1959,3 +1959,176 @@ pub fn calc_moon_sweph(
     };
     apparent_moon(&p, jd, flags, config, models)
 }
+
+/// Light-time iteration for swe_calc_pctr (c-ref-pctr §3a–§3c).
+/// Returns `(retarded_time, dt, xxsp)`.
+pub(crate) fn pctr_light_time(
+    tjd: f64,
+    xx0: &[f64; 6],
+    xxctr: &[f64; 6],
+    has_speed: bool,
+) -> (f64, f64, [f64; 3]) {
+    let niter = 1;
+    let mut xxsp = [0.0; 3];
+
+    // §3a: SPEED pre-pass — "change of dt" correction seed
+    if has_speed {
+        let mut xxsv = [0.0; 3];
+        for i in 0..3 {
+            xxsv[i] = xx0[i] - xx0[i + 3];
+            xxsp[i] = xxsv[i];
+        }
+        for _ in 0..=niter {
+            let mut dx = [0.0; 3];
+            for i in 0..3 {
+                dx[i] = xxsp[i] - (xxctr[i] - xxctr[i + 3]);
+            }
+            let dist = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt();
+            let dt_sp = dist * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xxsp[i] = xxsv[i] - dt_sp * xx0[i + 3];
+            }
+        }
+        for i in 0..3 {
+            xxsp[i] = xxsv[i] - xxsp[i];
+        }
+    }
+
+    // §3b: Main light-time loop
+    let mut xx_pos = [xx0[0], xx0[1], xx0[2]];
+    let mut dt = 0.0;
+    for _ in 0..=niter {
+        let mut dx = [0.0; 3];
+        for i in 0..3 {
+            dx[i] = xx_pos[i] - xxctr[i];
+        }
+        let dist = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt();
+        dt = dist * AUNIT / CLIGHT / 86400.0;
+        for i in 0..3 {
+            xx_pos[i] = xx0[i] - dt * xx0[i + 3];
+        }
+    }
+    let t = tjd - dt;
+
+    // §3c: Finalize speed correction
+    if has_speed {
+        for i in 0..3 {
+            xxsp[i] = xx0[i] - xx_pos[i] - xxsp[i];
+        }
+    }
+
+    (t, dt, xxsp)
+}
+
+/// Pipeline for swe_calc_pctr §4–§9: planetocentric subtraction, deflection,
+/// aberration, frame bias, precession, app_pos_rest.
+///
+/// `nut_epoch` is the §1 priming epoch (tjd + Δt(tjd)) at which `eps`/`nut`
+/// were computed; needed for the nutation speed derivative (nutv).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn pctr_pipeline(
+    xx_ipl: &[f64; 6],
+    xxctr: &[f64; 6],
+    xxctr2: &[f64; 6],
+    xxsp: &[f64; 3],
+    t: f64,
+    tjd: f64,
+    nut_epoch: f64,
+    earth_bary: &[f64; 6],
+    sun_bary: &[f64; 6],
+    flags: CalcFlags,
+    eps: &Epsilon,
+    nut: &NutationType,
+    models: &AstroModels,
+) -> ([f64; 24], [f64; 6]) {
+    let has_speed = flags.contains(CalcFlags::SPEED);
+
+    // §4: Planetocentric subtraction (unconditional — HELCTR/BARYCTR stripped)
+    let mut xx = [0.0; 6];
+    for i in 0..6 {
+        xx[i] = xx_ipl[i] - xxctr[i];
+    }
+    if !flags.contains(CalcFlags::TRUEPOS) && has_speed {
+        for i in 0..3 {
+            xx[i + 3] -= xxsp[i];
+        }
+    }
+    if !has_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    // §5: Gravitational deflection (Earth-observer geometry regardless of center)
+    // C reads pedp->x (earth_bary) and computes q = xx + earth_bary. Our
+    // deflect_light is designed around earth_helio (standard pipeline convention),
+    // so we compute earth_helio = earth_bary - sun_bary, and planet_for_defl =
+    // xx + earth_helio (self-consistent: in the standard pipeline planet_helio =
+    // geocentric + earth_helio). This avoids NaN when ipl=Sun (planet_helio would
+    // be [0;6]) while staying consistent with deflect_light's speed perturbation.
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOGDEFL) {
+        let mut earth_helio = [0.0; 6];
+        let mut planet_for_defl = [0.0; 6];
+        for i in 0..6 {
+            earth_helio[i] = earth_bary[i] - sun_bary[i];
+            planet_for_defl[i] = xx[i] + earth_helio[i];
+        }
+        deflect_light(&mut xx, &earth_helio, &planet_for_defl, has_speed);
+    }
+
+    // §6: Annual aberration (center body velocity as observer)
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOABERR) {
+        let ctr_vel = [xxctr[3], xxctr[4], xxctr[5]];
+        aberr_light(&mut xx, &ctr_vel, has_speed);
+        if has_speed {
+            for i in 3..6 {
+                xx[i] += xxctr[i] - xxctr2[i];
+            }
+        }
+    }
+    if !has_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    // §7: ICRS → J2000 frame bias (at retarded time t)
+    if !flags.contains(CalcFlags::ICRS) {
+        frame_bias(&mut xx, t, flags, models, FrameTransform::GcrsToJ2000);
+    }
+
+    // Save J2000 coordinates for sidereal projection
+    let x2000 = xx;
+
+    // §8–§9: Precession (at tjd) + nutation/ecliptic/polar/degrees
+    if !flags.contains(CalcFlags::J2000) {
+        let mut pos3 = [xx[0], xx[1], xx[2]];
+        precess(
+            &mut pos3,
+            tjd,
+            flags,
+            models,
+            PrecessionDirection::J2000ToDate,
+        );
+        xx[0] = pos3[0];
+        xx[1] = pos3[1];
+        xx[2] = pos3[2];
+        if has_speed {
+            precess_speed(
+                &mut xx,
+                tjd,
+                flags,
+                models,
+                PrecessionDirection::J2000ToDate,
+            );
+        }
+    }
+
+    let nutv = if has_speed && !flags.contains(CalcFlags::J2000) {
+        Some(nutation(nut_epoch - NUT_SPEED_INTV, flags, models))
+    } else {
+        None
+    };
+
+    (app_pos_rest(&mut xx, flags, eps, nut, nutv.as_ref()), x2000)
+}
