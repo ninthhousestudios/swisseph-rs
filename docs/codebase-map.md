@@ -189,17 +189,54 @@ src/
 │                          `(1+1/50)` atmospheric enlargement and doubled cosf1/cosf2 division —
 │                          literal C, not simplified — plus the 0.99405/0.98813 NASA-agreement
 │                          factors, phase/umbral+penumbral magnitude, distance from opposition,
-│                          Saros lookup; the `dcore[]` fundamental-plane geometry
-│                          (r0/d0/D0/cosf1/cosf2) that the not-yet-ported eclipse-search module
-│                          needs is computed internally but not exposed — out of scope until RSE
-│                          10/12 lands); LunarEclipseHow/swe_lun_eclipse_how (public wrapper,
-│                          swecl.c:3190-3239: adds the Moon's topocentric az/alt at `geopos` via
-│                          calc_ut_with_config+azalt, forces `flags` empty when apparent altitude
-│                          ≤0 while leaving magnitudes/Saros populated — matching
-│                          sol_eclipse_how's analogous horizon-visibility gate; unlike C, `geopos`
-│                          is always required here rather than nullable — callers needing the
-│                          geocentric-only core call lun_eclipse_how directly). Ephemeris::
+│                          Saros lookup; now also carries `dcore[0..4]` (r0/d0/D0/cosf1/cosf2,
+│                          fields `r0`/`d0`/`cap_d0`/`cosf1`/`cosf2`) that `lun_eclipse_when`'s
+│                          contact-time search needs — exposed on `LunarEclipseCore` since RSE
+│                          10/12, swisseph-rs/77); LunarEclipseHow/swe_lun_eclipse_how (public
+│                          wrapper, swecl.c:3190-3239: adds the Moon's topocentric az/alt at
+│                          `geopos` via calc_ut_with_config+azalt, forces `flags` empty when
+│                          apparent altitude ≤0 while leaving magnitudes/Saros populated —
+│                          matching sol_eclipse_how's analogous horizon-visibility gate; unlike C,
+│                          `geopos` is always required here rather than nullable — callers needing
+│                          the geocentric-only core call lun_eclipse_how directly). Ephemeris::
 │                          lun_eclipse_how in context.rs delegates.
+│                          lun_contact_dc (swisseph-rs/77, shared contact-time sample formula for
+│                          n=0 penumbral/n=1 partial(umbra)/n=2 totality begin-end, mirrors solar's
+│                          contact_dc); LunarEclipseGlobal (tret[0,2..7]: time_maximum,
+│                          time_partial_begin/end, time_totality_begin/end,
+│                          time_penumbral_begin/end — tret[1] omitted, unused for lunar);
+│                          lun_eclipse_when (swe_lun_eclipse_when port: `'next_try: loop` +
+│                          `continue 'next_try`; Meeus lunation stepping with the (21°,159°)
+│                          F-argument rejection band (same structure as solar's but a distinct
+│                          17-term full-moon periodic series, not factored into a shared helper —
+│                          F1's `sin(Om)` is computed with `Om` already in radians, a literal C
+│                          quirk preserved exactly); find_maximum-refined minimum-separation search
+│                          (dtdiv=4 fixed, unlike solar's 2-then-3 local-search schedule) then a
+│                          3-pass fixed-point ET→UT deltaT conversion; confirmation via the
+│                          internal `lun_eclipse_how` core directly (equivalent to C's public-
+│                          wrapper-with-geopos=NULL call, skipping the topocentric gate);
+│                          ifltype bit-cascade rejection/retry; find_zero-refined contact times
+│                          (coarse bracket + 3-round 2-point secant refinement, dt/=2 each round —
+│                          a different divisor than solar's dt/=3) with the same intentional
+│                          divergence as sol_eclipse_when_glob on `find_zero` failure: slots left
+│                          at 0.0 instead of C's stale-value carryover, unreachable for a confirmed
+│                          eclipse). Ephemeris::lun_eclipse_when in context.rs delegates.
+│                          LunarEclipseLocal (tret[0,2..9]: same index semantics as
+│                          LunarEclipseGlobal plus tret[8]/tret[9] for moonrise/moonset — NOT
+│                          SolarEclipseLocal's differing 1st/2nd/3rd/4th-contact layout);
+│                          lun_eclipse_when_loc (swe_lun_eclipse_when_loc port: visibility scan
+│                          (descending i=7..=0, skip i==1) via the public swe_lun_eclipse_how;
+│                          moonrise/moonset clipping via Ephemeris::rise_trans, both searches
+│                          anchored at `tret[6]-0.001` — Error::CircumpolarBody from either call
+│                          skips clipping entirely (matches C's `retc>=0` guard checking the LAST-
+│                          assigned retc, not each call's own), other Err propagates; the second
+│                          moonset-clipping `if` reads `tret[6]`/`tret[7]` which may already have
+│                          been mutated by the first moonrise-clipping `if` in the same iteration —
+│                          literal C hazard (ref doc §5), preserved via sequential mutation of one
+│                          `tret` array rather than "fixed" to read pre-mutation values; on no
+│                          visible phase / degenerate rise-set ordering / final-instant no-eclipse,
+│                          retries with `tjd_start = tret[0] ± 25` days). Ephemeris::
+│                          lun_eclipse_when_loc in context.rs delegates.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -288,7 +325,14 @@ tests/
 │                          horizon-visibility clearing path), 2024-09-18 (small partial) at their
 │                          actual maximum-eclipse UT instants × the same near-central Zurich
 │                          observer, asserts attr[0,1,4..10] eps 1e-7 + exact retval flags bitmask;
-│                          passed on the first implementation attempt)
+│                          passed on the first implementation attempt; lun_when: 4 cases — 2
+│                          tjd_start (2000/2019) × 2 backward, ifltype=0, asserts tret[0,2..7] eps
+│                          1e-5 day + exact retval flags bitmask, incl. a partial-only case
+│                          (tret[4..5]==0) and a penumbral-only case (tret[2..5]==0); lun_when_loc:
+│                          4 cases — 1 geopos (near-central Zurich) × the same 2 tjd_start × 2
+│                          backward, asserts tret[0,2..9] eps 1e-5 day + all attr[] fields except
+│                          attr[8] (duplicate) + exact retval flags bitmask; both passed on the
+│                          first implementation attempt, no escape-hatch escalation needed)
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -359,9 +403,10 @@ tests/
 │   ├── date.json       — C-generated reference data for date
 │   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key),
 │                          swe_sol_eclipse_how (sol_how key), swe_sol_eclipse_when_glob
-│                          (sol_when_glob key), swe_sol_eclipse_when_loc (sol_when_loc key), and
-│                          swe_lun_eclipse_how (lun_how key); later RSE tasks 10-12 add more keys
-│                          to this same file
+│                          (sol_when_glob key), swe_sol_eclipse_when_loc (sol_when_loc key),
+│                          swe_lun_eclipse_how (lun_how key), swe_lun_eclipse_when (lun_when key),
+│                          and swe_lun_eclipse_when_loc (lun_when_loc key); later RSE tasks 11-12
+│                          add more keys to this same file
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -389,7 +434,9 @@ tests/
     │                       ifltype=0; swe_sol_eclipse_when_loc: 2 geopos (near-central; Chile) ×
     │                       2 tjd_start × 2 backward; swe_lun_eclipse_how: 3 known lunar eclipses
     │                       (2001/2021/2024) at their real maximum-eclipse UT instants × 1 observer
-    │                       (near-central Zurich))
+    │                       (near-central Zurich); swe_lun_eclipse_when: 2 tjd_start (2000/2019) ×
+    │                       2 backward, ifltype=0; swe_lun_eclipse_when_loc: 1 geopos (near-central
+    │                       Zurich) × the same 2 tjd_start × 2 backward)
     ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

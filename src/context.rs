@@ -616,6 +616,33 @@ impl Ephemeris {
         crate::eclipse::swe_lun_eclipse_how(self, tjd_ut, ifl, geopos)
     }
 
+    /// Global lunar-eclipse search: next/previous lunar eclipse from `tjd_start` (UT), restricted
+    /// to eclipse types in `ifltype` (empty = any of TOTAL/PARTIAL/PENUMBRAL). Purely geocentric,
+    /// no geographic position. Port of `swe_lun_eclipse_when` (swecl.c:3389-3616).
+    pub fn lun_eclipse_when(
+        &self,
+        tjd_start: f64,
+        ifl: CalcFlags,
+        ifltype: EclipseFlags,
+        backward: bool,
+    ) -> Result<crate::eclipse::LunarEclipseGlobal, Error> {
+        crate::eclipse::lun_eclipse_when(self, tjd_start, ifl, ifltype, backward)
+    }
+
+    /// Local lunar-eclipse search: next/previous lunar eclipse visible from `geopos` (Moon above
+    /// the horizon during some phase), with contact times clipped to moonrise/moonset. Port of
+    /// `swe_lun_eclipse_when_loc` (swecl.c:3644-3739). `geopos` = [longitude, latitude, height
+    /// above sea (m)], degrees/degrees/meters.
+    pub fn lun_eclipse_when_loc(
+        &self,
+        tjd_start: f64,
+        ifl: CalcFlags,
+        geopos: [f64; 3],
+        backward: bool,
+    ) -> Result<crate::eclipse::LunarEclipseLocal, Error> {
+        crate::eclipse::lun_eclipse_when_loc(self, tjd_start, ifl, geopos, backward)
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`

@@ -1573,10 +1573,10 @@ pub(crate) fn sol_eclipse_when_loc(
 
 /// Result of `lun_eclipse_how`'s static core geometry pass (swecl.c:3248-3372,
 /// docs/c-ref-eclipse-lunar.md §2): the `attr[]` subset it computes directly -- everything except
-/// azimuth/altitude, which only the public wrapper adds. The `dcore[]` fundamental-plane
-/// shadow-cone geometry (`r0`/`d0`/`D0`/`cosf1`/`cosf2`) that `swe_lun_eclipse_when`'s
-/// contact-time refinement needs is computed internally by [`lun_eclipse_how`] but not exposed
-/// here -- out of scope until that search module is ported.
+/// azimuth/altitude, which only the public wrapper adds. Also carries the `dcore[0..4]`
+/// fundamental-plane shadow-cone geometry (`r0`/`d0`/`D0`/`cosf1`/`cosf2`, ref doc §2.5 table)
+/// that `swe_lun_eclipse_when`'s contact-time refinement (ref doc §4.7) needs -- `swe_lun_eclipse_
+/// how`'s public wrapper output doesn't carry these, only this internal core does.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LunarEclipseCore {
     /// `attr[0]`/`attr[8]` -- umbral magnitude: fraction of the Moon's diameter covered by the
@@ -1591,6 +1591,16 @@ pub(crate) struct LunarEclipseCore {
     pub saros_series: f64,
     /// `attr[10]` -- Saros series member number (1-based), or `-99999999.0` if none found.
     pub saros_member: f64,
+    /// `dcore[0]` -- distance of the shadow axis from the selenocenter, AU.
+    pub r0: f64,
+    /// `dcore[1]` -- diameter of the umbra (core shadow) on the fundamental plane, AU.
+    pub d0: f64,
+    /// `dcore[2]` -- diameter of the penumbra (half-shadow) on the fundamental plane, AU.
+    pub cap_d0: f64,
+    /// `dcore[3]` -- cosine of the umbra cone's half-angle.
+    pub cosf1: f64,
+    /// `dcore[4]` -- cosine of the penumbra cone's half-angle.
+    pub cosf2: f64,
     /// Eclipse-type classification: empty (no eclipse), or exactly one of TOTAL/PARTIAL/
     /// PENUMBRAL (`retc`, §2.10).
     pub flags: EclipseFlags,
@@ -1688,8 +1698,26 @@ pub(crate) fn lun_eclipse_how(
         distance_from_opposition,
         saros_series,
         saros_member,
+        r0,
+        d0,
+        cap_d0,
+        cosf1,
+        cosf2,
         flags,
     })
+}
+
+/// Contact-time sample formula shared by `swe_lun_eclipse_when`'s coarse `find_zero` bracket and
+/// its 3-round Newton refinement (ref doc §4.7, swecl.c:3583-3608). `n`: 0 = penumbral begin/end
+/// (`dcore[2]`/`D0` boundary), 1 = partial (umbra) begin/end (`dcore[1]`/`d0` boundary, `+
+/// RMOON/cosf1`), 2 = totality begin/end (same `d0` boundary, `- RMOON/cosf1` -- far limb exits
+/// the umbra entirely).
+fn lun_contact_dc(n: u32, core: &LunarEclipseCore) -> f64 {
+    match n {
+        0 => core.cap_d0 / 2.0 + RMOON / core.cosf2 - core.r0,
+        1 => core.d0 / 2.0 + RMOON / core.cosf1 - core.r0,
+        _ => core.d0 / 2.0 - RMOON / core.cosf1 - core.r0,
+    }
 }
 
 /// Local circumstances of a lunar eclipse at a given instant, plus the Moon's azimuth/altitude
@@ -1797,4 +1825,472 @@ pub(crate) fn swe_lun_eclipse_how(
         saros_member: core.saros_member,
         flags,
     })
+}
+
+/// Global lunar-eclipse search result: `tret[0..8]` per `swe_lun_eclipse_when` (swecl.c:3389-3616,
+/// ref doc §4). `tret[1]` is unused for lunar eclipses (index-parity padding with the solar
+/// `tret[]` layout) and omitted here.
+#[derive(Debug, Clone, Copy)]
+pub struct LunarEclipseGlobal {
+    /// Time (UT) of maximum eclipse: minimum selenocentric Sun/Earth-shadow angular separation.
+    /// `tret[0]`.
+    pub time_maximum: f64,
+    /// Time (UT) of partial (umbra) phase begin, `0.0` if only penumbral. `tret[2]`.
+    pub time_partial_begin: f64,
+    /// Time (UT) of partial (umbra) phase end, `0.0` if only penumbral. `tret[3]`.
+    pub time_partial_end: f64,
+    /// Time (UT) of totality begin, `0.0` unless the eclipse is total. `tret[4]`.
+    pub time_totality_begin: f64,
+    /// Time (UT) of totality end, `0.0` unless the eclipse is total. `tret[5]`.
+    pub time_totality_end: f64,
+    /// Time (UT) of penumbral phase begin (always set for any eclipse type). `tret[6]`.
+    pub time_penumbral_begin: f64,
+    /// Time (UT) of penumbral phase end (always set for any eclipse type). `tret[7]`.
+    pub time_penumbral_end: f64,
+    /// Eclipse-type classification: exactly one of TOTAL/PARTIAL/PENUMBRAL. Never empty -- the
+    /// search retries indefinitely (bounded only by ephemeris range) until a matching eclipse of
+    /// a requested type is found.
+    pub flags: EclipseFlags,
+}
+
+/// Global lunar-eclipse search: find the next (or, if `backward`, previous) lunar eclipse of a
+/// type in `ifltype` (empty = any of TOTAL/PARTIAL/PENUMBRAL) starting from `tjd_start` (UT). No
+/// geographic position -- purely geocentric. Port of `swe_lun_eclipse_when` (swecl.c:3389-3616,
+/// ref doc §4).
+pub(crate) fn lun_eclipse_when(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ifl: CalcFlags,
+    ifltype: EclipseFlags,
+    backward: bool,
+) -> Result<LunarEclipseGlobal, Error> {
+    let ifl = ifl & crate::calc::EPHMASK;
+    let config = eph.config();
+
+    // `ifltype` normalization (§4.1): solar-only CENTRAL/NONCENTRAL bits are meaningless here and
+    // stripped unconditionally; ANNULAR/HYBRID (annular-total) don't exist for lunar eclipses --
+    // stripped, and if nothing else survives, that's an unsatisfiable request (would infinite-loop
+    // the search below).
+    let mut ifltype = ifltype & !(EclipseFlags::CENTRAL | EclipseFlags::NONCENTRAL);
+    if ifltype.intersects(EclipseFlags::ANNULAR | EclipseFlags::HYBRID) {
+        ifltype &= !(EclipseFlags::ANNULAR | EclipseFlags::HYBRID);
+        if ifltype.is_empty() {
+            return Err(Error::CError(
+                "annular lunar eclipses don't exist".to_string(),
+            ));
+        }
+    }
+    if ifltype.is_empty() {
+        ifltype = EclipseFlags::ALLTYPES_LUNAR;
+    }
+
+    let direction = if backward { -1.0 } else { 1.0 };
+    let iflag_cart = CalcFlags::EQUATORIAL | ifl | CalcFlags::XYZ;
+
+    let mut k = ((tjd_start - J2000) / 365.2425 * 12.3685).trunc();
+    k -= direction;
+
+    'next_try: loop {
+        let mut tret = [0.0f64; 8];
+
+        // Full-moon (synodic-month) stepping via Meeus's lunation number K, plus the F-argument
+        // node-proximity pre-filter (§4.2/§4.3).
+        let kk = k + 0.5;
+        let tt_ = kk / 1236.85;
+        let t2 = tt_ * tt_;
+        let t3 = t2 * tt_;
+        let t4 = t3 * tt_;
+        let f_deg = normalize_degrees(
+            160.7108 + 390.67050274 * kk - 0.0016341 * t2 - 0.00000227 * t3 + 0.000000011 * t4,
+        );
+        let mut ff = f_deg;
+        if ff > 180.0 {
+            ff -= 180.0;
+        }
+        if ff > 21.0 && ff < 159.0 {
+            k += direction;
+            continue 'next_try;
+        }
+
+        // Approximate time of geocentric maximum eclipse (Meeus, German ed., p.381, §4.4).
+        let mut tjd = 2451550.09765 + 29.530588853 * kk + 0.0001337 * t2 - 0.000000150 * t3
+            + 0.00000000073 * t4;
+        let m = normalize_degrees(2.5534 + 29.10535669 * kk - 0.0000218 * t2 - 0.00000011 * t3);
+        let mm = normalize_degrees(
+            201.5643 + 385.81693528 * kk + 0.1017438 * t2 + 0.00001239 * t3 + 0.000000058 * t4,
+        );
+        let om = normalize_degrees(124.7746 - 1.56375580 * kk + 0.0020691 * t2 + 0.00000215 * t3);
+        let e = 1.0 - 0.002516 * tt_ - 0.0000074 * t2;
+        let a1 = normalize_degrees(299.77 + 0.107408 * kk - 0.009173 * t2);
+        let m_rad = m * DEGTORAD;
+        let mm_rad = mm * DEGTORAD;
+        let f_rad = f_deg * DEGTORAD;
+        let om_rad = om * DEGTORAD;
+        // Literal C quirk (swecl.c:3469): `Om` is already in radians here, so `sin(Om)` is
+        // dimensionless -- multiplying by `DEGTORAD` again is not a unit conversion, it's part of
+        // the tabulated Meeus coefficient. Preserve exactly, do not "fix".
+        let f1_rad = f_rad - 0.02665 * om_rad.sin() * DEGTORAD;
+        let a1_rad = a1 * DEGTORAD;
+        tjd =
+            tjd - 0.4075 * mm_rad.sin() + 0.1721 * e * m_rad.sin() + 0.0161 * (2.0 * mm_rad).sin()
+                - 0.0097 * (2.0 * f1_rad).sin()
+                + 0.0073 * e * (mm_rad - m_rad).sin()
+                - 0.0050 * e * (mm_rad + m_rad).sin()
+                - 0.0023 * (mm_rad - 2.0 * f1_rad).sin()
+                + 0.0021 * e * (2.0 * m_rad).sin()
+                + 0.0012 * (mm_rad + 2.0 * f1_rad).sin()
+                + 0.0006 * e * (2.0 * mm_rad + m_rad).sin()
+                - 0.0004 * (3.0 * mm_rad).sin()
+                - 0.0003 * e * (m_rad + 2.0 * f1_rad).sin()
+                + 0.0003 * a1_rad.sin()
+                - 0.0002 * e * (m_rad - 2.0 * f1_rad).sin()
+                - 0.0002 * e * (2.0 * mm_rad - m_rad).sin()
+                - 0.0002 * om_rad.sin();
+
+        // Precise refinement to the instant of minimum selenocentric Sun/Earth-shadow angular
+        // separation (§4.5). `tjd` is ET/TT throughout; UT conversion happens once, after
+        // convergence.
+        let dtstart = if !(2_100_000.0..=2_500_000.0).contains(&tjd) {
+            5.0
+        } else {
+            0.1
+        };
+        let mut dt = dtstart;
+        while dt > 0.001 {
+            let mut dc = [0.0f64; 3];
+            let mut t = tjd - dt;
+            for dc_i in dc.iter_mut() {
+                let xs = eph.calc(t, Body::Sun, iflag_cart)?.data;
+                let xm = eph.calc(t, Body::Moon, iflag_cart)?.data;
+                let xs_sel = [xs[0] - xm[0], xs[1] - xm[1], xs[2] - xm[2]];
+                let xm_sel = [-xm[0], -xm[1], -xm[2]];
+                let ds =
+                    (xs_sel[0] * xs_sel[0] + xs_sel[1] * xs_sel[1] + xs_sel[2] * xs_sel[2]).sqrt();
+                let dm =
+                    (xm_sel[0] * xm_sel[0] + xm_sel[1] * xm_sel[1] + xm_sel[2] * xm_sel[2]).sqrt();
+                let xa = [xs_sel[0] / ds, xs_sel[1] / ds, xs_sel[2] / ds];
+                let xb = [xm_sel[0] / dm, xm_sel[1] / dm, xm_sel[2] / dm];
+                let rearth = (REARTH / dm).asin() * RADTODEG;
+                let rsun = (RSUN / ds).asin() * RADTODEG;
+                *dc_i = dot_prod_unit(xa, xb).acos() * RADTODEG;
+                *dc_i -= rearth + rsun;
+                t += dt;
+            }
+            let (dtint, _) = crate::math::find_maximum(dc[0], dc[1], dc[2], dt);
+            tjd += dtint + dt;
+            dt /= 4.0;
+        }
+
+        // 3-pass fixed-point ET->UT conversion (swecl.c:3525-3527).
+        let tjds1 = tjd - crate::deltat::calc_deltat(tjd, config);
+        let tjds2 = tjd - crate::deltat::calc_deltat(tjds1, config);
+        let tjd = tjd - crate::deltat::calc_deltat(tjds2, config);
+
+        // Confirm eclipse and reject wrong types (§4.6). Uses the geocentric core directly
+        // (equivalent to calling the public wrapper with `geopos = NULL`, which skips the
+        // topocentric az/alt gate entirely).
+        let core = lun_eclipse_how(eph, tjd, ifl)?;
+        if core.flags.is_empty() {
+            k += direction;
+            continue 'next_try;
+        }
+        tret[0] = tjd;
+        if (backward && tret[0] >= tjd_start - 0.0001)
+            || (!backward && tret[0] <= tjd_start + 0.0001)
+        {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::PENUMBRAL)
+            && core.flags.contains(EclipseFlags::PENUMBRAL)
+        {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::PARTIAL) && core.flags.contains(EclipseFlags::PARTIAL) {
+            k += direction;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::TOTAL) && core.flags.contains(EclipseFlags::TOTAL) {
+            k += direction;
+            continue 'next_try;
+        }
+        let retflag = core.flags;
+
+        // Contact-time computation via `dcore`-based zero search (§4.7). `o` controls how many
+        // contact-pairs to compute based on the eclipse's actual type -- a total eclipse also
+        // gets partial and penumbral contacts (physical containment).
+        let o = if retflag.contains(EclipseFlags::PENUMBRAL) {
+            0
+        } else if retflag.contains(EclipseFlags::PARTIAL) {
+            1
+        } else {
+            2
+        };
+        let dta = 2.0 / 24.0;
+
+        for n in 0..=o {
+            let (i1, i2) = match n {
+                0 => (6usize, 7usize),
+                1 => (2usize, 3usize),
+                _ => (4usize, 5usize),
+            };
+
+            // Stage A: coarse bracket, sampling `dcore` at `tjd - dta, tjd, tjd + dta`.
+            let mut dc = [0.0f64; 3];
+            let mut t = tjd - dta;
+            for dc_i in dc.iter_mut() {
+                let c = lun_eclipse_how(eph, t, ifl)?;
+                *dc_i = lun_contact_dc(n, &c);
+                t += dta;
+            }
+            // Divergence from C on `find_zero` failure: C ignores the failure return and
+            // proceeds with a stale/zero-initialized `dt1`/`dt2` (see docs/c-ref-eclipse-
+            // lunar.md §4.7 and the analogous documented divergence in sol_eclipse_when_glob).
+            // We leave the slots at 0.0 and skip refinement instead -- unreachable for a
+            // confirmed eclipse (the type check above guarantees a sign change in `dc`).
+            if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], dta) {
+                let dtb = (dt1 + dta) / 2.0;
+                tret[i1] = tjd + dt1 + dta;
+                tret[i2] = tjd + dt2 + dta;
+
+                // Stage B: 3 rounds of 2-point secant/Newton refinement, halving `dt` each round.
+                let mut dt = dtb / 2.0;
+                for _ in 0..3 {
+                    for &j in &[i1, i2] {
+                        let mut dc2 = [0.0f64; 2];
+                        let mut t = tret[j] - dt;
+                        for dc2_i in dc2.iter_mut() {
+                            let c = lun_eclipse_how(eph, t, ifl)?;
+                            *dc2_i = lun_contact_dc(n, &c);
+                            t += dt;
+                        }
+                        let dt1 = dc2[1] / ((dc2[1] - dc2[0]) / dt);
+                        tret[j] -= dt1;
+                    }
+                    dt /= 2.0;
+                }
+            }
+        }
+
+        return Ok(LunarEclipseGlobal {
+            time_maximum: tret[0],
+            time_partial_begin: tret[2],
+            time_partial_end: tret[3],
+            time_totality_begin: tret[4],
+            time_totality_end: tret[5],
+            time_penumbral_begin: tret[6],
+            time_penumbral_end: tret[7],
+            flags: retflag,
+        });
+    }
+}
+
+/// Local lunar-eclipse search result: `tret[0..10]` + `attr[0..11]` per `swe_lun_eclipse_when_loc`
+/// (swecl.c:3644-3739, ref doc §5). `tret[]` index semantics match [`LunarEclipseGlobal`]'s (not
+/// [`SolarEclipseLocal`]'s different layout) plus two new slots for moonrise/moonset.
+#[derive(Debug, Clone, Copy)]
+pub struct LunarEclipseLocal {
+    /// Time (UT) of maximum eclipse as visible from this location -- re-anchored to
+    /// moonrise/moonset if the true geocentric maximum wasn't visible here. `tret[0]`.
+    pub time_maximum: f64,
+    /// Time (UT) of partial (umbra) phase begin, `0.0` if not applicable or clipped away by
+    /// moonrise/moonset. `tret[2]`.
+    pub time_partial_begin: f64,
+    /// Time (UT) of partial (umbra) phase end, `0.0` if not applicable or clipped away. `tret[3]`.
+    pub time_partial_end: f64,
+    /// Time (UT) of totality begin, `0.0` if not applicable or clipped away. `tret[4]`.
+    pub time_totality_begin: f64,
+    /// Time (UT) of totality end, `0.0` if not applicable or clipped away. `tret[5]`.
+    pub time_totality_end: f64,
+    /// Time (UT) of penumbral phase begin, `0.0` if clipped away by moonrise. `tret[6]`.
+    pub time_penumbral_begin: f64,
+    /// Time (UT) of penumbral phase end, `0.0` if clipped away by moonset. `tret[7]`.
+    pub time_penumbral_end: f64,
+    /// Time (UT) of moonrise, if it occurs during the eclipse; `0.0` otherwise. `tret[8]`.
+    pub time_moonrise: f64,
+    /// Time (UT) of moonset, if it occurs during the eclipse; `0.0` otherwise. `tret[9]`.
+    pub time_moonset: f64,
+    /// Local circumstances (`attr[]`) at whichever instant was written last: the moment of
+    /// maximum eclipse, unless a moonrise/moonset re-anchor overwrote it.
+    pub attr: LunarEclipseHow,
+    /// Eclipse-type classification (TOTAL/PARTIAL/PENUMBRAL) OR'd with VISIBLE and whichever of
+    /// MAX/PARTBEG/PARTEND/TOTBEG/TOTEND/PENUMBBEG/PENUMBEND_VISIBLE applied at some contact. The
+    /// search loop retries internally until a visible occurrence is found -- never empty.
+    pub flags: EclipseFlags,
+}
+
+/// Local lunar-eclipse search: find the next (or, if `backward`, previous) lunar eclipse that is
+/// at least partly visible (Moon above the horizon during some phase) from `geopos`, clipping
+/// contact times to moonrise/moonset as needed. Port of `swe_lun_eclipse_when_loc`
+/// (swecl.c:3644-3739, ref doc §5). `geopos` = [longitude, latitude, height above sea (m)],
+/// degrees/degrees/meters.
+pub(crate) fn lun_eclipse_when_loc(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ifl: CalcFlags,
+    geopos: [f64; 3],
+    backward: bool,
+) -> Result<LunarEclipseLocal, Error> {
+    if !(crate::constants::RISE_SET_GEOALT_MIN..=crate::constants::RISE_SET_GEOALT_MAX)
+        .contains(&geopos[2])
+    {
+        return Err(Error::CError(format!(
+            "location for eclipses must be between {:.0} and {:.0} m above sea",
+            crate::constants::RISE_SET_GEOALT_MIN,
+            crate::constants::RISE_SET_GEOALT_MAX
+        )));
+    }
+    let ifl = ifl & !(CalcFlags::DPSIDEPS_1980 | CalcFlags::JPLHOR_APPROX);
+
+    let mut tjd_start = tjd_start;
+
+    'next_lun_ecl: loop {
+        let glob = lun_eclipse_when(eph, tjd_start, ifl, EclipseFlags::empty(), backward)?;
+        let mut tret = [
+            glob.time_maximum,
+            0.0,
+            glob.time_partial_begin,
+            glob.time_partial_end,
+            glob.time_totality_begin,
+            glob.time_totality_end,
+            glob.time_penumbral_begin,
+            glob.time_penumbral_end,
+            0.0,
+            0.0,
+        ];
+
+        // Visibility scan (§5 step 4): descending i=7..=0 (skip i==1, unused slot; skip any
+        // tret[i]==0, not-applicable contact) -- order doesn't affect the OR'd result, only
+        // evaluation order.
+        let mut retflag = EclipseFlags::empty();
+        for i in (0..=7).rev() {
+            if i == 1 || tret[i] == 0.0 {
+                continue;
+            }
+            let h = swe_lun_eclipse_how(eph, tret[i], ifl, geopos)?;
+            if h.apparent_altitude > 0.0 {
+                retflag |= EclipseFlags::VISIBLE;
+                retflag |= match i {
+                    0 => EclipseFlags::MAX_VISIBLE,
+                    2 => EclipseFlags::PARTBEG_VISIBLE,
+                    3 => EclipseFlags::PARTEND_VISIBLE,
+                    4 => EclipseFlags::TOTBEG_VISIBLE,
+                    5 => EclipseFlags::TOTEND_VISIBLE,
+                    6 => EclipseFlags::PENUMBBEG_VISIBLE,
+                    7 => EclipseFlags::PENUMBEND_VISIBLE,
+                    _ => unreachable!(),
+                };
+            }
+        }
+        if !retflag.contains(EclipseFlags::VISIBLE) {
+            tjd_start = if backward {
+                tret[0] - 25.0
+            } else {
+                tret[0] + 25.0
+            };
+            continue 'next_lun_ecl;
+        }
+
+        // Moonrise/moonset clipping (§5 step 6). Both searches start just before penumbral
+        // begin (`tret[6] - 0.001`), matching C exactly. `Error::CircumpolarBody` from either
+        // call means "no rise/set found in the window" -- skip clipping entirely, matching C's
+        // `retc >= 0` guard (a genuine `ERR` still propagates).
+        let mut tjd_max = tret[0];
+        let rise = eph.rise_trans(
+            tret[6] - 0.001,
+            Body::Moon,
+            None,
+            ifl,
+            RiseSetFlags::RISE | RiseSetFlags::DISC_BOTTOM,
+            geopos,
+            0.0,
+            0.0,
+        );
+        let clip = match rise {
+            Ok(r) => {
+                let tjdr = r.time;
+                match eph.rise_trans(
+                    tret[6] - 0.001,
+                    Body::Moon,
+                    None,
+                    ifl,
+                    RiseSetFlags::SET | RiseSetFlags::DISC_BOTTOM,
+                    geopos,
+                    0.0,
+                    0.0,
+                ) {
+                    Ok(s) => Some((tjdr, s.time)),
+                    Err(Error::CircumpolarBody) => None,
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(Error::CircumpolarBody) => None,
+            Err(e) => return Err(e),
+        };
+
+        if let Some((tjdr, tjds)) = clip {
+            if tjds < tret[6] || (tjds > tjdr && tjdr > tret[7]) {
+                tjd_start = if backward {
+                    tret[0] - 25.0
+                } else {
+                    tret[0] + 25.0
+                };
+                continue 'next_lun_ecl;
+            }
+            // HAZARD (ref doc §5, FP/logic hazard note): the second block below reads
+            // `tret[6]`/`tret[7]` which may have just been mutated by the first block -- this is
+            // the C source's own behavior (sequential, not independent), preserved exactly.
+            if tjdr > tret[6] && tjdr < tret[7] {
+                tret[6] = 0.0;
+                for t in &mut tret[2..=5] {
+                    if tjdr > *t {
+                        *t = 0.0;
+                    }
+                }
+                tret[8] = tjdr;
+                if tjdr > tret[0] {
+                    tjd_max = tjdr;
+                }
+            }
+            if tjds > tret[6] && tjds < tret[7] {
+                tret[7] = 0.0;
+                for t in &mut tret[2..=5] {
+                    if tjds < *t {
+                        *t = 0.0;
+                    }
+                }
+                tret[9] = tjds;
+                if tjds < tret[0] {
+                    tjd_max = tjds;
+                }
+            }
+        }
+
+        tret[0] = tjd_max;
+        let how = swe_lun_eclipse_how(eph, tjd_max, ifl, geopos)?;
+        if how.flags.is_empty() {
+            tjd_start = if backward {
+                tret[0] - 25.0
+            } else {
+                tret[0] + 25.0
+            };
+            continue 'next_lun_ecl;
+        }
+        retflag |= how.flags & EclipseFlags::ALLTYPES_LUNAR;
+
+        return Ok(LunarEclipseLocal {
+            time_maximum: tret[0],
+            time_partial_begin: tret[2],
+            time_partial_end: tret[3],
+            time_totality_begin: tret[4],
+            time_totality_end: tret[5],
+            time_penumbral_begin: tret[6],
+            time_penumbral_end: tret[7],
+            time_moonrise: tret[8],
+            time_moonset: tret[9],
+            attr: how,
+            flags: retflag,
+        });
+    }
 }

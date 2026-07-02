@@ -46,12 +46,32 @@ struct LunHowCase {
 }
 
 #[derive(Deserialize)]
+struct LunWhenCase {
+    tjd_start: f64,
+    backward: bool,
+    retval: i32,
+    tret: [f64; 8],
+}
+
+#[derive(Deserialize)]
+struct LunWhenLocCase {
+    geopos: [f64; 3],
+    tjd_start: f64,
+    backward: bool,
+    retval: i32,
+    tret: [f64; 10],
+    attr: [f64; 11],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
     sol_how: Vec<SolHowCase>,
     sol_when_glob: Vec<SolWhenGlobCase>,
     sol_when_loc: Vec<SolWhenLocCase>,
     lun_how: Vec<LunHowCase>,
+    lun_when: Vec<LunWhenCase>,
+    lun_when_loc: Vec<LunWhenLocCase>,
 }
 
 fn load() -> GoldenData {
@@ -535,6 +555,210 @@ fn lun_how() {
             c.attr[10],
             result.saros_member,
             1e-7,
+        );
+    }
+}
+
+/// `swe_lun_eclipse_when` (`Ephemeris::lun_eclipse_when`): global next/previous lunar eclipse
+/// search, purely geocentric. `ifltype` fixed at "all types" (0) per the golden-data generator;
+/// `tjd_start` x `backward` battery lands on a mix of total/partial/penumbral eclipses (incl. a
+/// partial-only case where `tret[4]`/`tret[5]` (totality) stay `0.0`, and a penumbral-only case
+/// where `tret[2..=5]` all stay `0.0`).
+#[test]
+fn lun_when() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.lun_when.iter().enumerate() {
+        let label = format!(
+            "lun_when[{i}][tjd_start={},backward={}]",
+            c.tjd_start, c.backward
+        );
+        let result = ephe
+            .lun_eclipse_when(
+                c.tjd_start,
+                CalcFlags::MOSEPH,
+                EclipseFlags::empty(),
+                c.backward,
+            )
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[0] (time_maximum)"),
+            c.tret[0],
+            result.time_maximum,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[2] (time_partial_begin)"),
+            c.tret[2],
+            result.time_partial_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[3] (time_partial_end)"),
+            c.tret[3],
+            result.time_partial_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[4] (time_totality_begin)"),
+            c.tret[4],
+            result.time_totality_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[5] (time_totality_end)"),
+            c.tret[5],
+            result.time_totality_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[6] (time_penumbral_begin)"),
+            c.tret[6],
+            result.time_penumbral_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[7] (time_penumbral_end)"),
+            c.tret[7],
+            result.time_penumbral_end,
+            1e-5,
+        );
+    }
+}
+
+/// `swe_lun_eclipse_when_loc` (`Ephemeris::lun_eclipse_when_loc`): local next/previous lunar
+/// eclipse search, visible-from-`geopos`, with moonrise/moonset clipping. Same `tret[]` index
+/// semantics as `lun_when` (unlike solar's differing global/local layouts), plus `tret[8]`/
+/// `tret[9]` for moonrise/moonset.
+#[test]
+fn lun_when_loc() {
+    let data = load();
+    let ephe = Ephemeris::new(Default::default()).unwrap();
+    for (i, c) in data.lun_when_loc.iter().enumerate() {
+        let label = format!(
+            "lun_when_loc[{i}][geopos={:?},tjd_start={},backward={}]",
+            c.geopos, c.tjd_start, c.backward
+        );
+        let result = ephe
+            .lun_eclipse_when_loc(c.tjd_start, CalcFlags::MOSEPH, c.geopos, c.backward)
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[0] (time_maximum)"),
+            c.tret[0],
+            result.time_maximum,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[2] (time_partial_begin)"),
+            c.tret[2],
+            result.time_partial_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[3] (time_partial_end)"),
+            c.tret[3],
+            result.time_partial_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[4] (time_totality_begin)"),
+            c.tret[4],
+            result.time_totality_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[5] (time_totality_end)"),
+            c.tret[5],
+            result.time_totality_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[6] (time_penumbral_begin)"),
+            c.tret[6],
+            result.time_penumbral_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[7] (time_penumbral_end)"),
+            c.tret[7],
+            result.time_penumbral_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[8] (time_moonrise)"),
+            c.tret[8],
+            result.time_moonrise,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[9] (time_moonset)"),
+            c.tret[9],
+            result.time_moonset,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[0] (umbral_magnitude)"),
+            c.attr[0],
+            result.attr.umbral_magnitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[1] (penumbral_magnitude)"),
+            c.attr[1],
+            result.attr.penumbral_magnitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[4] (azimuth)"),
+            c.attr[4],
+            result.attr.azimuth,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[5] (true_altitude)"),
+            c.attr[5],
+            result.attr.true_altitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[6] (apparent_altitude)"),
+            c.attr[6],
+            result.attr.apparent_altitude,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[7] (distance_from_opposition)"),
+            c.attr[7],
+            result.attr.distance_from_opposition,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[9] (saros_series)"),
+            c.attr[9],
+            result.attr.saros_series,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.attr[10] (saros_member)"),
+            c.attr[10],
+            result.attr.saros_member,
+            1e-5,
         );
     }
 }

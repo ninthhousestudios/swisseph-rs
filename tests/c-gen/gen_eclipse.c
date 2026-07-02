@@ -2,8 +2,9 @@
  * Generates golden reference data for the eclipse module: swe_sol_eclipse_where
  * (RSE 5, swisseph-rs/72), swe_sol_eclipse_how (RSE 6, swisseph-rs/73),
  * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74), swe_sol_eclipse_when_loc
- * (RSE 8, swisseph-rs/75), and swe_lun_eclipse_how (RSE 9, swisseph-rs/76). Later RSE
- * tasks (10-12) add more keys to this same file.
+ * (RSE 8, swisseph-rs/75), swe_lun_eclipse_how (RSE 9, swisseph-rs/76), and
+ * swe_lun_eclipse_when + swe_lun_eclipse_when_loc (RSE 10, swisseph-rs/77). Later RSE
+ * tasks (11-12) add more keys to this same file.
  *
  * The "dcore" field in each sol_where case comes from swi_test_eclipse_where_dcore, a
  * non-static test-only hook added to ../swisseph/swecl.c (right after calc_planet_star) that
@@ -200,6 +201,65 @@ int main(void) {
                    tjd_ut, geopos[0], geopos[1], geopos[2], retval);
             for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
             printf("]}");
+        }
+    }
+    printf("\n  ],\n");
+
+    /* === lun_when === */
+    static double lun_when_starts[] = { 2451545.0, 2459000.5 };
+    #define N_LUN_WHEN_START (sizeof(lun_when_starts) / sizeof(lun_when_starts[0]))
+    printf("  \"lun_when\": [\n");
+    first = 1;
+    for (size_t i = 0; i < N_LUN_WHEN_START; i++) {
+        for (int backward = 0; backward <= 1; backward++) {
+            double tjd_start = lun_when_starts[i];
+            int32 ifltype = 0;
+            double tret[10] = { 0 };
+            char serr[256] = { 0 };
+            int32 retval = swe_lun_eclipse_when(tjd_start, SEFLG_MOSEPH, ifltype, tret,
+                                                  backward, serr);
+
+            if (!first) printf(",\n");
+            first = 0;
+            printf("    {\"tjd_start\": %.17g, \"backward\": %s, \"retval\": %d, \"tret\": [",
+                   tjd_start, backward ? "true" : "false", retval);
+            for (int k = 0; k < 8; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+            printf("]}");
+        }
+    }
+    printf("\n  ],\n");
+
+    /* === lun_when_loc === */
+    static double lun_when_loc_geopos[][3] = {
+        { 8.55, 47.37, 500.0 },
+    };
+    #define N_LUN_WHEN_LOC_GEOPOS (sizeof(lun_when_loc_geopos) / sizeof(lun_when_loc_geopos[0]))
+    printf("  \"lun_when_loc\": [\n");
+    first = 1;
+    for (size_t g = 0; g < N_LUN_WHEN_LOC_GEOPOS; g++) {
+        for (size_t i = 0; i < N_LUN_WHEN_START; i++) {
+            for (int backward = 0; backward <= 1; backward++) {
+                double geopos[3] = {
+                    lun_when_loc_geopos[g][0], lun_when_loc_geopos[g][1], lun_when_loc_geopos[g][2]
+                };
+                double tjd_start = lun_when_starts[i];
+                double tret[10] = { 0 };
+                double attr[20] = { 0 };
+                char serr[256] = { 0 };
+                int32 retval = swe_lun_eclipse_when_loc(tjd_start, SEFLG_MOSEPH, geopos, tret,
+                                                          attr, backward, serr);
+
+                if (!first) printf(",\n");
+                first = 0;
+                printf("    {\"geopos\": [%.17g, %.17g, %.17g], \"tjd_start\": %.17g, "
+                       "\"backward\": %s, \"retval\": %d, \"tret\": [",
+                       geopos[0], geopos[1], geopos[2], tjd_start, backward ? "true" : "false",
+                       retval);
+                for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+                printf("], \"attr\": [");
+                for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
+                printf("]}");
+            }
         }
     }
     printf("\n  ]\n");

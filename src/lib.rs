@@ -29,7 +29,8 @@ pub mod topocentric;
 
 pub use context::{CalcResult, Ephemeris, EphemerisConfig, TopoPosition};
 pub use eclipse::{
-    EclipseHow, EclipseWhere, LunarEclipseHow, SolarEclipseGlobal, SolarEclipseLocal,
+    EclipseHow, EclipseWhere, LunarEclipseGlobal, LunarEclipseHow, LunarEclipseLocal,
+    SolarEclipseGlobal, SolarEclipseLocal,
 };
 pub use error::Error;
 pub use flags::{CalcFlags, EclipseFlags, RiseSetFlags};
