@@ -710,6 +710,15 @@ impl Ephemeris {
             return Err(Error::UnsupportedFlags(flags & CalcFlags::BARYCTR));
         }
 
+        // Heliocentric Sun is the origin (the Sun relative to itself) — C's swe_calc returns an
+        // all-zero xx (position and speed) across every output frame, since the zero vector is
+        // invariant under bias/precession/nutation and polar-converts to zeros. calc_sun has no
+        // HELCTR branch (it always builds the geocentric -observer vector), so short-circuit here,
+        // matching the MeanNode/MeanApogee HELCTR handling above.
+        if body == Body::Sun && flags.contains(CalcFlags::HELCTR) {
+            return Ok(([0.0; 24], [0.0; 6], flags));
+        }
+
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
