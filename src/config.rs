@@ -14,6 +14,7 @@ pub struct TopoPosition {
     pub altitude: f64,
 }
 
+/// `set_sidereal_mode` is implemented in `ayanamsa.rs`, next to the `AYANAMSA` table it resolves.
 #[derive(Debug, Clone)]
 pub struct EphemerisConfig {
     pub ephemeris_source: EphemerisSource,
