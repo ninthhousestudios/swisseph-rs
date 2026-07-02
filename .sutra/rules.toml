@@ -208,29 +208,108 @@ to = "src/sweph_file/**"
 severity = "blocking"
 provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:phenomena→moshier"
-# from = "src/phenomena.rs"
-# to = "src/moshier/**"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+# ACTIVATED 2026-07-01 — Phase 12 (swisseph-rs/13 → PNOC 2): the phenomena port
+# begins this arc, so phenomena.rs gets real code. Globs corrected from the stale
+# single-file form.
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:phenomena→moshier"
+from = "src/phenomena.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:phenomena→jpl"
-# from = "src/phenomena.rs"
-# to = "src/jpl.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:phenomena→jpl"
+from = "src/phenomena.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
-# [[constraint]]
-# kind = "forbidden_dep"
-# name = "app-uses-calc-not-backends:phenomena→sweph"
-# from = "src/phenomena.rs"
-# to = "src/sweph_file.rs"
-# severity = "blocking"
-# provenance = "yojana:swisseph-rs §module-tree"
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:phenomena→sweph"
+from = "src/phenomena.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+# ACTIVATED 2026-07-01 — Phase 12 (swisseph-rs/13 → PNOC 3-7): nodaps.rs / orbit.rs
+# / crossings.rs are created this arc. Bound at planning time so they fire as the
+# arc is implemented; inert (dead_constraint) only until each file lands within
+# this arc.
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:nodaps→moshier"
+from = "src/nodaps.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:nodaps→jpl"
+from = "src/nodaps.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:nodaps→sweph"
+from = "src/nodaps.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:orbit→moshier"
+from = "src/orbit.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:orbit→jpl"
+from = "src/orbit.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:orbit→sweph"
+from = "src/orbit.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:crossings→moshier"
+from = "src/crossings.rs"
+to = "src/moshier/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:crossings→jpl"
+from = "src/crossings.rs"
+to = "src/jpl/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
+
+[[constraint]]
+kind = "forbidden_dep"
+name = "app-uses-calc-not-backends:crossings→sweph"
+from = "src/crossings.rs"
+to = "src/sweph_file/**"
+severity = "blocking"
+provenance = "yojana:swisseph-rs §module-tree"
 
 # [[constraint]]
 # kind = "forbidden_dep"
