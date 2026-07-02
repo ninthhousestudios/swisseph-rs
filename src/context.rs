@@ -6,6 +6,10 @@ use crate::error::Error;
 use crate::flags::{CalcFlags, EclipseFlags, SiderealBits};
 use crate::types::{Body, DeltaT, EphemerisSource, JdUt1};
 
+/// Three raw geocentric moon samples for the osculating node/apogee, plus the
+/// `istart`, backend-specific central-difference interval, and backend used.
+type OscMoonSamples = ([[f64; 6]; 3], usize, f64, EphemerisSource);
+
 pub struct Ephemeris {
     config: EphemerisConfig,
     leap_seconds: Vec<i32>,
@@ -704,6 +708,43 @@ impl Ephemeris {
             return Ok((xr, [0.0; 6], flags));
         }
 
+        if matches!(body, Body::TrueNode | Body::OscuApogee) {
+            // Heliocentric/barycentric node/apogee is meaningless — C returns a
+            // zeroed output (sweph.c:931-967, the HELCTR|BARYCTR guard).
+            if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
+                return Ok(([0.0; 24], [0.0; 6], flags));
+            }
+            // D.1: three raw geocentric moon samples (with Swiss->Moshier fallback).
+            let (samples, istart, speed_intv, source) =
+                self.osc_moon_samples(jd_tt, flags, config)?;
+            // D.2-D.4: node and apogee are computed together; keep the requested half.
+            let (node_xr, apog_xr) =
+                crate::calc::lunar_osc_elem(jd_tt, flags, models, &samples, istart, speed_intv);
+            let mut xr = match body {
+                Body::TrueNode => node_xr,
+                Body::OscuApogee => apog_xr,
+                _ => unreachable!(),
+            };
+            // D.5: the true node is on the ecliptic by definition — force exact
+            // zero latitude/z when neither SIDEREAL nor J2000 (suppress FP noise).
+            // No zeroing for the apogee (not constrained to the ecliptic).
+            if body == Body::TrueNode
+                && !flags.contains(CalcFlags::SIDEREAL)
+                && !flags.contains(CalcFlags::J2000)
+            {
+                xr[1] = 0.0;
+                xr[4] = 0.0;
+                xr[8] = 0.0;
+                xr[11] = 0.0;
+            }
+            let flags_used = if source == config.ephemeris_source {
+                flags
+            } else {
+                (flags & !crate::calc::EPHMASK) | CalcFlags::MOSEPH
+            };
+            return Ok((xr, [0.0; 6], flags_used));
+        }
+
         // Heliocentric (SEFLG_HELCTR) is supported below (per-backend/-body branches in calc.rs);
         // plaus_iflag has already forced NOABERR|NOGDEFL for it. Barycentric is still unported.
         if flags.contains(CalcFlags::BARYCTR) {
@@ -860,6 +901,131 @@ impl Ephemeris {
                 body,
                 source: EphemerisSource::Jpl,
             }),
+        }
+    }
+
+    /// Raw geocentric equatorial-J2000 (pre-bias) moon (pos+vel) at `t` from the
+    /// given backend, for the osculating-node/apogee D.1 sample loop.
+    fn raw_moon_at(
+        &self,
+        source: EphemerisSource,
+        t: f64,
+        eps_j2000: &crate::types::Epsilon,
+    ) -> Result<[f64; 6], Error> {
+        match source {
+            EphemerisSource::Moshier => crate::calc::raw_osc_moon_moshier(t, eps_j2000),
+            EphemerisSource::Swiss => crate::calc::raw_osc_moon_sweph(&self.moon_files, t),
+            EphemerisSource::Jpl => {
+                crate::calc::raw_osc_moon_jpl(self.jpl_file.as_ref().unwrap(), t)
+            }
+        }
+    }
+
+    /// Fetch the three light-time-corrected moon samples for one backend
+    /// (D.1 loop body, sweph.c:5251-5357). Only `[istart..=2]` are populated.
+    fn fetch_osc_samples(
+        &self,
+        source: EphemerisSource,
+        tjd: f64,
+        istart: usize,
+        speed_intv: f64,
+        truepos: bool,
+        eps_j2000: &crate::types::Epsilon,
+    ) -> Result<[[f64; 6]; 3], Error> {
+        let mut samples = [[0.0f64; 6]; 3];
+        for (i, slot) in samples.iter_mut().enumerate().skip(istart) {
+            let t = match i {
+                0 => tjd - speed_intv,
+                1 => tjd + speed_intv,
+                _ => tjd,
+            };
+            let mut m = self.raw_moon_at(source, t, eps_j2000)?;
+            // Light-time-corrected moon for the apparent node (full re-evaluation
+            // at t-dt, NOT the cheap `x -= dt*speed`; C insists on this). C ONLY
+            // does this for the JPL and Swiss branches — the Moshier branch
+            // (sweph.c:5336-5354) has NO light-time block, so the Moshier moon is
+            // used geometrically. Match that exactly.
+            if !truepos && source != EphemerisSource::Moshier {
+                let dist = (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).sqrt();
+                let dt = dist * crate::constants::AUNIT / crate::constants::CLIGHT / 86400.0;
+                m = self.raw_moon_at(source, t - dt, eps_j2000)?;
+            }
+            *slot = m;
+        }
+        Ok(samples)
+    }
+
+    /// Obtain the three backend moon samples for the osculating node/apogee,
+    /// with the Swiss->Moshier fallback (mirrors `calc_inner`; JPL does not fall
+    /// back, matching the rest of this port). Returns the samples, `istart`, the
+    /// backend-specific `speed_intv`, and the backend actually used.
+    fn osc_moon_samples(
+        &self,
+        tjd: f64,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<OscMoonSamples, Error> {
+        let istart = if flags.contains(CalcFlags::SPEED) {
+            0
+        } else {
+            2
+        };
+        let truepos = flags.contains(CalcFlags::TRUEPOS);
+        let models = &config.astro_models;
+        let eps_j2000 =
+            crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
+
+        match config.ephemeris_source {
+            EphemerisSource::Swiss => {
+                let si = crate::constants::NODE_CALC_INTV;
+                match self.fetch_osc_samples(
+                    EphemerisSource::Swiss,
+                    tjd,
+                    istart,
+                    si,
+                    truepos,
+                    &eps_j2000,
+                ) {
+                    Ok(s) => Ok((s, istart, si, EphemerisSource::Swiss)),
+                    Err(Error::BeyondEphemerisLimits { .. }) => {
+                        let sim = crate::constants::NODE_CALC_INTV_MOSH;
+                        let s = self.fetch_osc_samples(
+                            EphemerisSource::Moshier,
+                            tjd,
+                            istart,
+                            sim,
+                            truepos,
+                            &eps_j2000,
+                        )?;
+                        Ok((s, istart, sim, EphemerisSource::Moshier))
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            EphemerisSource::Jpl => {
+                let si = crate::constants::NODE_CALC_INTV;
+                let s = self.fetch_osc_samples(
+                    EphemerisSource::Jpl,
+                    tjd,
+                    istart,
+                    si,
+                    truepos,
+                    &eps_j2000,
+                )?;
+                Ok((s, istart, si, EphemerisSource::Jpl))
+            }
+            EphemerisSource::Moshier => {
+                let si = crate::constants::NODE_CALC_INTV_MOSH;
+                let s = self.fetch_osc_samples(
+                    EphemerisSource::Moshier,
+                    tjd,
+                    istart,
+                    si,
+                    truepos,
+                    &eps_j2000,
+                )?;
+                Ok((s, istart, si, EphemerisSource::Moshier))
+            }
         }
     }
 

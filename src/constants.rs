@@ -174,6 +174,13 @@ pub const MOON_SPEED_INTV: f64 = 0.00005;
 pub const DEFL_SPEED_INTV: f64 = 0.0000005;
 pub const NUT_SPEED_INTV: f64 = 0.0001;
 pub const MEAN_NODE_SPEED_INTV: f64 = 0.001;
+/// Central-difference interval for the osculating node/apogee with the JPL/Swiss
+/// moon (C `NODE_CALC_INTV`, sweph.c). Small because these backends' moon is smooth.
+pub const NODE_CALC_INTV: f64 = 0.0001;
+/// Wider interval for the Moshier moon (C `NODE_CALC_INTV_MOSH`): the Moshier
+/// moon's short-period terms make the node/apogee oscillate wildly within small
+/// intervals, so a coarser finite difference is used.
+pub const NODE_CALC_INTV_MOSH: f64 = 0.1;
 pub const CORR_MNODE_JD_T0GREG: f64 = -3063616.5;
 pub const JPL_DE431_START: f64 = -3027215.5;
 pub const JPL_DE431_END: f64 = 7930192.5;

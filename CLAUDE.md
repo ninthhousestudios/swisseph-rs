@@ -93,6 +93,20 @@ SPEED3 divergence — up to 0.5 degrees for Moon. This is a C state artifact, no
 
 Golden test tolerance: relaxed at file-boundary epochs for SPEED3.
 
+### 3. Osculating node/apogee SPEED with the Moshier backend (< 4e-6 deg/day)
+`Body::TrueNode`/`Body::OscuApogee` (C `lunar_osc_elem`) build their speed from a central
+difference of the node/apogee POSITION over the wide 0.1-day Moshier interval (`NODE_CALC_INTV_MOSH`;
+the Swiss/JPL backends use a 1e-4-day interval and are unaffected). C's off-center samples read its
+GLOBAL obliquity/nutation cache, which rounds slightly differently than a clean per-epoch
+recomputation — so C's own node speed does not even match a finite difference of C's own node
+POSITIONS (verified: at jd=2305447.5 C's internal ecliptic-cartesian node speed is -3.36864e-6 vs
+-3.36877e-6 from differencing its own standalone positions). Stateless Rust recomputes obliquity/
+nutation fresh and consistently, matching C's node/apogee POSITIONS bit-for-bit (1e-9) but differing
+on the Moshier SPEED by up to ~3.6e-6 deg/day (≈0.013"/day — astronomically negligible).
+
+Golden test tolerance (`tests/golden/truenode.rs`): Moshier node/apogee speeds relaxed to 5e-6;
+Swiss speeds stay at 1e-7; all positions 1e-9. (swisseph-rs/84)
+
 ### Do not chase sub-milliarcsecond deflection speed differences
 Four debugging sessions were spent on swisseph-rs/41 trying to exactly match C's deflection
 speed output. The root cause is that C's global state produces a slightly different geometric

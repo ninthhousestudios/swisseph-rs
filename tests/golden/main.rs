@@ -28,6 +28,7 @@ mod riseset;
 mod se1_header;
 mod sidereal_time;
 mod sweph_eval;
+mod truenode;
 
 use std::path::PathBuf;
 

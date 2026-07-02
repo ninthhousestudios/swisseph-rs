@@ -853,6 +853,334 @@ pub fn calc_ecl_nut(jd: f64, flags: CalcFlags, models: &AstroModels) -> [f64; 6]
     ]
 }
 
+// ---------------------------------------------------------------------------
+// Osculating lunar node / apogee (SE_TRUE_NODE / SE_OSCU_APOG)
+// Port of `lunar_osc_elem` + `swi_plan_for_osc_elem` (sweph.c:5168, 5758).
+// See docs/c-ref-nodaps.md Parts C, D.
+// ---------------------------------------------------------------------------
+
+/// Port of C `swi_plan_for_osc_elem` (sweph.c:5758), as it actually compiles in
+/// the default build. Rotates a raw (pre-bias, GCRS-equatorial) geocentric moon
+/// position+speed 6-vector into the ecliptic-of-date frame that the osculating
+/// ellipse computation needs.
+///
+/// CRITICAL: the `SEFLG_SIDEREAL`/`SEFLG_J2000` short-circuits that skip
+/// precession live inside `#ifdef SID_TNODE_FROM_ECL_T0`, which is NOT defined
+/// anywhere in the C tree. So this ALWAYS precesses J2000->date and ALWAYS uses
+/// obliquity-of-date, regardless of the `J2000` flag (the ref doc's Part C
+/// pseudocode is wrong on this point — verified against the C source). The
+/// speed vector is precessed and nutated as a PURE rotation — no precession-rate
+/// or nutation-rate term (`swi_precess`, not `swi_precess_speed`; matrix rotation
+/// with `nutv=None`) — matching the C comments "daily precession 0.137\" may not
+/// be added" and "again: speed vector must be rotated, but not added 'speed' of
+/// nutation".
+pub(crate) fn plan_for_osc_elem(
+    flags: CalcFlags,
+    tjd: f64,
+    xx: &mut [f64; 6],
+    models: &AstroModels,
+) {
+    // ICRS -> J2000 bias (unconditional on !ICRS, matching the Moon pipeline;
+    // C gates on swi_get_denum>=403, which holds for every backend here).
+    if !flags.contains(CalcFlags::ICRS) {
+        frame_bias(xx, tjd, flags, models, FrameTransform::GcrsToJ2000);
+    }
+
+    // Precession J2000 -> equator of date. Position AND speed via the SAME
+    // rotation (`precess`, NOT `precess_speed`).
+    let mut pos3 = [xx[0], xx[1], xx[2]];
+    let mut vel3 = [xx[3], xx[4], xx[5]];
+    precess(
+        &mut pos3,
+        tjd,
+        flags,
+        models,
+        PrecessionDirection::J2000ToDate,
+    );
+    precess(
+        &mut vel3,
+        tjd,
+        flags,
+        models,
+        PrecessionDirection::J2000ToDate,
+    );
+    xx[0..3].copy_from_slice(&pos3);
+    xx[3..6].copy_from_slice(&vel3);
+
+    let oe = obliquity(tjd, flags, models);
+    let nut_opt = if flags.contains(CalcFlags::NONUT) {
+        None
+    } else {
+        Some(nutation(tjd, flags, models))
+    };
+
+    // Equatorial nutation matrix (pure rotation of pos + speed, no rate term).
+    if let Some(nut_val) = nut_opt.as_ref() {
+        nutate(xx, &oe, nut_val, None, true);
+    }
+
+    // Equatorial -> ecliptic (rotate by +obliquity), pos + speed.
+    let p = rotate_x_sincos([xx[0], xx[1], xx[2]], oe.sin_eps, oe.cos_eps);
+    let v = rotate_x_sincos([xx[3], xx[4], xx[5]], oe.sin_eps, oe.cos_eps);
+    xx[0..3].copy_from_slice(&p);
+    xx[3..6].copy_from_slice(&v);
+
+    // Ecliptic nutation (rotate by nutation-in-obliquity), pos + speed.
+    if let Some(nut_val) = nut_opt.as_ref() {
+        let (sn, cn) = (nut_val.deps.sin(), nut_val.deps.cos());
+        let p = rotate_x_sincos([xx[0], xx[1], xx[2]], sn, cn);
+        let v = rotate_x_sincos([xx[3], xx[4], xx[5]], sn, cn);
+        xx[0..3].copy_from_slice(&p);
+        xx[3..6].copy_from_slice(&v);
+    }
+}
+
+/// Assemble the `xreturn[24]` output layout from an ecliptic-of-date cartesian
+/// 6-vector `x` (node or apogee). Port of `lunar_osc_elem`'s D.4 output-frame
+/// stage (sweph.c:5487-5591). `oe` is obliquity-of-date. No physical effects
+/// here — light-time/precession/nutation already happened per-sample in D.1.
+/// The `SEFLG_SIDEREAL` branch is NOT handled here (no golden coverage; the
+/// caller's sidereal path mirrors the mean-node one via `apply_sidereal`).
+fn osc_output_frame(
+    x: &[f64; 6],
+    flags: CalcFlags,
+    oe: &Epsilon,
+    tjd: f64,
+    models: &AstroModels,
+) -> [f64; 24] {
+    let has_speed = flags.contains(CalcFlags::SPEED);
+    let mut xr = [0.0; 24];
+
+    // Ecliptic cartesian + polar.
+    xr[6..12].copy_from_slice(x);
+    let ecl_pol = cartesian_to_polar_with_speed([xr[6], xr[7], xr[8], xr[9], xr[10], xr[11]]);
+    xr[0..6].copy_from_slice(&ecl_pol);
+
+    // Ecliptic -> equatorial cartesian (rotate by -obliquity).
+    let p = rotate_x_sincos([xr[6], xr[7], xr[8]], -oe.sin_eps, oe.cos_eps);
+    xr[18..21].copy_from_slice(&p);
+    if has_speed {
+        let v = rotate_x_sincos([xr[9], xr[10], xr[11]], -oe.sin_eps, oe.cos_eps);
+        xr[21..24].copy_from_slice(&v);
+    }
+
+    // Remove ecliptic-nutation rotation from the equatorial vector (unless NONUT).
+    if !flags.contains(CalcFlags::NONUT) {
+        let nut_val = nutation(tjd, flags, models);
+        let (sn, cn) = (nut_val.deps.sin(), nut_val.deps.cos());
+        let p = rotate_x_sincos([xr[18], xr[19], xr[20]], -sn, cn);
+        xr[18..21].copy_from_slice(&p);
+        if has_speed {
+            let v = rotate_x_sincos([xr[21], xr[22], xr[23]], -sn, cn);
+            xr[21..24].copy_from_slice(&v);
+        }
+    }
+
+    // Equatorial polar.
+    let eq_pol = cartesian_to_polar_with_speed([xr[18], xr[19], xr[20], xr[21], xr[22], xr[23]]);
+    xr[12..18].copy_from_slice(&eq_pol);
+
+    // SEFLG_J2000 re-projection (sweph.c:5561-5577): the node/apogee are referred
+    // to the equator/ecliptic of date; transform the equatorial vector to J2000.
+    // Position via `precess`, speed via `precess_speed` (WITH the rate term —
+    // unlike plan_for_osc_elem's pure rotation; this matches C's swi_precess +
+    // swi_precess_speed here).
+    if flags.contains(CalcFlags::J2000) {
+        let mut x6 = [xr[18], xr[19], xr[20], xr[21], xr[22], xr[23]];
+        let mut pos3 = [x6[0], x6[1], x6[2]];
+        precess(
+            &mut pos3,
+            tjd,
+            flags,
+            models,
+            PrecessionDirection::DateToJ2000,
+        );
+        x6[0..3].copy_from_slice(&pos3);
+        if has_speed {
+            precess_speed(
+                &mut x6,
+                tjd,
+                flags,
+                models,
+                PrecessionDirection::DateToJ2000,
+            );
+        }
+        xr[18..24].copy_from_slice(&x6);
+        let eq_pol = cartesian_to_polar_with_speed(x6);
+        xr[12..18].copy_from_slice(&eq_pol);
+
+        // Equatorial-J2000 -> ecliptic-J2000 (rotate by +obliquity of J2000).
+        let oe2000 = obliquity(J2000, flags, models);
+        let p = rotate_x_sincos([x6[0], x6[1], x6[2]], oe2000.sin_eps, oe2000.cos_eps);
+        xr[6..9].copy_from_slice(&p);
+        if has_speed {
+            let v = rotate_x_sincos([x6[3], x6[4], x6[5]], oe2000.sin_eps, oe2000.cos_eps);
+            xr[9..12].copy_from_slice(&v);
+        }
+        let ecl_pol = cartesian_to_polar_with_speed([xr[6], xr[7], xr[8], xr[9], xr[10], xr[11]]);
+        xr[0..6].copy_from_slice(&ecl_pol);
+    }
+
+    // Radians -> degrees (angles only) + degnorm on the two longitudes.
+    for i in 0..2 {
+        xr[i] *= RADTODEG;
+        xr[i + 3] *= RADTODEG;
+        xr[i + 12] *= RADTODEG;
+        xr[i + 15] *= RADTODEG;
+    }
+    xr[0] = crate::math::normalize_degrees(xr[0]);
+    xr[12] = crate::math::normalize_degrees(xr[12]);
+    xr
+}
+
+/// Core of `lunar_osc_elem` (sweph.c:5360-5592, D.2-D.4). Given the three raw
+/// geocentric equatorial-J2000 moon samples (pos+vel, light-time corrected;
+/// only `[istart..=2]` valid), computes BOTH the osculating node and the
+/// osculating apogee together (the node is always needed to derive the apogee
+/// and vice versa), and returns `(node_xreturn, apogee_xreturn)`.
+///
+/// Sample epochs: `raw_samples[0]` at `tjd - speed_intv`, `[1]` at
+/// `tjd + speed_intv`, `[2]` at `tjd`. `speed_intv` is the backend-specific
+/// central-difference interval (`NODE_CALC_INTV` / `NODE_CALC_INTV_MOSH`).
+pub(crate) fn lunar_osc_elem(
+    tjd: f64,
+    flags: CalcFlags,
+    models: &AstroModels,
+    raw_samples: &[[f64; 6]; 3],
+    istart: usize,
+    speed_intv: f64,
+) -> ([f64; 24], [f64; 24]) {
+    let has_speed = flags.contains(CalcFlags::SPEED);
+    let plan_flags = flags | CalcFlags::SPEED; // C always passes iflag|SEFLG_SPEED
+
+    // D.1 tail: rotate each raw sample into ecliptic-of-date via plan_for_osc_elem.
+    let mut xpos = [[0.0f64; 6]; 3];
+    for i in istart..=2 {
+        let t = match i {
+            0 => tjd - speed_intv,
+            1 => tjd + speed_intv,
+            _ => tjd,
+        };
+        let mut s = raw_samples[i];
+        plan_for_osc_elem(plan_flags, t, &mut s, models);
+        xpos[i] = s;
+    }
+
+    // D.2: node direction (tangent-line intersection with the ecliptic).
+    // xx[i][0..3] is the node position 3-vector for sample i.
+    let mut xx = [[0.0f64; 6]; 3];
+    for i in istart..=2 {
+        if xpos[i][5].abs() < 1e-15 {
+            xpos[i][5] = 1e-15; // clamp persists into D.3 (cross_prod reads xpos[i][5])
+        }
+        let fac = xpos[i][2] / xpos[i][5];
+        let sgn = xpos[i][5] / xpos[i][5].abs();
+        for j in 0..3 {
+            xx[i][j] = (xpos[i][j] - fac * xpos[i][j + 3]) * sgn;
+        }
+    }
+
+    // D.3: apogee (osculating ellipse) + ellipse-corrected node distance.
+    let gmsm =
+        GEOGCONST * (1.0 + 1.0 / EARTH_MOON_MRAT) / AUNIT / AUNIT / AUNIT * 86400.0 * 86400.0;
+    let mut xxa = [[0.0f64; 6]; 3];
+    for i in istart..=2 {
+        // node direction, unit angle
+        let mut rxy = (xx[i][0] * xx[i][0] + xx[i][1] * xx[i][1]).sqrt();
+        let cosnode = xx[i][0] / rxy;
+        let sinnode = xx[i][1] / rxy;
+        // inclination from the orbital angular-momentum vector
+        let xnorm = crate::math::cross_prod(
+            [xpos[i][0], xpos[i][1], xpos[i][2]],
+            [xpos[i][3], xpos[i][4], xpos[i][5]],
+        );
+        rxy = xnorm[0] * xnorm[0] + xnorm[1] * xnorm[1];
+        let c2 = rxy + xnorm[2] * xnorm[2];
+        let mut rxyz = c2.sqrt();
+        rxy = rxy.sqrt();
+        let sinincl = rxy / rxyz;
+        let cosincl = (1.0 - sinincl * sinincl).sqrt();
+        // argument of latitude
+        let cosu = xpos[i][0] * cosnode + xpos[i][1] * sinnode;
+        let sinu = xpos[i][2] / sinincl;
+        let uu = sinu.atan2(cosu);
+        // semi-major axis
+        rxyz = (xpos[i][0] * xpos[i][0] + xpos[i][1] * xpos[i][1] + xpos[i][2] * xpos[i][2]).sqrt();
+        let v2 = xpos[i][3] * xpos[i][3] + xpos[i][4] * xpos[i][4] + xpos[i][5] * xpos[i][5];
+        let sema = 1.0 / (2.0 / rxyz - v2 / gmsm);
+        // eccentricity
+        let pp = c2 / gmsm;
+        let ecce = (1.0 - pp / sema).sqrt();
+        // eccentric anomaly
+        let mut cos_e = 1.0 / ecce * (1.0 - rxyz / sema);
+        let dot = xpos[i][0] * xpos[i][3] + xpos[i][1] * xpos[i][4] + xpos[i][2] * xpos[i][5];
+        let sin_e = 1.0 / ecce / (sema * gmsm).sqrt() * dot;
+        // true anomaly
+        let mut ny = 2.0 * (((1.0 + ecce) / (1.0 - ecce)).sqrt() * sin_e / (1.0 + cos_e)).atan();
+        // apogee = perihelion + PI, distance a(1+e) unconditionally
+        let mut apg = [
+            crate::math::normalize_radians(uu - ny + std::f64::consts::PI),
+            0.0,
+            sema * (1.0 + ecce),
+        ];
+        apg = crate::math::polar_to_cartesian(apg);
+        apg = rotate_x_sincos(apg, -sinincl, cosincl);
+        apg = crate::math::cartesian_to_polar(apg);
+        apg[0] += sinnode.atan2(cosnode);
+        let apg_cart = crate::math::polar_to_cartesian(apg);
+        xxa[i][0..3].copy_from_slice(&apg_cart);
+
+        // ellipse-corrected node distance (reusing this sample's ecce/sema/uu)
+        ny = crate::math::normalize_radians(ny - uu);
+        cos_e = (2.0 * ((ny / 2.0).tan() / ((1.0 + ecce) / (1.0 - ecce)).sqrt()).atan()).cos();
+        let r0 = sema * (1.0 - ecce * cos_e);
+        let r1 = (xx[i][0] * xx[i][0] + xx[i][1] * xx[i][1] + xx[i][2] * xx[i][2]).sqrt();
+        for v in &mut xx[i][..3] {
+            *v *= r0 / r1;
+        }
+    }
+
+    // Save node/apogee position + central-difference speed (both plain central
+    // differences — the D.2 quadratic node speed is dead code, overwritten here).
+    let mut node = [0.0f64; 6];
+    let mut apog = [0.0f64; 6];
+    for i in 0..3 {
+        apog[i] = xxa[2][i];
+        node[i] = xx[2][i];
+        if has_speed {
+            apog[i + 3] = (xxa[1][i] - xxa[0][i]) / speed_intv / 2.0;
+            node[i + 3] = (xx[1][i] - xx[0][i]) / speed_intv / 2.0;
+        }
+    }
+
+    // D.4: output frame for both bodies. oe = obliquity of date.
+    let oe = obliquity(tjd, flags, models);
+    (
+        osc_output_frame(&node, flags, &oe, tjd, models),
+        osc_output_frame(&apog, flags, &oe, tjd, models),
+    )
+}
+
+/// Raw geocentric equatorial-J2000 (pre-bias) Moshier moon (pos+vel) at `t`,
+/// as C's `swi_moshmoon` returns it before `swi_plan_for_osc_elem`.
+pub(crate) fn raw_osc_moon_moshier(t: f64, eps_j2000: &Epsilon) -> Result<[f64; 6], Error> {
+    crate::moshier::backend::compute(t, Body::Moon, eps_j2000)
+}
+
+/// Raw geocentric equatorial-J2000 (pre-bias) Swiss-ephemeris moon (pos+vel) at `t`.
+pub(crate) fn raw_osc_moon_sweph(moon_files: &[SwissEphFile], t: f64) -> Result<[f64; 6], Error> {
+    SwephProvider {
+        planet_files: &[],
+        moon_files,
+    }
+    .moon_geo(t, true)
+}
+
+/// Raw geocentric equatorial-J2000 (pre-bias) JPL moon (pos+vel) at `t`.
+pub(crate) fn raw_osc_moon_jpl(file: &crate::jpl::JplFile, t: f64) -> Result<[f64; 6], Error> {
+    JplProvider { file }.moon_geo(t, true)
+}
+
 /// Apply default-branch sidereal projection (Branch 3) to `xreturn`.
 ///
 /// `daya[0]` is the ayanamsa in degrees; `daya[1]` is the ayanamsa speed in
