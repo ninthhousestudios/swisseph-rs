@@ -681,9 +681,17 @@ impl Ephemeris {
         let models = &self.config.astro_models;
         let has_speed = flags.contains(CalcFlags::SPEED);
 
-        // §1: Prime obliquity/nutation at tjd + Δt(tjd) — a third, distinct epoch
+        // §1: Prime obliquity/nutation at tjd + Δt(tjd) — a third, distinct epoch.
+        // For J2000 output the §9 ecliptic rotation uses the J2000 mean obliquity
+        // (oec2000), not obliquity-of-date, mirroring calc::precess_and_ephem's
+        // J2000 branch. (nut_val is unused when J2000 forces NONUT, but priming it
+        // is harmless and keeps the non-J2000 path unchanged.)
         let dt_prime = crate::deltat::calc_deltat(jd_tt, &self.config);
-        let eps = crate::obliquity::obliquity(jd_tt + dt_prime, flags, models);
+        let eps = if flags.contains(CalcFlags::J2000) {
+            crate::obliquity::obliquity(crate::constants::J2000, flags, models)
+        } else {
+            crate::obliquity::obliquity(jd_tt + dt_prime, flags, models)
+        };
         let nut_val = crate::nutation::nutation(jd_tt + dt_prime, flags, models);
 
         // §2: Barycentric J2000-equatorial states of both bodies at tjd
