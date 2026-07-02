@@ -720,8 +720,9 @@ int main(void) {
     }
     printf("\n  ],\n");
 
-    /* --- gauquelin_riseset: swe_gauquelin_sector, imeth in {2,3,4,5} (rise/set-based).
-     * Uses the same 6 ut_triples x 3 bodies x 4 imeth = 72 cases. */
+    /* --- gauquelin_riseset: swe_gauquelin_sector, imeth in {0,1,2,3,4,5} via the full dispatcher.
+     * Planet cases: 6 ut_triples x 3 bodies x 4 imeth(2-5) = 72 cases.
+     * Star cases: 2 ut_triples x Aldebaran x 3 imeth(0,1,2) = 6 cases. */
     printf("  \"gauquelin_riseset\": [\n");
     first = 1;
     {
@@ -753,6 +754,48 @@ int main(void) {
                            "\"geolon\": %.20e, \"geolat\": %.20e, "
                            "\"dgsect\": %.20e, \"retval\": %d}",
                            t_ut, gq_bodies[ib5], gq_imeths[im5], geopos[0], geopos[1],
+                           dgsect, retc);
+                }
+            }
+        }
+
+        /* Fixed-star cases: Aldebaran at 2 mid-latitude triples x imeth {0, 1, 2}.
+         * swe_fixstar strcpy()s into its starname argument, so use a local char[].
+         * Set ephe_path here (not at top) so sefstars.txt is findable without
+         * contaminating earlier Sunshine (I/i) cases that rely on Moshier fallback. */
+        swe_set_ephe_path("../swisseph/ephe");
+        {
+            int star_triples[] = { 0, 1 };
+            int star_imeths[] = { 0, 1, 2 };
+            int n_star_triples = sizeof(star_triples) / sizeof(star_triples[0]);
+            int n_star_imeths = sizeof(star_imeths) / sizeof(star_imeths[0]);
+            int ist, ism;
+
+            for (ist = 0; ist < n_star_triples; ist++) {
+                for (ism = 0; ism < n_star_imeths; ism++) {
+                    int idx = star_triples[ist];
+                    double t_ut = ut_triples[idx].tjd_ut;
+                    double geopos[3];
+                    double dgsect = 0;
+                    int32 retc;
+                    char starname[256];
+
+                    strcpy(starname, "Aldebaran");
+                    geopos[0] = ut_triples[idx].geolon;
+                    geopos[1] = ut_triples[idx].geolat;
+                    geopos[2] = 0.0;
+                    serr[0] = '\0';
+
+                    retc = swe_gauquelin_sector(t_ut, SE_SUN, starname, SEFLG_MOSEPH,
+                                                 star_imeths[ism], geopos, 0, 0, &dgsect, serr);
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"tjd_ut\": %.20e, \"ipl\": %d, \"imeth\": %d, "
+                           "\"starname\": \"Aldebaran\", "
+                           "\"geolon\": %.20e, \"geolat\": %.20e, "
+                           "\"dgsect\": %.20e, \"retval\": %d}",
+                           t_ut, SE_SUN, star_imeths[ism], geopos[0], geopos[1],
                            dgsect, retc);
                 }
             }

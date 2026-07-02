@@ -12,7 +12,7 @@ src/
 ├── corrections.rs      — relativistic corrections: meff (lookup), aberr_light (Lorentz), deflect_light (GR bending)
 ├── flags.rs            — bitflags! structs: CalcFlags, SiderealBits, etc. (146 lines)
 ├── error.rs            — Error enum
-├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_with_config (swisseph-rs/79, mirrors calc_with_config — threads an explicit &EphemerisConfig into calc_fixstar/calc_fixstar_moshier/_sweph/_jpl so TOPOCTR gets a per-call topographic override instead of always reading self.config; fixstar2 delegates to it with &self.config), fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion, gauquelin_sector_geometric — swe_gauquelin_sector imeth 0/1 port: own ARMC/eps/nutation setup using the caller's flags directly (NOT houses_ex2's forced TIDAL_DEFAULT — swe_gauquelin_sector's C deltaT call genuinely carries the caller's ephemeris-source iflag), calc() the body, house_pos with hsys=Gauquelin; gauquelin_sector — full swe_gauquelin_sector dispatcher (swisseph-rs/89, PNOC 8): imeth 0/1 → gauquelin_sector_geometric, imeth 2–5 → gauquelin_sector_risetrans (rise/set-based: finds bracketing rise+set via Ephemeris::rise_trans with DISC_CENTER/NO_REFRACTION per imeth, §7 bracket+re-search logic, linear interpolation into sectors 1–36; circumpolar bodies propagate Err)), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
+├── context.rs          — Ephemeris (calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_with_config (swisseph-rs/79, mirrors calc_with_config — threads an explicit &EphemerisConfig into calc_fixstar/calc_fixstar_moshier/_sweph/_jpl so TOPOCTR gets a per-call topographic override instead of always reading self.config; fixstar2 delegates to it with &self.config), fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion, gauquelin_sector_geometric — swe_gauquelin_sector imeth 0/1 port: own ARMC/eps/nutation setup using the caller's flags directly (NOT houses_ex2's forced TIDAL_DEFAULT — swe_gauquelin_sector's C deltaT call genuinely carries the caller's ephemeris-source iflag), calc() or fixstar2() per starname, house_pos with hsys=Gauquelin (swisseph-rs/97: starname threaded through); gauquelin_sector — full swe_gauquelin_sector dispatcher (swisseph-rs/89, PNOC 8): imeth 0/1 → gauquelin_sector_geometric, imeth 2–5 → gauquelin_sector_risetrans (rise/set-based: finds bracketing rise+set via Ephemeris::rise_trans with DISC_CENTER/NO_REFRACTION per imeth, §7 bracket+re-search logic, linear interpolation into sectors 1–36; circumpolar bodies propagate Err)), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
 ├── math.rs             — pure math functions: normalize, chebyshev, cartpol, cotrans, poly_eval
 ├── date.rs             — Julian Day ↔ calendar conversion, delta-T, UTC
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
@@ -658,10 +658,13 @@ tests/
 │                         dgsect via Ephemeris::gauquelin_sector_geometric — this test caught a
 │                         pre-existing sidtime_long_term deltaT/tid_acc bug at 1600/1800 AD epochs,
 │                         fixed in sidereal_time.rs (see that file's codebase-map entry));
-│                         gauquelin_riseset: 72 cases (swisseph-rs/89, PNOC 8), 6 ut_triples ×
-│                         3 bodies (Sun/Moon/Mars) × 4 imeth {2,3,4,5}, SEFLG_MOSEPH, atpress=0,
-│                         attemp=0, eps 1e-6 dgsect via Ephemeris::gauquelin_sector; 1 circumpolar
-│                         case (Moon at -64° latitude, 1600-Jan-1) asserts Err)
+│                         gauquelin_riseset: 78 cases (swisseph-rs/89, PNOC 8), 72 planet: 6
+│                         ut_triples × 3 bodies (Sun/Moon/Mars) × 4 imeth {2,3,4,5}, SEFLG_MOSEPH,
+│                         atpress=0, attemp=0, eps 1e-6 dgsect via Ephemeris::gauquelin_sector; 1
+│                         circumpolar case (Moon at -64° latitude, 1600-Jan-1) asserts Err; + 6
+│                         star: Aldebaran × 2 ut_triples × imeth {0,1,2}, exercises the fixstar2
+│                         geometric branch + rise/set star path (swisseph-rs/97); star rise/set
+│                         eps 1e-5 for the known fixstar-TOPOCTR gap)
 ├── riseset.rs         — golden tests for rise_trans_true_hor + rise_trans (swisseph-rs/70,71;
 │                         full: 36 cases, 3 geopos (Zurich/Null Island/Tromso) × 2 bodies
 │                         (Sun/Moon) × 2 epochs × 3 rsmi (RISE/SET/MTRANSIT, all with FORCE_SLOW

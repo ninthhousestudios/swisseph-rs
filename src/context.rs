@@ -903,16 +903,18 @@ impl Ephemeris {
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`
     /// Gauquelin sector position via geometric house position (imeth 0/1).
-    /// See docs/c-ref-houses.md §10.
+    /// See docs/c-ref-houses.md §10, docs/c-ref-gauquelin-riseset.md §9.
     ///
-    /// Unlike [`Ephemeris::houses_ex2`], the deltaT/obliquity/nutation resolution here follows
-    /// `swe_deltat_ex(t_ut, iflag, ...)`'s actual C behavior: it uses the caller's `flags`
-    /// (ephemeris source and all), not a forced `TIDAL_DEFAULT` override — that override is
-    /// specific to `swe_houses_ex2`'s own deltaT call site, not this one.
+    /// When `starname` is `Some(non_empty)`, uses `fixstar2` instead of `calc` to resolve
+    /// the body position (swecl.c:6356-6362). Unlike [`Ephemeris::houses_ex2`], the
+    /// deltaT/obliquity/nutation resolution here uses the caller's `flags` directly, not a
+    /// forced `TIDAL_DEFAULT` override.
+    #[allow(clippy::too_many_arguments)]
     pub fn gauquelin_sector_geometric(
         &self,
         t_ut: f64,
         body: Body,
+        starname: Option<&str>,
         imeth: i32,
         flags: CalcFlags,
         geolon: f64,
@@ -939,7 +941,11 @@ impl Ephemeris {
                 + geolon,
         );
 
-        let x0 = self.calc(t_et, body, flags)?;
+        let x0 = if starname.is_some_and(|s| !s.is_empty()) {
+            self.fixstar2(starname.unwrap(), t_et, flags)?.1
+        } else {
+            self.calc(t_et, body, flags)?
+        };
         let lat = if imeth == 1 { 0.0 } else { x0.data[1] };
 
         crate::houses::house_pos(
@@ -978,7 +984,9 @@ impl Ephemeris {
         };
 
         if imeth <= 1 {
-            self.gauquelin_sector_geometric(t_ut, body, imeth, flags, geopos[0], geopos[1])
+            self.gauquelin_sector_geometric(
+                t_ut, body, starname, imeth, flags, geopos[0], geopos[1],
+            )
         } else {
             self.gauquelin_sector_risetrans(
                 t_ut, body, starname, flags, imeth, geopos, atpress, attemp,
