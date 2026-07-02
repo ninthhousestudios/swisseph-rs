@@ -295,3 +295,58 @@ per day, ascending node at 1e-3°/1e-4° per day, descending node at 2e-3°/3e-2
 battery's pre-1900 epoch is additionally nudged off the sepl_18 `.se1` file boundary (see
 `osc_epochs` in `tests/c-gen/gen_nodaps.c`) — a separate, already-documented stateless-vs-stateful
 artifact (see `CLAUDE.md` `<stateless_tolerance>` §2), not this one. (swisseph-rs/86)
+
+## 9. MOSEPH + asteroid output depends on process call history (stale SEI_SUNBARY)
+
+**Location:** `sweph.c:2332–2343` (`sweph()`'s heliocentric→barycentric conversion, flag-gated
+on `SEFLG_JPLEPH || SEFLG_SWIEPH`), `sweph.c:2345–2352` (`pdp->iephe = psdp->iephe` for
+asteroid files), `sweph.c:2517–2521` (`app_pos_etc_plan`'s `SEFLG_HELCTR` branch, gated on
+`pdp->iephe`), `swemplan.c:276–339` (`swi_moshplan` — never writes `swed.pldat[SEI_SUNBARY]`),
+plus `swi_deflect_light`'s global reads of the barycentric Sun.
+
+**What:** The asteroid calc path (`swecalc`'s minor-planet branch, sweph.c:1064–1101) threads
+`swed.pldat[SEI_SUNBARY]` into several consumers, but under `SEFLG_MOSEPH` nothing ever
+populates that slot — `main_planet(SEI_EARTH, ..., MOSEPH, ...)` calls `swi_moshplan`, which
+writes only `SEI_EARTH`. So every consumer reads whatever the *last* SWIEPH/JPLEPH call in the
+process happened to leave there (or zeros in a fresh process):
+
+1. `sweph()`'s helio→bary conversion for the asteroid is skipped entirely (the flag gate is
+   false in MOSEPH mode), so the asteroid position stays heliocentric. This happens to be
+   *self-consistent* in a fresh process: `app_pos_etc_plan`'s observer is `pedp->x`
+   (sweph.c:2528–2543), which under MOSEPH is Moshier's heliocentric Earth — heliocentric
+   minus heliocentric is a correct geocentric vector.
+2. `pdp->iephe` for the asteroid is copied from `psdp->iephe` (`SEI_SUNBARY`'s), not set to
+   the ephemeris actually used — under MOSEPH it reports whatever ephemeris last computed the
+   barycentric Sun, or garbage-zero in a fresh process.
+3. `app_pos_etc_plan`'s `SEFLG_HELCTR` branch subtracts `swed.pldat[SEI_SUNBARY].x` when
+   `pdp->iephe` claims SWIEPH/JPLEPH. With the stale `iephe` from (2), a MOSEPH+HELCTR
+   asteroid call in a process that previously ran SWIEPH subtracts a stale barycentric Sun
+   (evaluated at the *earlier call's epoch*) from a heliocentric position — a genuine
+   frame/epoch mixing error.
+4. `swi_deflect_light`/`swi_aberr_light` read the barycentric-Sun global for their geometry —
+   zero (Sun at origin: consistent with the heliocentric frame) in a fresh process, a
+   wrong-epoch Sun after a prior SWIEPH call.
+
+Net: **the same `swe_calc(tjd, SE_CERES, SEFLG_MOSEPH)` call returns (subtly) different
+results depending on which calls preceded it in the process.** In a fresh process the zeros
+make the whole path a coherent heliocentric-frame computation and the geocentric output is
+correct; after a SWIEPH/JPLEPH call at a different epoch, the HELCTR branch and the
+deflection/aberration geometry mix frames and epochs.
+
+**Impact:** Geocentric non-HELCTR output: position core unaffected (frame-consistent either
+way); only the mas-level deflection/aberration geometry wobbles with stale state.
+MOSEPH+HELCTR asteroid output: wrong by the stale barycentric-Sun vector (up to ~0.01 AU)
+whenever a SWIEPH/JPLEPH call preceded it. The reported `iephe` is unreliable in all MOSEPH
+asteroid cases.
+
+**Cause:** Global-state architecture — `SEI_SUNBARY` is a shared mutable slot with no
+invalidation tied to ephemeris mode, and the asteroid save path launders its `iephe` through
+it.
+
+**Our Rust code:** models the *fresh-process* semantics, which is the only deterministic
+member of C's behavior family: `MoshierEarthProvider` reports heliocentric Earth with an
+all-zero `sun_bary`, so the asteroid stays heliocentric against a heliocentric observer and
+deflection sees the Sun at the origin of that frame (swisseph-rs/95 decision; dispatch in
+swisseph-rs/101). Golden verification uses a dedicated MOSEPH-only generator process so the C
+side is guaranteed fresh (`tests/c-gen/gen_asteroid_moseph.c`, swisseph-rs/102). See
+`docs/c-ref-asteroid.md` §1.5.

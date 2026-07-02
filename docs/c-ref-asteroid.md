@@ -210,10 +210,19 @@ check; the flag check is load-bearing here). When `epheflag == SEFLG_MOSEPH`:
    the `SEFLG_MOSEPH` bit (not `SWIEPH`/`JPLEPH`), so the flag check above is false regardless
    of what `psdp->x` contains — **the heliocentric→barycentric conversion is skipped entirely**.
    The asteroid position returned from `sweph()` remains purely heliocentric (as stored in the
-   `.se1` file) while the rest of `app_pos_etc_plan()`'s geocentric-conversion arithmetic
-   (subtracting the observer's barycentric position) assumes a barycentric input. The
-   geocentric result is therefore off by the Sun-to-barycenter vector (up to ~0.01 AU depending
-   on giant-planet configuration) whenever `SEFLG_MOSEPH` is combined with an asteroid body.
+   `.se1` file). This is NOT a position error for plain geocentric output, though (an earlier
+   draft of this section overstated it): `app_pos_etc_plan()`'s observer is `pedp->x`
+   (sweph.c:2528–2543, verified directly), and under MOSEPH `swi_moshplan` fills
+   `pldat[SEI_EARTH]` with *heliocentric* Earth — heliocentric asteroid minus heliocentric
+   Earth is a frame-consistent geocentric vector. The genuine defects are confined to the
+   `SEI_SUNBARY` consumers: (a) the `SEFLG_HELCTR` branch (sweph.c:2517–2521) subtracts a
+   stale barycentric Sun when the stale `pdp->iephe` (point below) claims SWIEPH/JPLEPH —
+   wrong by up to ~0.01 AU after a prior SWIEPH/JPLEPH call in the same process; (b)
+   deflection/aberration geometry reads the zero-or-stale barycentric-Sun global (zero =
+   Sun-at-origin, consistent with the heliocentric frame; stale = wrong-epoch Sun, mas-level
+   wobble). Full write-up: `docs/swisseph-c-potential-bugs.md` §9. Net: MOSEPH+asteroid
+   output is deterministic and essentially correct in a *fresh process*, and call-history-
+   dependent otherwise.
 
 This is a real quirk/bug in the C library's stateful design, not a documentation
 simplification — verified directly against sweph.c:2335 and swemplan.c:276-339. It is exactly
