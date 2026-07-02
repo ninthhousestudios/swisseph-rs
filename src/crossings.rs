@@ -178,6 +178,7 @@ fn reject_helio_body(body: Body) -> bool {
         body,
         Body::Sun
             | Body::Moon
+            | Body::Earth
             | Body::MeanNode
             | Body::TrueNode
             | Body::MeanApogee
