@@ -902,7 +902,7 @@ impl Ephemeris {
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`
-    /// (from rise/set times) depend on the not-yet-ported rise/trans module and return `Err`.
+    /// Gauquelin sector position via geometric house position (imeth 0/1).
     /// See docs/c-ref-houses.md §10.
     ///
     /// Unlike [`Ephemeris::houses_ex2`], the deltaT/obliquity/nutation resolution here follows
@@ -922,9 +922,9 @@ impl Ephemeris {
         use crate::types::HouseSystem;
 
         if !(0..=1).contains(&imeth) {
-            return Err(Error::CError(
-                "gauquelin rise/set methods need rise_trans (not ported)".into(),
-            ));
+            return Err(Error::CError(format!(
+                "invalid imeth for geometric gauquelin: {imeth}"
+            )));
         }
 
         let models = &self.config.astro_models;
@@ -950,6 +950,159 @@ impl Ephemeris {
             [x0.data[0], lat],
             None,
         )
+    }
+
+    /// Full Gauquelin sector dispatcher. Routes imeth 0/1 to the geometric method
+    /// and imeth 2–5 to the rise/set method. Port of `swe_gauquelin_sector`
+    /// (swecl.c:6309-6439, docs/c-ref-gauquelin-riseset.md).
+    #[allow(clippy::too_many_arguments)]
+    pub fn gauquelin_sector(
+        &self,
+        t_ut: f64,
+        body: Body,
+        starname: Option<&str>,
+        flags: CalcFlags,
+        imeth: i32,
+        geopos: [f64; 3],
+        atpress: f64,
+        attemp: f64,
+    ) -> Result<f64, Error> {
+        if !(0..=5).contains(&imeth) {
+            return Err(Error::CError(format!("invalid method: {imeth}")));
+        }
+
+        if imeth <= 1 {
+            self.gauquelin_sector_geometric(t_ut, body, imeth, flags, geopos[0], geopos[1])
+        } else {
+            self.gauquelin_sector_risetrans(
+                t_ut, body, starname, flags, imeth, geopos, atpress, attemp,
+            )
+        }
+    }
+
+    /// Rise/set-based Gauquelin sector (imeth 2–5). Finds the bracketing rise and set
+    /// times around `t_ut`, then linearly interpolates into sectors 1–36.
+    /// Port of swecl.c:6370-6438, docs/c-ref-gauquelin-riseset.md §2/§7.
+    #[allow(clippy::too_many_arguments)]
+    fn gauquelin_sector_risetrans(
+        &self,
+        t_ut: f64,
+        body: Body,
+        starname: Option<&str>,
+        flags: CalcFlags,
+        imeth: i32,
+        geopos: [f64; 3],
+        atpress: f64,
+        attemp: f64,
+    ) -> Result<f64, Error> {
+        use crate::flags::RiseSetFlags;
+
+        let epheflag = flags & crate::calc::EPHMASK;
+
+        // §2: derive rise method flags from imeth
+        let mut risemeth = RiseSetFlags::empty();
+        if imeth == 2 || imeth == 4 {
+            risemeth |= RiseSetFlags::NO_REFRACTION;
+        }
+        if imeth == 2 || imeth == 3 {
+            risemeth |= RiseSetFlags::DISC_CENTER;
+        }
+
+        let mut tret = [0.0f64; 2]; // [0] = rise, [1] = set
+        let mut rise_found = true;
+        let mut set_found = true;
+        let above_horizon;
+
+        // §7.1: find next rising
+        match self.rise_trans(
+            t_ut,
+            body,
+            starname,
+            epheflag,
+            RiseSetFlags::RISE | risemeth,
+            geopos,
+            atpress,
+            attemp,
+        ) {
+            Ok(r) => tret[0] = r.time,
+            Err(Error::CircumpolarBody) => rise_found = false,
+            Err(e) => return Err(e),
+        }
+
+        // §7.2: find next setting
+        match self.rise_trans(
+            t_ut,
+            body,
+            starname,
+            epheflag,
+            RiseSetFlags::SET | risemeth,
+            geopos,
+            atpress,
+            attemp,
+        ) {
+            Ok(r) => tret[1] = r.time,
+            Err(Error::CircumpolarBody) => set_found = false,
+            Err(e) => return Err(e),
+        }
+
+        // §7.3: bracket determination + one re-search
+        if tret[0] < tret[1] && rise_found {
+            above_horizon = false;
+            let t = if set_found { tret[1] - 1.2 } else { t_ut - 1.2 };
+            set_found = true;
+            match self.rise_trans(
+                t,
+                body,
+                starname,
+                epheflag,
+                RiseSetFlags::SET | risemeth,
+                geopos,
+                atpress,
+                attemp,
+            ) {
+                Ok(r) => tret[1] = r.time,
+                Err(Error::CircumpolarBody) => set_found = false,
+                Err(e) => return Err(e),
+            }
+        } else if tret[0] >= tret[1] && set_found {
+            above_horizon = true;
+            let t = if rise_found {
+                tret[0] - 1.2
+            } else {
+                t_ut - 1.2
+            };
+            rise_found = true;
+            match self.rise_trans(
+                t,
+                body,
+                starname,
+                epheflag,
+                RiseSetFlags::RISE | risemeth,
+                geopos,
+                atpress,
+                attemp,
+            ) {
+                Ok(r) => tret[0] = r.time,
+                Err(Error::CircumpolarBody) => rise_found = false,
+                Err(e) => return Err(e),
+            }
+        } else {
+            above_horizon = false;
+        }
+
+        // §7.4: sector interpolation or failure
+        if rise_found && set_found {
+            if above_horizon {
+                Ok((t_ut - tret[0]) / (tret[1] - tret[0]) * 18.0 + 1.0)
+            } else {
+                Ok((t_ut - tret[1]) / (tret[0] - tret[1]) * 18.0 + 19.0)
+            }
+        } else {
+            Err(Error::CError(format!(
+                "rise or set not found for planet {}",
+                body.to_raw_id()
+            )))
+        }
     }
 
     fn extract_for_body(xreturn: &[f64; 24], body: Body, flags: CalcFlags) -> [f64; 6] {

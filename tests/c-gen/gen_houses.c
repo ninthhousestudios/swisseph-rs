@@ -720,8 +720,47 @@ int main(void) {
     }
     printf("\n  ],\n");
 
-    /* --- gauquelin_sector: swe_gauquelin_sector, imeth in {0,1} (geometric, via house_pos 'G').
-     * imeth 2-5 (rise/set) depend on the not-yet-ported rise_trans module -- out of scope. */
+    /* --- gauquelin_riseset: swe_gauquelin_sector, imeth in {2,3,4,5} (rise/set-based).
+     * Uses the same 6 ut_triples x 3 bodies x 4 imeth = 72 cases. */
+    printf("  \"gauquelin_riseset\": [\n");
+    first = 1;
+    {
+        int gq_bodies[] = { SE_SUN, SE_MOON, SE_MARS };
+        int n_gq_bodies = sizeof(gq_bodies) / sizeof(gq_bodies[0]);
+        int it5, ib5, im5;
+        int gq_imeths[] = { 2, 3, 4, 5 };
+        int n_gq_imeths = sizeof(gq_imeths) / sizeof(gq_imeths[0]);
+
+        for (it5 = 0; it5 < N_UT_TRIPLE; it5++) {
+            for (ib5 = 0; ib5 < n_gq_bodies; ib5++) {
+                for (im5 = 0; im5 < n_gq_imeths; im5++) {
+                    double t_ut = ut_triples[it5].tjd_ut;
+                    double geopos[3];
+                    double dgsect = 0;
+                    int32 retc;
+
+                    geopos[0] = ut_triples[it5].geolon;
+                    geopos[1] = ut_triples[it5].geolat;
+                    geopos[2] = 0.0;
+                    serr[0] = '\0';
+
+                    retc = swe_gauquelin_sector(t_ut, gq_bodies[ib5], NULL, SEFLG_MOSEPH,
+                                                 gq_imeths[im5], geopos, 0, 0, &dgsect, serr);
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"tjd_ut\": %.20e, \"ipl\": %d, \"imeth\": %d, "
+                           "\"geolon\": %.20e, \"geolat\": %.20e, "
+                           "\"dgsect\": %.20e, \"retval\": %d}",
+                           t_ut, gq_bodies[ib5], gq_imeths[im5], geopos[0], geopos[1],
+                           dgsect, retc);
+                }
+            }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* --- gauquelin_sector: swe_gauquelin_sector, imeth in {0,1} (geometric, via house_pos 'G'). */
     printf("  \"gauquelin_sector\": [\n");
     first = 1;
     {

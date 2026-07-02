@@ -144,6 +144,17 @@ struct GauquelinSectorCase {
 }
 
 #[derive(Deserialize)]
+struct GauquelinRisesetCase {
+    tjd_ut: f64,
+    ipl: i32,
+    imeth: i32,
+    geolon: f64,
+    geolat: f64,
+    dgsect: f64,
+    retval: i32,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     angles_special: Vec<AnglesSpecialCase>,
     equal_family: Vec<EqualFamilyCase>,
@@ -157,6 +168,7 @@ struct GoldenData {
     sidereal_trad: Vec<SiderealTradCase>,
     sidereal_geom: Vec<SiderealGeomCase>,
     house_pos: Vec<HousePosCase>,
+    gauquelin_riseset: Vec<GauquelinRisesetCase>,
     gauquelin_sector: Vec<GauquelinSectorCase>,
 }
 
@@ -695,5 +707,43 @@ fn gauquelin_sector() {
             )
             .unwrap_or_else(|e| panic!("{label}: gauquelin_sector_geometric failed: {e}"));
         super::assert_f64_eps(&format!("{label} dgsect"), c.dgsect, dgsect, 1e-6);
+    }
+}
+
+#[test]
+fn gauquelin_riseset() {
+    let eph = Ephemeris::new(EphemerisConfig::default()).unwrap();
+    let data = load();
+    assert_eq!(
+        data.gauquelin_riseset.len(),
+        72,
+        "expected 72 golden cases (6 ut_triples x 3 bodies x 4 imeth)"
+    );
+    for (i, c) in data.gauquelin_riseset.iter().enumerate() {
+        let body = swisseph::types::Body::try_from(c.ipl)
+            .unwrap_or_else(|e| panic!("case {i}: unknown body {}: {e}", c.ipl));
+        let label = format!(
+            "case {i} (ipl={} imeth={} tjd_ut={:.6} geolon={:.6} geolat={:.6})",
+            c.ipl, c.imeth, c.tjd_ut, c.geolon, c.geolat
+        );
+        let geopos = [c.geolon, c.geolat, 0.0];
+        let result = eph.gauquelin_sector(
+            c.tjd_ut,
+            body,
+            None,
+            CalcFlags::empty(),
+            c.imeth,
+            geopos,
+            0.0,
+            0.0,
+        );
+        if c.retval < 0 {
+            result
+                .err()
+                .unwrap_or_else(|| panic!("{label}: expected Err (retval={}), got Ok", c.retval));
+        } else {
+            let dgsect = result.unwrap_or_else(|e| panic!("{label}: gauquelin_sector failed: {e}"));
+            super::assert_f64_eps(&format!("{label} dgsect"), c.dgsect, dgsect, 1e-6);
+        }
     }
 }
