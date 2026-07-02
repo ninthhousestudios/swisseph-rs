@@ -96,6 +96,16 @@ struct OccWhenLocCase {
 }
 
 #[derive(Deserialize)]
+struct OccWhenGlobIfltypeCase {
+    tjd_start: f64,
+    ipl: i32,
+    starname: Option<String>,
+    ifltype: i32,
+    retval: i32,
+    tret: [f64; 10],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
     sol_how: Vec<SolHowCase>,
@@ -107,6 +117,7 @@ struct GoldenData {
     occ_where: Vec<OccWhereCase>,
     occ_when_glob: Vec<OccWhenGlobCase>,
     occ_when_loc: Vec<OccWhenLocCase>,
+    occ_when_glob_ifltype: Vec<OccWhenGlobIfltypeCase>,
 }
 
 fn load() -> GoldenData {
@@ -810,8 +821,11 @@ fn lun_when_loc() {
 }
 
 /// `swe_lun_occult_where` (`Ephemeris::lun_occult_where`): shadow-cone geometry for two planets
-/// (Venus, Mars) and one fixed star (Aldebaran, via `starname`; `ipl` is then just C's `-1`
-/// sentinel, translated verbatim through `Body::try_from` -- unused once `starname` is set).
+/// (Venus, Mars), one fixed star (Aldebaran, via `starname`; `ipl` is then just C's `-1` sentinel,
+/// translated verbatim through `Body::try_from` -- unused once `starname` is set), and
+/// numbered-asteroid Pluto (`SE_AST_OFFSET + 134340` -> `Body::Asteroid`), which
+/// `lun_occult_where` aliases to `Body::Pluto`; the golden value is C's own aliased-to-Pluto
+/// result, so a broken alias fails here (loudly, since MOSEPH has no bare-asteroid ephemeris).
 /// `dcore[1..6]` come from the same `swi_test_eclipse_where_dcore` test-only hook `sol_where`
 /// uses (generic over `ipl`/`starname` already).
 #[test]
@@ -893,7 +907,7 @@ fn occ_where() {
 }
 
 /// `swe_lun_occult_when_glob` (`Ephemeris::lun_occult_when_glob`): global occultation search for
-/// the same three occulted bodies as `occ_where`, `ifltype = 0` (all types valid for the occulted
+/// the same four occulted bodies as `occ_where`, `ifltype = 0` (all types valid for the occulted
 /// body), both search directions.
 #[test]
 fn occ_when_glob() {
@@ -971,6 +985,66 @@ fn occ_when_glob() {
             result.time_centerline_end,
             1e-5,
         );
+    }
+}
+
+/// `swe_lun_occult_when_glob` with a non-empty `ifltype` (swisseph-rs/92 follow-up): exercises the
+/// type-filter logic the `ifltype = 0` `occ_when_glob` battery never reaches. Covers the retry that
+/// skips non-matching types (`PARTIAL` searching past the nearer total occultations of Venus), the
+/// pass-through when the first occultation already matches (`TOTAL`), and the two hard-error returns
+/// (`ANNULAR` for a planet, `PARTIAL | CENTRAL`). C signals an error with `retval < 0`; the Rust
+/// port returns `Err` for those, so those cases assert an error instead of comparing `tret`.
+#[test]
+fn occ_when_glob_ifltype() {
+    let data = load();
+    let ephe = make_eph();
+    for (i, c) in data.occ_when_glob_ifltype.iter().enumerate() {
+        let label = format!(
+            "occ_when_glob_ifltype[{i}][ipl={},starname={:?},ifltype={:#x}]",
+            c.ipl, c.starname, c.ifltype
+        );
+        let body = Body::try_from(c.ipl).unwrap();
+        let ifltype = EclipseFlags::from_bits(c.ifltype as u32)
+            .unwrap_or_else(|| panic!("{label}: bad ifltype bits {:#x}", c.ifltype));
+        let result = ephe.lun_occult_when_glob(
+            c.tjd_start,
+            body,
+            c.starname.as_deref(),
+            CalcFlags::MOSEPH,
+            ifltype,
+            false,
+        );
+
+        if c.retval < 0 {
+            assert!(
+                result.is_err(),
+                "{label}: expected error (C retval {}), got {result:?}",
+                c.retval
+            );
+            continue;
+        }
+
+        let result = result.unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        let got = [
+            result.time_maximum,
+            result.time_ra_conjunction,
+            result.time_begin,
+            result.time_end,
+            result.time_totality_begin,
+            result.time_totality_end,
+            result.time_centerline_begin,
+            result.time_centerline_end,
+        ];
+        for (slot, &g) in got.iter().enumerate() {
+            super::assert_f64_eps(&format!("{label}.tret[{slot}]"), c.tret[slot], g, 1e-5);
+        }
     }
 }
 

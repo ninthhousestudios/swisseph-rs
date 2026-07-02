@@ -56,15 +56,19 @@ static double sol_how_geopos[][3] = {
 };
 #define N_SOL_HOW_GEOPOS (sizeof(sol_how_geopos) / sizeof(sol_how_geopos[0]))
 
-/* Occulted bodies for occ_where/occ_when_glob: two planets (Venus, Mars) plus one fixed star
+/* Occulted bodies for occ_where/occ_when_glob: two planets (Venus, Mars), one fixed star
  * (Aldebaran, via starname -- ipl is ignored by calc_planet_star/body_radius_au once starname is
  * non-empty, so any placeholder ipl works; -1 mirrors C's own "ipl<0 -> clamp to SE_SUN"
- * convention for star-only calls). */
+ * convention for star-only calls), and numbered-asteroid Pluto (SE_AST_OFFSET + 134340), which
+ * all three swe_lun_occult_* entry points alias to SE_PLUTO before computing -- exercises that
+ * aliasing end-to-end (swisseph-rs/92; with SEFLG_MOSEPH a bare asteroid would otherwise have no
+ * ephemeris, so a wrong/absent alias fails loudly). */
 struct occ_body { int32 ipl; const char *starname; };
 static struct occ_body occ_bodies[] = {
     { SE_VENUS, NULL },
     { SE_MARS, NULL },
     { -1, "Aldebaran" },
+    { SE_AST_OFFSET + 134340, NULL },
 };
 #define N_OCC_BODIES (sizeof(occ_bodies) / sizeof(occ_bodies[0]))
 
@@ -301,15 +305,19 @@ int main(void) {
         char serr[256] = { 0 };
         int32 retval = swe_lun_occult_where(tjd_ut, ipl, starname, ifl, geopos, attr, serr);
 
-        /* swe_lun_occult_where masks ifl &= SEFLG_EPHMASK before calling eclipse_where
-         * (swecl.c:619) -- replicate that here so the dcore we capture (via the same test-only
-         * hook used for sol_where) matches what swe_lun_occult_where's own eclipse_where call
-         * actually saw. */
+        /* swe_lun_occult_where masks ifl &= SEFLG_EPHMASK AND aliases numbered-asteroid Pluto
+         * (134340) to SE_PLUTO (swecl.c:619-623) before calling eclipse_where -- replicate BOTH
+         * here so the dcore we capture (via the same test-only hook used for sol_where) matches
+         * what swe_lun_occult_where's own internal eclipse_where call actually saw. Without the
+         * alias, eclipse_where would take the `ipl > SE_AST_OFFSET` branch and read the
+         * unpopulated swed.ast_diam (== 0 under MOSEPH), yielding a point-source drad=0 shadow
+         * that disagrees with the aliased-to-Pluto geometry the geopos[] above already reflects. */
+        int32 ipl_dcore = (ipl == SE_AST_OFFSET + 134340) ? SE_PLUTO : ipl;
         double geopos2[10] = { 0 };
         double dcore[10] = { 0 };
         char serr2[256] = { 0 };
-        swi_test_eclipse_where_dcore(tjd_ut, ipl, starname, ifl & SEFLG_EPHMASK, geopos2, dcore,
-                                      serr2);
+        swi_test_eclipse_where_dcore(tjd_ut, ipl_dcore, starname, ifl & SEFLG_EPHMASK, geopos2,
+                                      dcore, serr2);
 
         if (!first) printf(",\n");
         first = 0;
@@ -391,6 +399,46 @@ int main(void) {
             for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
             printf("]}");
         }
+    }
+    printf("\n  ],\n");
+
+    /* === occ_when_glob_ifltype === */
+    /* Exercises the ifltype filter/validation logic in swe_lun_occult_when_glob that the
+     * ifltype=0 occ_when_glob battery never touches (swisseph-rs/92): the type-match retry that
+     * skips non-matching occultations (TOTAL vs PARTIAL), and the two hard-error returns
+     * (annular-for-planet, central-partial). retval < 0 (ERR) marks an expected-error case; tret
+     * is then meaningless (left zeroed). All forward from J2000. */
+    struct { int32 ipl; const char *starname; int32 ifltype; } occ_ifltype_cases[] = {
+        { SE_VENUS, NULL, SE_ECL_TOTAL },                    /* matches 1st Venus occ (total) */
+        { SE_VENUS, NULL, SE_ECL_PARTIAL },                  /* retries past totals to a partial */
+        { SE_VENUS, NULL, SE_ECL_ANNULAR },                  /* ERR: annular impossible for planet */
+        { SE_VENUS, NULL, SE_ECL_PARTIAL | SE_ECL_CENTRAL }, /* ERR: central-partial impossible */
+        { -1, "Aldebaran", SE_ECL_TOTAL },                   /* star point-source is always total */
+    };
+    #define N_OCC_IFLTYPE_CASES (sizeof(occ_ifltype_cases) / sizeof(occ_ifltype_cases[0]))
+    static double occ_ifltype_tjd_start = 2451545.0;
+    printf("  \"occ_when_glob_ifltype\": [\n");
+    first = 1;
+    for (size_t i = 0; i < N_OCC_IFLTYPE_CASES; i++) {
+        double tjd_start = occ_ifltype_tjd_start;
+        int32 ipl = occ_ifltype_cases[i].ipl;
+        char starbuf[AS_MAXCH] = { 0 };
+        if (occ_ifltype_cases[i].starname != NULL)
+            strcpy(starbuf, occ_ifltype_cases[i].starname);
+        char *starname = occ_ifltype_cases[i].starname != NULL ? starbuf : NULL;
+        int32 ifltype = occ_ifltype_cases[i].ifltype;
+        double tret[10] = { 0 };
+        char serr[256] = { 0 };
+        int32 retval = swe_lun_occult_when_glob(tjd_start, ipl, starname, SEFLG_MOSEPH,
+                                                  ifltype, tret, 0, serr);
+
+        if (!first) printf(",\n");
+        first = 0;
+        printf("    {\"tjd_start\": %.17g, \"ipl\": %d, \"starname\": %s, \"ifltype\": %d, "
+               "\"retval\": %d, \"tret\": [",
+               tjd_start, ipl, starname ? "\"Aldebaran\"" : "null", ifltype, retval);
+        for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+        printf("]}");
     }
     printf("\n  ]\n");
 
