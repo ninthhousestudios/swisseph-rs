@@ -538,6 +538,11 @@ impl Ephemeris {
         flags: CalcFlags,
         method: crate::nodaps::NodApsMethod,
     ) -> Result<crate::nodaps::NodesApsides, Error> {
+        if flags.contains(CalcFlags::TOPOCTR) && self.config.topographic.is_none() {
+            return Err(Error::CError(
+                "topocentric requires topographic position".to_string(),
+            ));
+        }
         crate::nodaps::nod_aps(self, tjd_et, body, flags, method)
     }
 
@@ -556,7 +561,10 @@ impl Ephemeris {
 
     /// Observer / origin geometry for the nodes-&-apsides pipeline at epoch `t`
     /// (TT), in equatorial-J2000 cartesian. Replaces C's `xsun`/`xear`/`xobs`
-    /// globals (swecl.c A.5.1) with an explicit per-epoch computation.
+    /// globals (swecl.c A.5.1) with an explicit per-epoch computation. The
+    /// final `xobs` (which of `sun_bary`/`xear`/`topo` to actually observe
+    /// from, per HELCTR/BARYCTR/SE_SUN) is resolved by `nodaps::select_xobs`,
+    /// not here.
     ///
     /// `xear` is Earth's position in the node's native frame: heliocentric
     /// (≈barycentric, Moshier has no true barycenter) for Moshier, real
@@ -570,7 +578,7 @@ impl Ephemeris {
     ) -> Result<crate::nodaps::ObsFrame, Error> {
         let config = &self.config;
         let models = &config.astro_models;
-        let offset = crate::calc::topo_offset(t, flags, config, models);
+        let topo = crate::calc::topo_offset(t, flags, config, models);
         match config.ephemeris_source {
             EphemerisSource::Moshier => {
                 let eps_j2000 = crate::obliquity::obliquity(
@@ -579,15 +587,10 @@ impl Ephemeris {
                     models,
                 );
                 let pp = crate::moshier::backend::compute_pipeline(t, Body::Sun, &eps_j2000)?;
-                let earth_helio = pp.earth_helio;
-                let mut xobs = earth_helio;
-                for i in 0..6 {
-                    xobs[i] += offset[i];
-                }
                 Ok(crate::nodaps::ObsFrame {
                     sun_bary: [0.0; 6],
-                    xear: earth_helio,
-                    xobs,
+                    xear: pp.earth_helio,
+                    topo,
                 })
             }
             EphemerisSource::Swiss => {
@@ -596,14 +599,10 @@ impl Ephemeris {
                     moon_files: &self.moon_files,
                 };
                 let pos = provider.positions(Body::Sun, t, true)?;
-                let mut xobs = pos.earth_bary;
-                for i in 0..6 {
-                    xobs[i] += offset[i];
-                }
                 Ok(crate::nodaps::ObsFrame {
                     sun_bary: pos.sun_bary,
                     xear: pos.earth_bary,
-                    xobs,
+                    topo,
                 })
             }
             EphemerisSource::Jpl => {
@@ -611,14 +610,10 @@ impl Ephemeris {
                     file: self.jpl_file.as_ref().unwrap(),
                 };
                 let pos = provider.positions(Body::Sun, t, true)?;
-                let mut xobs = pos.earth_bary;
-                for i in 0..6 {
-                    xobs[i] += offset[i];
-                }
                 Ok(crate::nodaps::ObsFrame {
                     sun_bary: pos.sun_bary,
                     xear: pos.earth_bary,
-                    xobs,
+                    topo,
                 })
             }
         }

@@ -26,6 +26,8 @@ struct GoldenData {
     oscu: Vec<MeanCase>,
     oscu_bar: Vec<MeanCase>,
     fopoint: Vec<MeanCase>,
+    helctr_bary_mean: Vec<MeanCase>,
+    helctr_bary_osc: Vec<MeanCase>,
 }
 
 fn sweph_ephe_path() -> PathBuf {
@@ -195,6 +197,31 @@ fn tolerance(point: &str, k: usize, flag_name: &str) -> f64 {
     1e-6
 }
 
+/// Tolerance for the HELCTR/BARYCTR mean-branch cases: same as [`tolerance`]
+/// but with the peri/aphe longitude floor raised to 5e-6° for the
+/// heliocentric/barycentric observer branches.
+///
+/// **Root cause (order-of-magnitude verified):** C's `swi_deflect_light`
+/// (sweph.c:3771-3776) retards the barycentric Sun position by the light-time
+/// `dt` before building its `planethel` ("Q") vector; this port omits that
+/// 2nd-order refinement, matching the existing `calc_planet` convention
+/// elsewhere in this codebase (which never retards the Sun for deflection
+/// either, and stays within its own tolerance). The residual matches the
+/// expected order of `dt · xsun_speed` projected onto the node's ~0.4-5 AU
+/// distance (worst observed: 3.4e-6° for Mercury's heliocentric perihelion
+/// longitude) — noticeably below the mean branch's own descending-node
+/// ill-conditioning (see [`tolerance`]), and only surfaces on peri/aphe
+/// longitude because those points, unlike asc/desc, come directly from `uu`
+/// without the extra `fac=z/ż`-style division that would otherwise dominate.
+fn helctr_bary_tolerance(point: &str, k: usize, flag_name: &str) -> f64 {
+    let base = tolerance(point, k, flag_name);
+    if k < 3 && matches!(point, "peri" | "aphe") {
+        base.max(5e-6)
+    } else {
+        base
+    }
+}
+
 /// Mean nodes & apsides via `Ephemeris::nod_aps` (`swe_nod_aps`, method
 /// `SE_NODBIT_MEAN`): 200 Moshier cases — 10 bodies {Sun, Moon,
 /// Mercury..Neptune, Earth} × 4 epochs (incl. pre-1900 1800-Jan-1) × 5 flag combos
@@ -332,6 +359,92 @@ fn golden_nodaps_oscu_bar() {
     }
 }
 
+/// HELCTR/BARYCTR observer-frame coverage for the mean branch (A.5.1) — added
+/// after a review found `transform_nodaps_output` ignored these flags and
+/// always returned geocentric output regardless of what was requested. 12
+/// cases — Mercury/Jupiter × 2 epochs × {SWIEPH|HELCTR, SWIEPH|BARYCTR,
+/// MOSEPH|HELCTR}, method `SE_NODBIT_MEAN`.
+#[test]
+fn golden_nodaps_helctr_bary_mean() {
+    let data = load();
+    let cases = &data.helctr_bary_mean;
+    assert!(cases.len() >= 12, "expected 12+ cases, got {}", cases.len());
+
+    let mut ephemerides: HashMap<EphemerisSource, Ephemeris> = HashMap::new();
+    let mut failures = Vec::new();
+    for (i, c) in cases.iter().enumerate() {
+        let flags = CalcFlags::from_bits_truncate(c.flags);
+        let eph = ephemeris_for(&mut ephemerides, flags);
+        let body = Body::try_from(c.body).expect("valid body id");
+        let label = format!("case {i} {} tjd={:.1} {}", c.body_name, c.jd, c.flag_name);
+
+        let NodesApsides {
+            ascending,
+            descending,
+            perihelion,
+            aphelion,
+        } = match eph.nod_aps(c.jd, body, flags, NodApsMethod::MEAN) {
+            Ok(r) => r,
+            Err(e) => {
+                failures.push(format!("{label}: error: {e}"));
+                continue;
+            }
+        };
+
+        for (name, expected, got) in [
+            ("asc", &c.asc, &ascending),
+            ("desc", &c.desc, &descending),
+            ("peri", &c.peri, &perihelion),
+            ("aphe", &c.aphe, &aphelion),
+        ] {
+            for k in 0..6 {
+                let eps = helctr_bary_tolerance(name, k, &c.flag_name);
+                let diff = (expected[k] - got[k]).abs();
+                if diff > eps {
+                    failures.push(format!(
+                        "{label} {name}[{k}]: expected {:.15e}, got {:.15e}, diff {diff:.3e} > eps {eps:.1e}",
+                        expected[k], got[k]
+                    ));
+                }
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        let n = failures.len();
+        for f in failures.iter().take(40) {
+            eprintln!("{f}");
+        }
+        panic!("{n} failures (showing first 40)");
+    }
+}
+
+/// HELCTR/BARYCTR observer-frame coverage for the osculating branch: 12 cases
+/// — Jupiter/Pluto × 2 epochs × {SWIEPH|HELCTR, SWIEPH|BARYCTR,
+/// MOSEPH|HELCTR}, method `SE_NODBIT_OSCU`.
+#[test]
+fn golden_nodaps_helctr_bary_osc() {
+    let data = load();
+    let cases = &data.helctr_bary_osc;
+    assert!(cases.len() >= 12, "expected 12+ cases, got {}", cases.len());
+
+    let mut ephemerides: HashMap<EphemerisSource, Ephemeris> = HashMap::new();
+    let mut failures = Vec::new();
+    for (i, c) in cases.iter().enumerate() {
+        let flags = CalcFlags::from_bits_truncate(c.flags);
+        let eph = ephemeris_for(&mut ephemerides, flags);
+        check_case(eph, NodApsMethod::OSCU, i, c, &mut failures);
+    }
+
+    if !failures.is_empty() {
+        let n = failures.len();
+        for f in failures.iter().take(40) {
+            eprintln!("{f}");
+        }
+        panic!("{n} failures (showing first 40)");
+    }
+}
+
 /// `SE_NODBIT_FOPOINT` (2nd focal point instead of aphelion), combined with
 /// `SE_NODBIT_OSCU`: 6 MOSEPH cases — Moon/Mars/Jupiter × 2 epochs.
 #[test]
@@ -361,4 +474,24 @@ fn golden_nodaps_fopoint() {
         }
         panic!("{n} failures (showing first 40)");
     }
+}
+
+/// `SEFLG_TOPOCTR` without a configured topographic position must be
+/// rejected, not silently degrade to a geocentric result (a review found
+/// `Ephemeris::nod_aps` had no such guard, unlike `Ephemeris::calc`).
+#[test]
+fn nod_aps_rejects_topoctr_without_config() {
+    let eph = Ephemeris::new(EphemerisConfig::default()).expect("Ephemeris::new");
+    let err = eph
+        .nod_aps(
+            2451545.0,
+            Body::Mercury,
+            CalcFlags::MOSEPH | CalcFlags::TOPOCTR,
+            NodApsMethod::MEAN,
+        )
+        .expect_err("TOPOCTR without config.topographic must error");
+    assert!(
+        err.to_string().contains("topocentric"),
+        "unexpected error: {err}"
+    );
 }

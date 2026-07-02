@@ -393,6 +393,34 @@ src/
 │                          ported in moshier/moon.rs (mean_lunar_elements; note mean_elements_t2
 │                          stale-T2 quirk). SwephProvider/JplProvider (calc.rs) widened to pub(crate)
 │                          for context.rs's nodaps_observer/nodaps_osc_body_j2000 reuse.
+│                          REVIEW FIX (swisseph-rs/85, /86 codex review): `transform_nodaps_output`
+│                          originally ignored SEFLG_HELCTR/BARYCTR entirely — `nodaps_observer`'s
+│                          `xobs` always subtracted Earth regardless of flags, so HELCTR/BARYCTR
+│                          requests silently returned geocentric output (order-AU error, untested by
+│                          any golden case). Fixed per swecl.c:5401-5436's A.5.1 observer-selection
+│                          logic (`select_xobs` in nodaps.rs: HELCTR real-ephemerides ->
+│                          sun_bary, BARYCTR/HELCTR-on-Moshier -> unchanged/topo-only, else -> +xear).
+│                          `ObsFrame.xobs` renamed to `topo` (raw topocentric offset only) so
+│                          `select_xobs` can choose per-flag rather than baking Earth in upfront.
+│                          Separately, `swi_deflect_light` (sweph.c:3743) ALWAYS reads the true
+│                          Earth/Sun-bary globals for its geometry, ignoring whatever the caller's
+│                          observer-frame variable holds — only `swi_aberr_light` honors the
+│                          HELCTR/BARYCTR-selected xobs. Missing this split initially blew up the
+│                          deflection correction under HELCTR (feeding it `sun_bary`, a
+│                          near-zero-magnitude vector relative to real Earth-Sun distance, as its
+│                          "observer"). Fixed by computing a separate always-true
+│                          `earth_helio_true = xear - sun_bary` for deflect_light specifically,
+│                          leaving aberr_light/position-shift on the flag-aware `xobs`. Also added:
+│                          `Ephemeris::nod_aps`/`nod_aps_ut` now reject `SEFLG_TOPOCTR` without
+│                          `config.topographic` (previously silently returned geocentric, matching
+│                          `calc_with_config`'s existing guard). Golden coverage added:
+│                          "helctr_bary_mean"/"helctr_bary_osc" keys in nodaps.json (24 cases,
+│                          Mercury/Jupiter/Pluto × SWIEPH_HELCTR/SWIEPH_BARYCTR/MOSEPH_HELCTR); peri/
+│                          aphe longitude gets a 5e-6° floor there (`helctr_bary_tolerance`) for the
+│                          2nd-order retarded-Sun-position term this port omits in deflection's
+│                          "planethel" vector (order-of-magnitude verified via dt·xsun_speed, matches
+│                          calc.rs's own established omission elsewhere). Plus a direct unit test for
+│                          the TOPOCTR-without-config rejection.
 └── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
 
 tests/

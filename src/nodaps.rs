@@ -80,10 +80,39 @@ pub(crate) struct ObsFrame {
     /// Earth in the node's heliocentric/barycentric frame, WITHOUT the
     /// topocentric offset (`swed.pldat[SEI_EARTH].x`).
     pub xear: [f64; 6],
-    /// Observer position = `xear` + topocentric offset. Also serves as the
-    /// heliocentric-observer vector for the deflection geometry (matching
-    /// `calc_planet`, which passes its `xobs` to `deflect_light`).
-    pub xobs: [f64; 6],
+    /// Topocentric offset alone (`swi_get_observer`'s output), zero unless
+    /// `SEFLG_TOPOCTR` is set. Combined with `sun_bary`/`xear` by
+    /// [`select_xobs`] per A.5.1 — NOT pre-added to `xear` here, since the
+    /// HELCTR/BARYCTR branches of A.5.1 discard the Earth term entirely.
+    pub topo: [f64; 6],
+}
+
+/// A.5.1 observer-frame selection (swecl.c:5401-5436). HELCTR (real
+/// ephemerides only) and BARYCTR requests observe from the barycentric Sun
+/// (HELCTR) or the barycenter/origin (BARYCTR, or HELCTR on Moshier which has
+/// no true barycenter) — bypassing the Earth/topocentric offset entirely. A
+/// bare `SE_SUN` request (real ephemerides only) also observes from the
+/// barycentric Sun, since "the Sun's node/apsis" means Earth's orbital
+/// node/apsis mirrored through heliocentric space (swecl.c:5524-5525's sign
+/// flip). Every other request observes from Earth (+ topocentric offset).
+fn select_xobs(frame: &ObsFrame, flags: CalcFlags, ipl: Body, is_moseph: bool) -> [f64; 6] {
+    let mut xobs = if flags.contains(CalcFlags::TOPOCTR) {
+        frame.topo
+    } else {
+        [0.0; 6]
+    };
+    if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
+        if flags.contains(CalcFlags::HELCTR) && !is_moseph {
+            xobs = frame.sun_bary;
+        }
+    } else if ipl == Body::Sun && !is_moseph {
+        xobs = frame.sun_bary;
+    } else {
+        for (v, a) in xobs.iter_mut().zip(frame.xear.iter()) {
+            *v += a;
+        }
+    }
+    xobs
 }
 
 // ---------------------------------------------------------------------------
@@ -589,8 +618,18 @@ pub(crate) fn transform_nodaps_output(
         obliquity(tjd_et, flags, models)
     };
 
-    // Observer frame at tjd_et (xsun / xear / xobs / earth_helio).
+    // Observer frame at tjd_et (xsun / xear / topo), then A.5.1's xobs selection.
     let frame0 = eph.nodaps_observer(tjd_et, flags)?;
+    let xobs = select_xobs(&frame0, flags, ipl, is_moseph);
+    // `swi_deflect_light` (sweph.c:3743) always reads the TRUE Earth/Sun
+    // globals for its geometry, independent of whatever `xobs` was
+    // reassigned to for HELCTR/BARYCTR output framing — only `swi_aberr_light`
+    // (and the position-shift step) use the reassigned `xobs`. `xear` is
+    // already heliocentric for Moshier (`sun_bary` is zero there).
+    let mut earth_helio_true = frame0.xear;
+    for (v, s) in earth_helio_true.iter_mut().zip(frame0.sun_bary.iter()) {
+        *v -= s;
+    }
 
     // Nutation of date, needed by is_true_nodaps steps and by the app_pos_rest tail.
     let nut_val = nutation(tjd_et, flags, models);
@@ -645,8 +684,8 @@ pub(crate) fn transform_nodaps_output(
             }
         }
 
-        // --- to observer (geocenter / topocenter) ---
-        for (v, o) in xp.iter_mut().zip(frame0.xobs.iter()) {
+        // --- to observer (geocenter / topocenter / heliocenter / barycenter) ---
+        for (v, o) in xp.iter_mut().zip(xobs.iter()) {
             *v -= o;
         }
         if ipl == Body::Sun && !flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
@@ -660,26 +699,27 @@ pub(crate) fn transform_nodaps_output(
         let dt = r * AUNIT / CLIGHT / 86400.0;
         if do_defl {
             // The node's heliocentric position = geocentric node + heliocentric
-            // earth (mirrors calc_planet's planet_helio_retarded).
+            // earth (mirrors calc_planet's planet_helio_retarded). Uses the
+            // TRUE Earth (`earth_helio_true`), not the HELCTR/BARYCTR-selected
+            // `xobs` (sweph.c:3743's `swi_deflect_light` ignores the caller's
+            // observer-frame choice and always reads the real Earth/Sun-bary
+            // globals).
             let mut planet_helio = [0.0f64; 6];
             for i in 0..6 {
-                planet_helio[i] = xp[i] + frame0.xobs[i];
+                planet_helio[i] = xp[i] + earth_helio_true[i];
             }
-            deflect_light(xp, &frame0.xobs, &planet_helio, has_speed);
+            deflect_light(xp, &earth_helio_true, &planet_helio, has_speed);
         }
 
         // --- aberration ---
         if do_aberr {
-            aberr_light(
-                xp,
-                &[frame0.xobs[3], frame0.xobs[4], frame0.xobs[5]],
-                has_speed,
-            );
+            aberr_light(xp, &[xobs[3], xobs[4], xobs[5]], has_speed);
             if has_speed {
                 // Observer-velocity change between emission (t-dt) and reception.
                 let frame_ret = eph.nodaps_observer(tjd_et - dt, flags)?;
+                let xobs_ret = select_xobs(&frame_ret, flags, ipl, is_moseph);
                 for i in 0..3 {
-                    xp[i + 3] += frame0.xobs[i + 3] - frame_ret.xobs[i + 3];
+                    xp[i + 3] += xobs[i + 3] - xobs_ret[i + 3];
                 }
             }
         }

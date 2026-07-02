@@ -39,6 +39,18 @@
  *   Epochs: epochs[0..1] (J2000, 2024-Jan-1).
  *   => 3 bodies * 2 epochs * 1 flag = 6 cases.
  *
+ * "helctr_bary_mean"/"helctr_bary_osc" (SEFLG_HELCTR / SEFLG_BARYCTR on the
+ *   A.5 output pipeline itself — distinct from SE_NODBIT_OSCU_BAR, which
+ *   controls the *ellipse's own* reference frame): covers swisseph-rs review
+ *   finding that `transform_nodaps_output`'s observer selection ignored these
+ *   flags entirely and always returned geocentric output.
+ *   Bodies: mean -> SE_MERCURY, SE_JUPITER; osc -> SE_JUPITER, SE_PLUTO.
+ *   Flags:  SWIEPH|SPEED|HELCTR, SWIEPH|SPEED|BARYCTR, MOSEPH|SPEED|HELCTR
+ *           (Moshier has no true barycenter, so bare BARYCTR without
+ *           SE_NODBIT_OSCU_BAR is not exercised there).
+ *   Epochs: epochs[0..1] (J2000, 2024-Jan-1).
+ *   => 2 bodies * 2 epochs * 3 flags * 2 methods = 24 cases.
+ *
  * Compile (from repo root):
  *   cc -O2 -I../swisseph -o tests/c-gen/gen_nodaps tests/c-gen/gen_nodaps.c \
  *      ../swisseph/libswe.a -lm
@@ -122,6 +134,23 @@ static const char *fop_body_names[] = {"Moon", "Mars", "Jupiter"};
 
 #define NOSCEPOCHS 2 /* epochs[0..1]: J2000, 2024-Jan-1 */
 
+/* "helctr_bary_mean"/"helctr_bary_osc" batteries — HELCTR/BARYCTR output-frame
+ * coverage (A.5.1), as opposed to SE_NODBIT_OSCU_BAR's ellipse-frame bit. */
+static int helbar_mean_bodies[] = {SE_MERCURY, SE_JUPITER};
+static const char *helbar_mean_names[] = {"Mercury", "Jupiter"};
+#define NHELBARMEAN 2
+
+static int helbar_osc_bodies[] = {SE_JUPITER, SE_PLUTO};
+static const char *helbar_osc_names[] = {"Jupiter", "Pluto"};
+#define NHELBAROSC 2
+
+static struct flag_combo helbar_flags[] = {
+    {SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_HELCTR, "SWIEPH_HELCTR"},
+    {SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_BARYCTR, "SWIEPH_BARYCTR"},
+    {SEFLG_MOSEPH | SEFLG_SPEED | SEFLG_HELCTR, "MOSEPH_HELCTR"},
+};
+#define NHELBARFLAGS 3
+
 static int first = 1;
 
 static void emit(int body, const char *body_name, double jd, int flags,
@@ -199,6 +228,28 @@ int main(void) {
             run_case(epochs[ie], fop_bodies[ib], fop_body_names[ib],
                      SEFLG_MOSEPH | SEFLG_SPEED, "MOSEPH_SPEED",
                      SE_NODBIT_OSCU | SE_NODBIT_FOPOINT);
+        }
+    }
+    printf("\n],\n\"helctr_bary_mean\": [\n");
+    first = 1;
+    for (int ib = 0; ib < NHELBARMEAN; ib++) {
+        for (int ie = 0; ie < NOSCEPOCHS; ie++) {
+            for (int ifl = 0; ifl < NHELBARFLAGS; ifl++) {
+                run_case(epochs[ie], helbar_mean_bodies[ib], helbar_mean_names[ib],
+                         helbar_flags[ifl].flag, helbar_flags[ifl].name,
+                         SE_NODBIT_MEAN);
+            }
+        }
+    }
+    printf("\n],\n\"helctr_bary_osc\": [\n");
+    first = 1;
+    for (int ib = 0; ib < NHELBAROSC; ib++) {
+        for (int ie = 0; ie < NOSCEPOCHS; ie++) {
+            for (int ifl = 0; ifl < NHELBARFLAGS; ifl++) {
+                run_case(epochs[ie], helbar_osc_bodies[ib], helbar_osc_names[ib],
+                         helbar_flags[ifl].flag, helbar_flags[ifl].name,
+                         SE_NODBIT_OSCU);
+            }
         }
     }
     printf("\n]\n}\n");
