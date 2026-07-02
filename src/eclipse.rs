@@ -2668,9 +2668,6 @@ pub(crate) fn lun_occult_when_glob(
                     if d > 180.0 {
                         d -= 360.0;
                     }
-                    if d > 180.0 {
-                        d -= 360.0;
-                    }
                     *dc_i = d;
                     t2 -= dt;
                 }
