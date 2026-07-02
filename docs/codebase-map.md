@@ -421,6 +421,31 @@ src/
 │                          "planethel" vector (order-of-magnitude verified via dt·xsun_speed, matches
 │                          calc.rs's own established omission elsewhere). Plus a direct unit test for
 │                          the TOPOCTR-without-config rejection.
+├── orbit.rs            — swe_get_orbital_elements / swe_orbit_max_min_true_distance (swisseph-rs/87,
+│                          PNOC 6): OrbitalElements struct (17 named dret slots + as_array());
+│                          get_orbital_elements (swecl.c:5783-5971 — J2000/TRUEPOS/NONUT/XYZ state
+│                          vector → Kepler elements: node via r_z/v_z projection, inclination via
+│                          r×v, vis-viva sema, anomaly chain, node/apsis refinement, periods);
+│                          get_gmsm (swecl.c:5687-5742 — central-body GM, ports the PLMASS/IPL_TO_ELEM
+│                          Pluto quirk + ORBEL_AA Mercury double-count literally); osc_get_orbit_
+│                          constants/osc_get_ecl_pos/osc_iterate_max_dist/osc_iterate_min_dist
+│                          (ellipse sampling + coordinate-descent search — the iterate functions
+│                          ALWAYS restart ean=0 and leave `xa` at the overshoot position, both
+│                          verified against the C source, not the ref doc); orbit_max_min_true_
+│                          distance (swecl.c:6170-6287 — heliocentric single-ellipse branch, else
+│                          geocentric two-ellipse grid scan with the literal asymmetric loop-bound
+│                          quirk (outer j*2°→362°, inner i*1°→181°) + 300-iter refinement).
+│                          SEFLG_ORBEL_AA is bit-aliased onto CalcFlags::TOPOCTR (mass-summation
+│                          method, NOT topocentric — the bit never reaches eph.calc). Goes through
+│                          Ephemeris::calc/context (app-uses-calc-not-backends:orbit), NOT backends.
+│                          KEY GAP: this codebase's `calc` has no heliocentric-Earth path (Earth is
+│                          the observer origin → calc(Earth)=[0;6]), so get_orbital_elements derives
+│                          heliocentric Earth as -(geocentric Sun) (exact under TRUEPOS/NONUT); and
+│                          `calc` has no BARYCTR support at all, so the r>6-AU barycentric branch is
+│                          unreachable (C-Moshier errors there too — verified). Ephemeris::
+│                          get_orbital_elements/orbit_max_min_true_distance in context.rs delegate.
+│                          OrbitalElements re-exported in lib.rs. PLMASS/IPL_TO_ELEM/
+│                          OSCU_BAR_DISTANCE_THRESHOLD_AU in constants.rs (shared with nodaps.rs).
 └── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
 
 tests/
@@ -557,6 +582,20 @@ tests/
 │                          for the `fac=z/ż` node-direction division amplifying backend FP noise into
 │                          BOTH nodes (docs/swisseph-c-potential-bugs.md §8, verified via an
 │                          identical-input formula check, not guessed))
+│   ├── orbit.rs         — golden tests for swe_get_orbital_elements + swe_orbit_max_min_true_distance
+│                          (swisseph-rs/87, PNOC 6). elements: 130 cases — Mercury..Pluto+Earth ×
+│                          {Moshier default/HELCTR/ORBEL_AA(=TOPOCTR bit) × 4 epochs incl. pre-1900,
+│                          Swiss default/HELCTR × 2 epochs, MOSEPH|BARYCTR<6-AU-fallback × 5 bodies ×
+│                          2 epochs}. Asserts all 17 dret slots; every PLANET matches C bit-for-bit
+│                          (residual 0.0), only Earth carries a ~4e-8° artifact from the -(Sun) helio
+│                          derivation, so a uniform 1e-6 both accommodates Earth and guards the
+│                          planets. Node(3)/arg-peri(4) relaxed to 1e-3 for near-planar orbits
+│                          (incl<0.1° isolates Earth from Uranus's 0.77°): those two are
+│                          ill-conditioned when the orbit is near-coplanar with the reference
+│                          ecliptic, but their sum peri(5) stays tight (same class as nodaps'
+│                          descending-node singularity). maxmin: 30 Moshier cases — Mercury/Venus/
+│                          Mars/Jupiter/Pluto × 3 epochs × {geocentric two-ellipse, heliocentric};
+│                          dmax/dmin 1e-8 (actual ~1e-10 after the 300-iter refine), dtrue 1e-9.
 │   ├── moshier_backend.rs — golden tests for backend::compute (110 cases: 10 bodies × 11 epochs + Earth zero-check)
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   ├── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)

@@ -559,6 +559,32 @@ impl Ephemeris {
         self.nod_aps(tjde, body, flags, method)
     }
 
+    /// Osculating (Keplerian) orbital elements of `body` at `tjd_et` (TT). Port
+    /// of `swe_get_orbital_elements` (swecl.c:5783-5971). Rejects the Sun, the
+    /// lunar nodes, and the apsides. Note: `SEFLG_TOPOCTR` is bit-aliased onto
+    /// `SEFLG_ORBEL_AA` here ("sum masses inside the orbit"), NOT a topocentric
+    /// request — see [`crate::orbit`].
+    pub fn get_orbital_elements(
+        &self,
+        tjd_et: f64,
+        body: Body,
+        flags: CalcFlags,
+    ) -> Result<crate::orbit::OrbitalElements, Error> {
+        crate::orbit::get_orbital_elements(self, tjd_et, body, flags)
+    }
+
+    /// Maximum, minimum, and current true distance of `body` (AU) at `tjd_et`
+    /// (TT), returned as `(dmax, dmin, dtrue)`. Port of
+    /// `swe_orbit_max_min_true_distance` (swecl.c:6170-6287).
+    pub fn orbit_max_min_true_distance(
+        &self,
+        tjd_et: f64,
+        body: Body,
+        flags: CalcFlags,
+    ) -> Result<(f64, f64, f64), Error> {
+        crate::orbit::orbit_max_min_true_distance(self, tjd_et, body, flags)
+    }
+
     /// Observer / origin geometry for the nodes-&-apsides pipeline at epoch `t`
     /// (TT), in equatorial-J2000 cartesian. Replaces C's `xsun`/`xear`/`xobs`
     /// globals (swecl.c A.5.1) with an explicit per-epoch computation. The
