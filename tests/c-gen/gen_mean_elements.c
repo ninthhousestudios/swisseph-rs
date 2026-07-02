@@ -48,11 +48,41 @@ static struct flag_combo flag_combos[] = {
 };
 #define NFLAGS 5
 
+/* Sidereal cases apply to the two lunar elements only (not ECL_NUT). */
+static int sid_bodies[] = { SE_MEAN_NODE, SE_MEAN_APOG };
+static const char *sid_body_names[] = { "MeanNode", "MeanApogee" };
+#define NSIDBODIES 2
+
+struct sid_combo {
+    int sid_mode;
+    const char *name;
+};
+static struct sid_combo sid_combos[] = {
+    { SE_SIDM_LAHIRI,                         "LAHIRI" },     /* traditional subtraction */
+    { SE_SIDM_LAHIRI | SE_SIDBIT_ECL_T0,      "ECL_T0" },     /* rigorous, ecliptic of t0 */
+    { SE_SIDM_LAHIRI | SE_SIDBIT_SSY_PLANE,   "SSY_PLANE" },  /* rigorous, solar-system plane */
+};
+#define NSID 3
+
+static int first = 1;
+
+static void emit(int body, const char *body_name, double jd, int flags,
+                 const char *flag_name, int sid_mode, const double *xx) {
+    if (!first) printf(",\n");
+    first = 0;
+    printf("  {\"body\": %d, \"body_name\": \"%s\", "
+           "\"jd\": %.20e, \"flags\": %d, \"flag_name\": \"%s\", "
+           "\"sid_mode\": %d, "
+           "\"output\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e]}",
+           body, body_name, jd, flags, flag_name, sid_mode,
+           xx[0], xx[1], xx[2], xx[3], xx[4], xx[5]);
+}
+
 int main(void) {
     char serr[256];
     swe_set_ephe_path(NULL);
-    int first = 1;
     printf("[\n");
+    /* Tropical cases (sid_mode = 0). */
     for (int ib = 0; ib < NBODIES; ib++) {
         for (int ie = 0; ie < NEPOCHS; ie++) {
             for (int ifl = 0; ifl < NFLAGS; ifl++) {
@@ -64,14 +94,26 @@ int main(void) {
                             serr, bodies[ib], epochs[ie], flags);
                     return 1;
                 }
-                if (!first) printf(",\n");
-                first = 0;
-                printf("  {\"body\": %d, \"body_name\": \"%s\", "
-                       "\"jd\": %.20e, \"flags\": %d, \"flag_name\": \"%s\", "
-                       "\"output\": [%.20e, %.20e, %.20e, %.20e, %.20e, %.20e]}",
-                       bodies[ib], body_names[ib],
-                       epochs[ie], flags, flag_combos[ifl].name,
-                       xx[0], xx[1], xx[2], xx[3], xx[4], xx[5]);
+                emit(bodies[ib], body_names[ib], epochs[ie], flags,
+                     flag_combos[ifl].name, 0, xx);
+            }
+        }
+    }
+    /* Sidereal cases: SEFLG_SIDEREAL | SEFLG_SPEED, one per sid_mode. */
+    for (int is = 0; is < NSID; is++) {
+        swe_set_sid_mode(sid_combos[is].sid_mode, 0, 0);
+        for (int ib = 0; ib < NSIDBODIES; ib++) {
+            for (int ie = 0; ie < NEPOCHS; ie++) {
+                int flags = SEFLG_MOSEPH | SEFLG_SPEED | SEFLG_SIDEREAL;
+                double xx[6];
+                int rc = swe_calc(epochs[ie], sid_bodies[ib], flags, xx, serr);
+                if (rc < 0) {
+                    fprintf(stderr, "error: %s body=%d jd=%.1f sid=%s\n",
+                            serr, sid_bodies[ib], epochs[ie], sid_combos[is].name);
+                    return 1;
+                }
+                emit(sid_bodies[ib], sid_body_names[ib], epochs[ie], flags,
+                     sid_combos[is].name, sid_combos[is].sid_mode, xx);
             }
         }
     }

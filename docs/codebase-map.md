@@ -446,7 +446,7 @@ tests/
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
 │   ├── deltat.rs      — golden tests for delta-T (217 cases: 5 models × 43 epochs)
 │   ├── sidereal_time.rs — golden tests for sidereal time (128 cases: 4 models × 32 epochs)
-│   ├── mean_elements.rs — golden tests for mean node, mean apogee, ECL_NUT (165 cases: 3 bodies × 11 epochs × 5 flag combos)
+│   ├── mean_elements.rs — golden tests for mean node, mean apogee, ECL_NUT (231 cases: 165 tropical [3 bodies × 11 epochs × 5 flag combos] + 66 sidereal [2 lunar bodies × 11 epochs × 3 sid_modes {Lahiri, Lahiri|ECL_T0, Lahiri|SSY_PLANE}, SEFLG_SIDEREAL|SEFLG_SPEED] — regression guard for the swisseph-rs/84 review follow-up threading x2000 through mean_element_pipeline; tropical eps 1e-10, sidereal 1e-9 pos / 1e-7 speed)
 │   ├── truenode.rs     — golden tests for osculating node/apogee (swisseph-rs/84: 252 cases, 2
 │                          bodies {SE_TRUE_NODE, SE_OSCU_APOG} × {MOSEPH, SWIEPH}. 168 tropical: × 6
 │                          flag combos {SPEED, SPEED|EQUATORIAL, SPEED|XYZ, SPEED|NONUT, SPEED|J2000,
@@ -534,7 +534,7 @@ tests/
 │   ├── nutation.json   — C-generated reference data for nutation
 │   ├── deltat.json     — C-generated reference data for delta-T
 │   ├── sidereal_time.json — C-generated reference data for sidereal time
-│   ├── mean_elements.json — C-generated reference data for mean node, mean apogee, ECL_NUT
+│   ├── mean_elements.json — C-generated reference data for mean node, mean apogee, ECL_NUT (231 cases: 165 tropical + 66 sidereal)
 │   ├── truenode.json   — C-generated reference data for swe_calc SE_TRUE_NODE/SE_OSCU_APOG (252 cases: 168 tropical + 84 sidereal)
 │   ├── moshier_backend.json — C-generated reference data for backend::compute (swe_calc with ICRS)
 │   ├── moshier_moon.json — C-generated reference data for moshmoon2
@@ -568,7 +568,7 @@ tests/
     │                       tjd_start=2451545.0 × 2 backward)
     ├── gen_pheno.c     — C harness to regenerate pheno.json (swe_pheno: Sun..Pluto × 4 epochs ×
     │                       {MOSEPH, MOSEPH|TRUEPOS, SWIEPH}; asteroids omitted, boundary-safe 1800 epoch)
-    ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT)
+    ├── gen_mean_elements.c — C harness to regenerate mean_elements.json (mean node, mean apogee, ECL_NUT; 165 tropical + 66 sidereal [MeanNode/MeanApogee × 11 epochs × 3 sid_modes via swe_set_sid_mode])
     ├── gen_truenode.c  — C harness to regenerate truenode.json (swe_calc SE_TRUE_NODE/SE_OSCU_APOG, 2 bodies × {MOSEPH,SWIEPH}; 168 tropical [6 flags × 7 epochs] + 84 sidereal [3 sid_modes {Lahiri, Lahiri|ECL_T0, Lahiri|SSY_PLANE} × 7 epochs, via swe_set_sid_mode]; sets ephe path for SWIEPH)
     ├── gen_corrections.c — C harness to regenerate corrections.json (meff copied from sweph.c, swi_aberr_light direct, pipeline via swe_calc)
     ├── gen_obliquity_bias.c — C harness to regenerate obliquity_bias.json

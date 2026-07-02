@@ -700,12 +700,15 @@ impl Ephemeris {
             if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
                 return Ok(([0.0; 24], [0.0; 6], flags));
             }
-            let xr = match body {
+            // `x2000` carries the J2000 equatorial vector for the SIDEREAL ECL_T0 /
+            // SSY_PLANE rigorous branches (see `mean_element_pipeline`); all-zero for
+            // non-sidereal calls, which `apply_sidereal` never reads.
+            let (xr, x2000) = match body {
                 Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models)?,
                 Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models)?,
                 _ => unreachable!(),
             };
-            return Ok((xr, [0.0; 6], flags));
+            return Ok((xr, x2000, flags));
         }
 
         if matches!(body, Body::TrueNode | Body::OscuApogee) {

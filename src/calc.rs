@@ -769,7 +769,7 @@ fn mean_element_pipeline(
     jd: f64,
     flags: CalcFlags,
     models: &AstroModels,
-) -> [f64; 24] {
+) -> OscOutput {
     // Ecliptic polar → ecliptic cartesian (with speed)
     let cart = polar_to_cartesian_with_speed(*xx);
     *xx = cart;
@@ -787,6 +787,38 @@ fn mean_element_pipeline(
         xx[4] = 0.0;
         xx[5] = 0.0;
     }
+
+    // J2000 equatorial vector for the SEFLG_SIDEREAL ECL_T0 / SSY_PLANE rigorous
+    // branches (applied by the caller's `apply_sidereal`). Mirrors C's
+    // app_pos_etc_mean sweph.c:4335-4347: precess the equatorial-of-date vector to
+    // J2000 — no nutation removal here, because the mean element carries no nutation
+    // yet (app_pos_rest adds it below). Captured before the J2000 re-projection.
+    //
+    // CRITICAL: the precession is guarded `teval != J2000` (unlike lunar_osc_elem,
+    // which precesses unconditionally). At exactly J2000 the position rotation is a
+    // no-op but `precess_speed` would still add its precession-rate term (~the
+    // ayanamsa rate, 3.8e-5 deg/day) to the velocity — C skips the whole block, so
+    // we must too, or the sidereal SPEED comes out short by that rate.
+    let x2000 = if flags.contains(CalcFlags::SIDEREAL) {
+        let mut x = *xx;
+        if jd != J2000 {
+            let mut pos3 = [x[0], x[1], x[2]];
+            precess(
+                &mut pos3,
+                jd,
+                flags,
+                models,
+                PrecessionDirection::DateToJ2000,
+            );
+            x[0..3].copy_from_slice(&pos3);
+            if flags.contains(CalcFlags::SPEED) {
+                precess_speed(&mut x, jd, flags, models, PrecessionDirection::DateToJ2000);
+            }
+        }
+        x
+    } else {
+        [0.0; 6]
+    };
 
     // J2000: precess equatorial back to J2000
     let eps = if flags.contains(CalcFlags::J2000) {
@@ -816,10 +848,13 @@ fn mean_element_pipeline(
         None
     };
 
-    app_pos_rest(xx, flags, &eps, &nut_val, nutv.as_ref())
+    (
+        app_pos_rest(xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    )
 }
 
-pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result<[f64; 24], Error> {
+pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result<OscOutput, Error> {
     let pos = crate::moshier::moon::mean_node(jd)?;
     let pos_prev = crate::moshier::moon::mean_node(jd - MEAN_NODE_SPEED_INTV)?;
 
@@ -831,7 +866,7 @@ pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result
     xx[4] = 0.0;
     xx[5] = 0.0;
 
-    let mut xreturn = mean_element_pipeline(&mut xx, jd, flags, models);
+    let (mut xreturn, x2000) = mean_element_pipeline(&mut xx, jd, flags, models);
 
     if !flags.contains(CalcFlags::SIDEREAL) && !flags.contains(CalcFlags::J2000) {
         xreturn[1] = 0.0;
@@ -841,14 +876,14 @@ pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result
         xreturn[11] = 0.0;
     }
 
-    Ok(xreturn)
+    Ok((xreturn, x2000))
 }
 
 pub fn calc_mean_apogee(
     jd: f64,
     flags: CalcFlags,
     models: &AstroModels,
-) -> Result<[f64; 24], Error> {
+) -> Result<OscOutput, Error> {
     let pos = crate::moshier::moon::mean_apogee(jd)?;
     let pos_prev = crate::moshier::moon::mean_apogee(jd - MEAN_NODE_SPEED_INTV)?;
 
@@ -860,11 +895,11 @@ pub fn calc_mean_apogee(
     xx[4] = diff_radians(pos[1], pos_prev[1]) / MEAN_NODE_SPEED_INTV;
     xx[5] = 0.0;
 
-    let mut xreturn = mean_element_pipeline(&mut xx, jd, flags, models);
+    let (mut xreturn, x2000) = mean_element_pipeline(&mut xx, jd, flags, models);
 
     xreturn[5] = 0.0;
 
-    Ok(xreturn)
+    Ok((xreturn, x2000))
 }
 
 pub fn calc_ecl_nut(jd: f64, flags: CalcFlags, models: &AstroModels) -> [f64; 6] {
