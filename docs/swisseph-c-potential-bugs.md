@@ -249,3 +249,49 @@ geometry bit-for-bit but inherits the same ill-conditioning in the apparent outp
 `tests/golden/nodaps.rs` tolerances reflect this: `TRUEPOS` geometry is asserted tight (1e-9 / 1e-8),
 apparent ascending-node / perihelion / aphelion at 1e-6, and the apparent descending node relaxed
 to 1e-3° / 2e-2°/day. (swisseph-rs/85)
+
+## 8. swe_nod_aps osculating branch: node-direction division amplifies backend FP noise (both nodes)
+
+**Location:** `swecl.c`, `swe_nod_aps()` osculating branch, tangent-line node construction (lines
+~5300–5309, "A.4.3" in `docs/c-ref-nodaps.md`).
+
+**What:** The ascending-node *direction* is built from a linear extrapolation of the sampled
+position back to the ecliptic plane:
+
+```c
+fac = xpos[i][2] / xpos[i][5];             /* z / dz — "time" to cross the ecliptic */
+xn[i][j] = (xpos[i][j] - fac * xpos[i][j+3]) * sgn;
+xs[i][j] = -xn[i][j];                       /* descending = antipode, same fac */
+```
+
+`fac = z / ż` amplifies whatever relative floating-point noise is present in `ż` (the sampled
+radial velocity) by `fac`'s own magnitude before it ever reaches the node/apsis geometry. Unlike
+bug §7 (mean branch), **both** the ascending and descending directions inherit this noise equally
+(they're literal antipodes of the same vector) — descending is empirically worse only because the
+downstream ellipse-distance rescale (`rn2/ro2`, A.4.4) tends to have a larger ratio there.
+
+**Verified, not guessed:** feeding C's own dumped `xpos[1]` (the ecliptic-of-date sample at exactly
+`tjd_et`, read via temporary instrumentation of this function) directly into the Rust port's
+per-sample ellipse formula reproduces C's own `uu`/`cosnode`/`sinnode`/`sinincl` to ~12 significant
+digits — the formula itself is a faithful, bit-exact port. The measured divergence traces entirely
+to the raw position/velocity sample's ~1e-10..1e-11 relative backend noise (Moshier series
+evaluation order, or Swiss/JPL Chebyshev interpolation order), which the `fac` division then
+amplifies. Observed worst case in the golden battery: Jupiter's `SE_NODBIT_OSCU_BAR` descending
+node at ~1.2e-3° position / ~1.9e-2°/day speed.
+
+**Impact:** Same shape as §7 — the raw `SEFLG_TRUEPOS` sample-at-`tjd_et` position is unaffected
+(this is a construction *within* the already-sampled position, not a light-effect chain), but the
+node/apsis output as a whole (all four points, not just descending) carries more FP-ordering
+sensitivity than the mean branch's non-node points. Perihelion/aphelion are far less affected since
+they derive from `uu`/`ny`/`sema`/`ecce` directly, picking up node noise only secondhand through
+`uu`'s `cosnode`/`sinnode` term.
+
+**Cause:** Same class as §7 — a division (`z/ż` here, `1/cos(θ)` there) with no width/scale guard,
+applied to a already-tiny quantity subject to backend FP noise.
+
+**Our Rust code:** Ports the formula verbatim (`nodaps::osculating_branch`). Golden tolerances
+(`tests/golden/nodaps.rs::osc_tolerance`) are tiered by point: perihelion/aphelion at 5e-5°/1e-4°
+per day, ascending node at 1e-3°/1e-4° per day, descending node at 2e-3°/3e-2° per day. The "oscu"
+battery's pre-1900 epoch is additionally nudged off the sepl_18 `.se1` file boundary (see
+`osc_epochs` in `tests/c-gen/gen_nodaps.c`) — a separate, already-documented stateless-vs-stateful
+artifact (see `CLAUDE.md` `<stateless_tolerance>` §2), not this one. (swisseph-rs/86)

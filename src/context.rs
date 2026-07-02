@@ -1,5 +1,6 @@
 use std::fs;
 
+use crate::calc::{JplProvider, PositionProvider, SwephPositions, SwephProvider};
 use crate::config::EphemerisConfig;
 use crate::date::LEAP_SECONDS;
 use crate::error::Error;
@@ -9,6 +10,33 @@ use crate::types::{Body, DeltaT, EphemerisSource, JdUt1};
 /// Three raw geocentric moon samples for the osculating node/apogee, plus the
 /// `istart`, backend-specific central-difference interval, and backend used.
 type OscMoonSamples = ([[f64; 6]; 3], usize, f64, EphemerisSource);
+
+/// Selects `ipli`'s position from a `SwephPositions` bundle in the frame
+/// `swe_nod_aps`'s osculating branch needs: barycentric (`SE_NODBIT_OSCU_BAR`)
+/// or heliocentric, with `Body::Earth` reading the always-populated
+/// `earth_bary`/`earth_helio` fields rather than `planet_bary` (which, for the
+/// `query = Body::Sun` dummy call `nodaps_osc_body_j2000` makes for Earth, is
+/// the Sun's own position, not Earth's — see `docs/c-ref-nodaps.md` §A.4.1).
+fn nodaps_osc_frame(pos: &SwephPositions, ipli: Body, want_bary: bool) -> [f64; 6] {
+    if ipli == Body::Earth {
+        if want_bary {
+            pos.earth_bary
+        } else {
+            pos.earth_helio
+        }
+    } else if want_bary {
+        pos.planet_bary
+    } else {
+        let mut helio = [0.0; 6];
+        for (h, (p, s)) in helio
+            .iter_mut()
+            .zip(pos.planet_bary.iter().zip(pos.sun_bary.iter()))
+        {
+            *h = p - s;
+        }
+        helio
+    }
+}
 
 pub struct Ephemeris {
     config: EphemerisConfig,
@@ -530,8 +558,11 @@ impl Ephemeris {
     /// (TT), in equatorial-J2000 cartesian. Replaces C's `xsun`/`xear`/`xobs`
     /// globals (swecl.c A.5.1) with an explicit per-epoch computation.
     ///
-    /// Currently the Moshier backend only (the mean-branch golden coverage);
-    /// Swiss/JPL observer frames come with PNOC 5's osculating branch.
+    /// `xear` is Earth's position in the node's native frame: heliocentric
+    /// (≈barycentric, Moshier has no true barycenter) for Moshier, real
+    /// barycentric for Swiss/JPL (`swed.pldat[SEI_EARTH].x` is barycentric in
+    /// C's own shared frame). `sun_bary` is `[0.0; 6]` for Moshier (matching
+    /// `transform_nodaps_output`'s `is_moseph` gate, which never adds it).
     pub(crate) fn nodaps_observer(
         &self,
         t: f64,
@@ -539,6 +570,7 @@ impl Ephemeris {
     ) -> Result<crate::nodaps::ObsFrame, Error> {
         let config = &self.config;
         let models = &config.astro_models;
+        let offset = crate::calc::topo_offset(t, flags, config, models);
         match config.ephemeris_source {
             EphemerisSource::Moshier => {
                 let eps_j2000 = crate::obliquity::obliquity(
@@ -548,7 +580,6 @@ impl Ephemeris {
                 );
                 let pp = crate::moshier::backend::compute_pipeline(t, Body::Sun, &eps_j2000)?;
                 let earth_helio = pp.earth_helio;
-                let offset = crate::calc::topo_offset(t, flags, config, models);
                 let mut xobs = earth_helio;
                 for i in 0..6 {
                     xobs[i] += offset[i];
@@ -559,10 +590,110 @@ impl Ephemeris {
                     xobs,
                 })
             }
-            other => Err(Error::CError(format!(
-                "swe_nod_aps mean branch currently supports the Moshier backend only (got {other:?})"
-            ))),
+            EphemerisSource::Swiss => {
+                let provider = SwephProvider {
+                    planet_files: &self.planet_files,
+                    moon_files: &self.moon_files,
+                };
+                let pos = provider.positions(Body::Sun, t, true)?;
+                let mut xobs = pos.earth_bary;
+                for i in 0..6 {
+                    xobs[i] += offset[i];
+                }
+                Ok(crate::nodaps::ObsFrame {
+                    sun_bary: pos.sun_bary,
+                    xear: pos.earth_bary,
+                    xobs,
+                })
+            }
+            EphemerisSource::Jpl => {
+                let provider = JplProvider {
+                    file: self.jpl_file.as_ref().unwrap(),
+                };
+                let pos = provider.positions(Body::Sun, t, true)?;
+                let mut xobs = pos.earth_bary;
+                for i in 0..6 {
+                    xobs[i] += offset[i];
+                }
+                Ok(crate::nodaps::ObsFrame {
+                    sun_bary: pos.sun_bary,
+                    xear: pos.earth_bary,
+                    xobs,
+                })
+            }
         }
+    }
+
+    /// `SE_NODBIT_OSCU`/`SE_NODBIT_OSCU_BAR` (`docs/c-ref-nodaps.md` §A.4.1,
+    /// §A.4.2) — heliocentric or barycentric J2000-equatorial cartesian
+    /// position+speed of `ipli` at `t`, across all three backends, with no
+    /// light-time/aberration/deflection (matching `swe_nod_aps`'s
+    /// `SEFLG_TRUEPOS`-forced `iflJ2000`).
+    ///
+    /// The Moon is always geocentric — `want_bary` is ignored, matching C
+    /// never setting HELCTR/BARYCTR for `ipli == SE_MOON`. `Body::Earth` gets
+    /// the Earth->EMB correction added back in (swecl.c:5293-5296: `swe_calc`
+    /// on `SE_EARTH` returns bare Earth with the Moon's contribution already
+    /// subtracted out; `swe_nod_aps` wants the EMB `ipli` actually orbits
+    /// around).
+    ///
+    /// `want_bary` (`SE_NODBIT_OSCU_BAR`) is only meaningful for Swiss/JPL,
+    /// which carry a real solar-system barycenter; Moshier has no such frame
+    /// and rejects it the same way `calc_inner` rejects a bare `SEFLG_BARYCTR`
+    /// request (`Error::UnsupportedFlags`).
+    pub(crate) fn nodaps_osc_body_j2000(
+        &self,
+        t: f64,
+        ipli: Body,
+        want_bary: bool,
+    ) -> Result<[f64; 6], Error> {
+        let source = self.config.ephemeris_source;
+        let models = &self.config.astro_models;
+        let eps_j2000 =
+            crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
+
+        if ipli == Body::Moon {
+            return self.raw_moon_at(source, t, &eps_j2000);
+        }
+
+        let mut xx = match source {
+            EphemerisSource::Moshier => {
+                if want_bary {
+                    return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
+                }
+                if ipli == Body::Earth {
+                    crate::moshier::backend::compute_pipeline(t, Body::Sun, &eps_j2000)?.earth_helio
+                } else {
+                    crate::moshier::backend::compute_pipeline(t, ipli, &eps_j2000)?.planet_helio
+                }
+            }
+            EphemerisSource::Swiss => {
+                let provider = SwephProvider {
+                    planet_files: &self.planet_files,
+                    moon_files: &self.moon_files,
+                };
+                let query = if ipli == Body::Earth { Body::Sun } else { ipli };
+                let pos = provider.positions(query, t, true)?;
+                nodaps_osc_frame(&pos, ipli, want_bary)
+            }
+            EphemerisSource::Jpl => {
+                let provider = JplProvider {
+                    file: self.jpl_file.as_ref().unwrap(),
+                };
+                let query = if ipli == Body::Earth { Body::Sun } else { ipli };
+                let pos = provider.positions(query, t, true)?;
+                nodaps_osc_frame(&pos, ipli, want_bary)
+            }
+        };
+
+        if ipli == Body::Earth {
+            let moon = self.raw_moon_at(source, t, &eps_j2000)?;
+            for i in 0..6 {
+                xx[i] += moon[i] / (crate::constants::EARTH_MOON_MRAT + 1.0);
+            }
+        }
+
+        Ok(xx)
     }
 
     /// Global eclipse search: next/previous solar eclipse anywhere on Earth from `tjd_start`

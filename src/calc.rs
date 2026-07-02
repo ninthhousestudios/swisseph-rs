@@ -1384,9 +1384,9 @@ pub(crate) trait PositionProvider {
     fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error>;
 }
 
-struct SwephProvider<'a> {
-    planet_files: &'a [SwissEphFile],
-    moon_files: &'a [SwissEphFile],
+pub(crate) struct SwephProvider<'a> {
+    pub(crate) planet_files: &'a [SwissEphFile],
+    pub(crate) moon_files: &'a [SwissEphFile],
 }
 
 /// Days of slop allowed past a file's per-body coverage before declaring a jd
@@ -1845,8 +1845,8 @@ fn body_to_jpl_index(body: Body) -> Option<i32> {
     }
 }
 
-struct JplProvider<'a> {
-    file: &'a crate::jpl::JplFile,
+pub(crate) struct JplProvider<'a> {
+    pub(crate) file: &'a crate::jpl::JplFile,
 }
 
 impl<'a> PositionProvider for JplProvider<'a> {

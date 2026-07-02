@@ -1,6 +1,9 @@
 use serde::Deserialize;
 use std::collections::HashMap;
-use swisseph::{Body, CalcFlags, Ephemeris, EphemerisConfig, NodApsMethod, NodesApsides};
+use std::path::PathBuf;
+use swisseph::{
+    Body, CalcFlags, Ephemeris, EphemerisConfig, EphemerisSource, NodApsMethod, NodesApsides,
+};
 
 #[derive(Deserialize)]
 struct MeanCase {
@@ -20,6 +23,131 @@ struct MeanCase {
 #[derive(Deserialize)]
 struct GoldenData {
     mean: Vec<MeanCase>,
+    oscu: Vec<MeanCase>,
+    oscu_bar: Vec<MeanCase>,
+    fopoint: Vec<MeanCase>,
+}
+
+fn sweph_ephe_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("swisseph")
+        .join("ephe")
+}
+
+/// Ephemeris cache keyed by backend, shared across the osculating batteries
+/// (which mix `SEFLG_MOSEPH`/`SEFLG_SWIEPH` cases in the same JSON file).
+fn ephemeris_for(cache: &mut HashMap<EphemerisSource, Ephemeris>, flags: CalcFlags) -> &Ephemeris {
+    let source = if flags.contains(CalcFlags::SWIEPH) {
+        EphemerisSource::Swiss
+    } else {
+        EphemerisSource::Moshier
+    };
+    cache.entry(source).or_insert_with(|| {
+        let config = match source {
+            EphemerisSource::Moshier => EphemerisConfig::default(),
+            EphemerisSource::Swiss => EphemerisConfig {
+                ephemeris_source: EphemerisSource::Swiss,
+                ephe_path: Some(sweph_ephe_path()),
+                ..Default::default()
+            },
+            EphemerisSource::Jpl => unreachable!("nodaps golden data has no JPL cases"),
+        };
+        Ephemeris::new(config).expect("Ephemeris::new")
+    })
+}
+
+/// Runs one `Ephemeris::nod_aps` case and records any component outside
+/// `eps_pos`/`eps_speed` into `failures`.
+/// Tolerance for one osculating-branch component `k` (0..2 = position, 3..5 =
+/// speed) of the given node/apsis `point`.
+///
+/// **Root cause, verified (not guessed):** feeding C's own dumped `xpos[1]`
+/// (the ecliptic-of-date sample at exactly `tjd_et`) directly into this
+/// port's per-sample ellipse formula reproduces C's own `uu`/`cosnode`/
+/// `sinnode`/`sinincl` to ~12 significant digits — the formula is a faithful
+/// port. The remaining divergence comes entirely from the ~1e-10..1e-11
+/// relative backend noise in the raw position/velocity sample (Moshier series
+/// evaluation order, or Swiss/JPL file interpolation), amplified by the
+/// A.4.3 tangent-line construction's `fac = z / dz` division — near-singular
+/// whenever the sampled radial (z) speed is small relative to the position
+/// scale. Ascending AND descending directions share the same `xn`/`-xn`
+/// vector, so both inherit this noise (unlike the mean branch, where only
+/// the descending node has its own divide-by-near-zero formula); descending
+/// is empirically worse because `rn2/ro2`'s rescale ratio (A.4.4) tends to be
+/// larger there. Perihelion/aphelion are far less sensitive: they come from
+/// `uu`/`ny`/`sema`/`ecce` directly, only picking up node noise secondhand
+/// through `uu`'s `cosnode`/`sinnode` term. This is the same class of C-native
+/// ill-conditioning as the mean branch's descending-node singularity (see
+/// [`tolerance`]) — not a port defect.
+fn osc_tolerance(point: &str, k: usize) -> f64 {
+    let is_speed = k >= 3;
+    match point {
+        "desc" => {
+            if is_speed {
+                3e-2
+            } else {
+                2e-3
+            }
+        }
+        "asc" => {
+            if is_speed {
+                1e-4
+            } else {
+                1e-3
+            }
+        }
+        _ => {
+            if is_speed {
+                1e-4
+            } else {
+                5e-5
+            }
+        } // peri / aphe
+    }
+}
+
+fn check_case(
+    eph: &Ephemeris,
+    method: NodApsMethod,
+    i: usize,
+    c: &MeanCase,
+    failures: &mut Vec<String>,
+) {
+    let body = Body::try_from(c.body).expect("valid body id");
+    let flags = CalcFlags::from_bits_truncate(c.flags);
+    let label = format!("case {i} {} tjd={:.1} {}", c.body_name, c.jd, c.flag_name);
+
+    let NodesApsides {
+        ascending,
+        descending,
+        perihelion,
+        aphelion,
+    } = match eph.nod_aps(c.jd, body, flags, method) {
+        Ok(r) => r,
+        Err(e) => {
+            failures.push(format!("{label}: error: {e}"));
+            return;
+        }
+    };
+
+    for (name, expected, got) in [
+        ("asc", &c.asc, &ascending),
+        ("desc", &c.desc, &descending),
+        ("peri", &c.peri, &perihelion),
+        ("aphe", &c.aphe, &aphelion),
+    ] {
+        for k in 0..6 {
+            let eps = osc_tolerance(name, k);
+            let diff = (expected[k] - got[k]).abs();
+            if diff > eps {
+                failures.push(format!(
+                    "{label} {name}[{k}]: expected {:.15e}, got {:.15e}, diff {diff:.3e} > eps {eps:.1e}",
+                    expected[k], got[k]
+                ));
+            }
+        }
+    }
 }
 
 fn load() -> GoldenData {
@@ -130,6 +258,100 @@ fn golden_nodaps_mean() {
                 }
             }
         }
+    }
+
+    if !failures.is_empty() {
+        let n = failures.len();
+        for f in failures.iter().take(40) {
+            eprintln!("{f}");
+        }
+        panic!("{n} failures (showing first 40)");
+    }
+}
+
+/// Osculating nodes & apsides via `Ephemeris::nod_aps` (`swe_nod_aps`, method
+/// `SE_NODBIT_OSCU`): 72 cases — 9 bodies {Moon, Mercury..Neptune, Pluto} × 4
+/// epochs (incl. a pre-1900 epoch nudged off the sepl_18 .se1 file boundary —
+/// see `osc_epochs` in `tests/c-gen/gen_nodaps.c`) × 2 backends {MOSEPH,
+/// SWIEPH}, all with `SEFLG_SPEED` (the 3-position central-difference speed is
+/// always exercised).
+///
+/// Tolerances are per point — see [`osc_tolerance`] for the verified root
+/// cause (a near-singular division in the node-direction construction, not a
+/// port defect).
+#[test]
+fn golden_nodaps_oscu() {
+    let data = load();
+    let cases = &data.oscu;
+    assert!(cases.len() >= 72, "expected 72+ cases, got {}", cases.len());
+
+    let mut ephemerides: HashMap<EphemerisSource, Ephemeris> = HashMap::new();
+    let mut failures = Vec::new();
+    for (i, c) in cases.iter().enumerate() {
+        let flags = CalcFlags::from_bits_truncate(c.flags);
+        let eph = ephemeris_for(&mut ephemerides, flags);
+        check_case(eph, NodApsMethod::OSCU, i, c, &mut failures);
+    }
+
+    if !failures.is_empty() {
+        let n = failures.len();
+        for f in failures.iter().take(40) {
+            eprintln!("{f}");
+        }
+        panic!("{n} failures (showing first 40)");
+    }
+}
+
+/// Osculating-about-the-barycenter nodes & apsides (`SE_NODBIT_OSCU_BAR`): 8
+/// SWIEPH cases — Jupiter/Saturn/Pluto (beyond the 6 AU threshold, so the
+/// ellipse is genuinely barycentric) and Mercury (inside it, so this collapses
+/// to the same heliocentric ellipse as plain `OSCU`) × 2 epochs. Moshier has
+/// no real barycentric frame — `SE_NODBIT_OSCU_BAR` there returns
+/// `Error::UnsupportedFlags`, matching `calc_inner`'s general `BARYCTR` gate;
+/// this battery is SWIEPH-only so it never exercises that path.
+#[test]
+fn golden_nodaps_oscu_bar() {
+    let data = load();
+    let cases = &data.oscu_bar;
+    assert!(cases.len() >= 8, "expected 8+ cases, got {}", cases.len());
+
+    let mut ephemerides: HashMap<EphemerisSource, Ephemeris> = HashMap::new();
+    let mut failures = Vec::new();
+    for (i, c) in cases.iter().enumerate() {
+        let flags = CalcFlags::from_bits_truncate(c.flags);
+        let eph = ephemeris_for(&mut ephemerides, flags);
+        check_case(eph, NodApsMethod::OSCU_BAR, i, c, &mut failures);
+    }
+
+    if !failures.is_empty() {
+        let n = failures.len();
+        for f in failures.iter().take(40) {
+            eprintln!("{f}");
+        }
+        panic!("{n} failures (showing first 40)");
+    }
+}
+
+/// `SE_NODBIT_FOPOINT` (2nd focal point instead of aphelion), combined with
+/// `SE_NODBIT_OSCU`: 6 MOSEPH cases — Moon/Mars/Jupiter × 2 epochs.
+#[test]
+fn golden_nodaps_fopoint() {
+    let data = load();
+    let cases = &data.fopoint;
+    assert!(cases.len() >= 6, "expected 6+ cases, got {}", cases.len());
+
+    let mut ephemerides: HashMap<EphemerisSource, Ephemeris> = HashMap::new();
+    let mut failures = Vec::new();
+    for (i, c) in cases.iter().enumerate() {
+        let flags = CalcFlags::from_bits_truncate(c.flags);
+        let eph = ephemeris_for(&mut ephemerides, flags);
+        check_case(
+            eph,
+            NodApsMethod::OSCU | NodApsMethod::FOPOINT,
+            i,
+            c,
+            &mut failures,
+        );
     }
 
     if !failures.is_empty() {

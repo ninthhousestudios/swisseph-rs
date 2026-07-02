@@ -3,11 +3,11 @@
 //! Standalone public API for the ascending/descending nodes and the
 //! perihelion/aphelion (apogee) of any body. Two families:
 //!
-//! * **Mean** elements (this module, PNOC 4): VSOP-style mean-equinox-of-date
-//!   polynomials for Sun..Neptune / Earth, and `swi_mean_lunar_elements` for the
-//!   Moon. Implemented here.
-//! * **Osculating** elements (`SE_NODBIT_OSCU` / `SE_NODBIT_OSCU_BAR`): the true
-//!   instantaneous two-body ellipse — not yet implemented (PNOC 5, swisseph-rs/86).
+//! * **Mean** elements (PNOC 4): VSOP-style mean-equinox-of-date polynomials
+//!   for Sun..Neptune / Earth, and `swi_mean_lunar_elements` for the Moon.
+//! * **Osculating** elements (PNOC 5, `SE_NODBIT_OSCU` / `SE_NODBIT_OSCU_BAR` /
+//!   `SE_NODBIT_FOPOINT`): the true instantaneous two-body (angular-momentum)
+//!   ellipse, sampled at up to 3 epochs for a central-difference speed.
 //!
 //! Both families share the [`transform_nodaps_output`] pipeline (C `swe_nod_aps`
 //! A.5), which takes the four raw node/apsis vectors in heliocentric
@@ -18,10 +18,11 @@
 
 use bitflags::bitflags;
 
-use crate::calc::{app_pos_rest, extract_output, precess_speed};
+use crate::calc::{app_pos_rest, extract_output, plan_for_osc_elem, precess_speed};
 use crate::constants::{
-    AUNIT, CLIGHT, DEGTORAD, IPL_TO_ELEM, J2000, MOON_MEAN_DIST, MOON_MEAN_ECC, MOON_MEAN_INCL,
-    NUT_SPEED_INTV,
+    AUNIT, CLIGHT, DEGTORAD, EARTH_MOON_MRAT, GEOGCONST, HELGRAVCONST, IPL_TO_ELEM, J2000,
+    MOON_MEAN_DIST, MOON_MEAN_ECC, MOON_MEAN_INCL, NODE_CALC_INTV, NUT_SPEED_INTV,
+    OSCU_BAR_DISTANCE_THRESHOLD_AU, PLMASS,
 };
 use crate::context::Ephemeris;
 use crate::corrections::{aberr_light, deflect_light};
@@ -210,30 +211,28 @@ pub(crate) fn nod_aps(
 
     let models = &eph.config().astro_models;
 
-    if !use_mean {
-        // OSCU / OSCU_BAR (and Pluto/asteroids/fictitious) — PNOC 5.
-        return Err(Error::CError(
-            "swe_nod_aps: osculating nodes/apsides (SE_NODBIT_OSCU / SE_NODBIT_OSCU_BAR) not yet \
-             implemented — PNOC 5 (swisseph-rs/86)"
-                .to_string(),
-        ));
-    }
-
-    // A.3 — build the four raw node/apsis vectors (heliocentric ecliptic-of-date
-    // cartesian, pos + speed).
-    let mut points = mean_branch(ipl, t, do_focal_point);
+    // A.3 (mean) — heliocentric ecliptic-of-date cartesian, pos + speed — or
+    // A.4 (osculating): the instantaneous two-body ellipse. Pluto/asteroids/
+    // fictitious bodies always fall here (mean_eligible is false for them).
+    let (mut points, ellipse_is_bary, is_true_nodaps) = if use_mean {
+        (mean_branch(ipl, t, do_focal_point), false, false)
+    } else {
+        let (points, ellipse_is_bary) =
+            osculating_branch(eph, tjd_et, ipli, flags, method, do_focal_point)?;
+        (points, ellipse_is_bary, true)
+    };
 
     // A.5 — shared observer/apparent-position + output pipeline.
     let outputs = transform_nodaps_output(
         eph,
         &mut points,
-        /* is_true_nodaps = */ false,
+        is_true_nodaps,
         ipl,
         ipli,
         flags,
         do_defl,
         do_aberr,
-        /* ellipse_is_bary = */ false,
+        ellipse_is_bary,
         models,
         tjd_et,
     )?;
@@ -359,6 +358,203 @@ fn mean_branch(ipl: Body, t: f64, do_focal_point: bool) -> [[f64; 6]; 4] {
         *xp = polar_to_cartesian_with_speed(*xp);
     }
     points
+}
+
+/// A.4 — osculating branch (swecl.c:5249-5400): the instantaneous two-body
+/// (angular-momentum) ellipse, sampled at up to 3 epochs (`istart..=iend`) for
+/// a central-difference speed. Returns the four raw `[ascending, descending,
+/// perihelion, aphelion]` vectors (ecliptic-of-date cartesian, pos + speed)
+/// plus `ellipse_is_bary` (for A.5's barycenter-add gate). Faithful port of
+/// swecl.c:5249-5399; reference `docs/c-ref-nodaps.md` §A.4.
+fn osculating_branch(
+    eph: &Ephemeris,
+    tjd_et: f64,
+    ipli: Body,
+    flags: CalcFlags,
+    method: NodApsMethod,
+    do_focal_point: bool,
+) -> Result<([[f64; 6]; 4], bool), Error> {
+    let has_speed = flags.contains(CalcFlags::SPEED);
+
+    // A.4.1 — reference (heliocentric) distance, Gmsm, dt, ellipse_is_bary.
+    let mut ellipse_is_bary = false;
+    let (dt, dzmin, gmsm) = if ipli == Body::Moon {
+        (
+            NODE_CALC_INTV,
+            1e-15,
+            GEOGCONST * (1.0 + 1.0 / EARTH_MOON_MRAT) / AUNIT / AUNIT / AUNIT * 86400.0 * 86400.0,
+        )
+    } else {
+        let raw0 = eph.nodaps_osc_body_j2000(tjd_et, ipli, false)?;
+        let dist = (raw0[0] * raw0[0] + raw0[1] * raw0[1] + raw0[2] * raw0[2]).sqrt();
+        if method.contains(NodApsMethod::OSCU_BAR) && dist > OSCU_BAR_DISTANCE_THRESHOLD_AU {
+            ellipse_is_bary = true;
+        }
+        let raw_id = ipli.to_raw_id();
+        let plm = if (2..=9).contains(&raw_id) || raw_id == 14 {
+            1.0 / PLMASS[IPL_TO_ELEM[raw_id as usize]]
+        } else {
+            0.0
+        };
+        let dt = NODE_CALC_INTV * 10.0 * dist;
+        (
+            dt,
+            1e-15 * dt / NODE_CALC_INTV,
+            HELGRAVCONST * (1.0 + plm) / AUNIT / AUNIT / AUNIT * 86400.0 * 86400.0,
+        )
+    };
+
+    // A.4.2 — up to 3 samples (heliocentric/barycentric J2000 equatorial
+    // cartesian, TRUEPOS), rotated into ecliptic-of-date via plan_for_osc_elem.
+    let (istart, iend) = if has_speed {
+        (0usize, 2usize)
+    } else {
+        (0usize, 0usize)
+    };
+    let mut xpos = [[0.0f64; 6]; 3];
+    for (i, slot) in xpos.iter_mut().enumerate().take(iend + 1).skip(istart) {
+        let t = if istart == iend {
+            tjd_et
+        } else {
+            match i {
+                0 => tjd_et - dt,
+                2 => tjd_et + dt,
+                _ => tjd_et,
+            }
+        };
+        let mut raw = eph.nodaps_osc_body_j2000(t, ipli, ellipse_is_bary)?;
+        plan_for_osc_elem(flags, t, &mut raw, &eph.config().astro_models);
+        *slot = raw;
+    }
+
+    // A.4.3-A.4.4 — per-sample ellipse elements: perihelion/aphelion(-or-2nd-
+    // focal-point) direction + ellipse-corrected ascending/descending node
+    // distance (replacing A.4.3's tangent-line approximation).
+    let mut xq = [[0.0f64; 3]; 3]; // perihelion
+    let mut xa = [[0.0f64; 3]; 3]; // aphelion / 2nd focal point
+    let mut xn = [[0.0f64; 3]; 3]; // ascending node
+    let mut xs = [[0.0f64; 3]; 3]; // descending node
+    for i in istart..=iend {
+        // A.4.3 — tangent-line node/antinode direction.
+        if xpos[i][5].abs() < dzmin {
+            xpos[i][5] = dzmin;
+        }
+        let fac = xpos[i][2] / xpos[i][5];
+        let sgn = xpos[i][5] / xpos[i][5].abs();
+        let mut xn_tan = [0.0f64; 3];
+        for j in 0..3 {
+            xn_tan[j] = (xpos[i][j] - fac * xpos[i][j + 3]) * sgn;
+        }
+        let xs_tan = [-xn_tan[0], -xn_tan[1], -xn_tan[2]];
+
+        // A.4.4 — node longitude direction.
+        let rxy0 = (xn_tan[0] * xn_tan[0] + xn_tan[1] * xn_tan[1]).sqrt();
+        let cosnode = xn_tan[0] / rxy0;
+        let sinnode = xn_tan[1] / rxy0;
+
+        // Inclination from the orbital angular-momentum vector.
+        let xnorm = crate::math::cross_prod(
+            [xpos[i][0], xpos[i][1], xpos[i][2]],
+            [xpos[i][3], xpos[i][4], xpos[i][5]],
+        );
+        let mut rxy = xnorm[0] * xnorm[0] + xnorm[1] * xnorm[1];
+        let c2 = rxy + xnorm[2] * xnorm[2];
+        let mut rxyz = c2.sqrt();
+        rxy = rxy.sqrt();
+        let sinincl = rxy / rxyz;
+        let mut cosincl = (1.0 - sinincl * sinincl).sqrt();
+        if xnorm[2] < 0.0 {
+            // Retrograde (e.g. 20461 Dioretsa) — A.4.4 only; lunar_osc_elem's
+            // D.3 never flips (the Moon's inclination is never retrograde).
+            cosincl = -cosincl;
+        }
+
+        // Argument of latitude.
+        let cosu = xpos[i][0] * cosnode + xpos[i][1] * sinnode;
+        let sinu = xpos[i][2] / sinincl;
+        let uu = sinu.atan2(cosu);
+
+        // Vis-viva semi-major axis.
+        rxyz = (xpos[i][0] * xpos[i][0] + xpos[i][1] * xpos[i][1] + xpos[i][2] * xpos[i][2]).sqrt();
+        let v2 = xpos[i][3] * xpos[i][3] + xpos[i][4] * xpos[i][4] + xpos[i][5] * xpos[i][5];
+        let sema = 1.0 / (2.0 / rxyz - v2 / gmsm);
+
+        // Eccentricity from specific angular momentum.
+        let pp = c2 / gmsm;
+        let ecce = (1.0 - pp / sema).sqrt();
+
+        // Eccentric/true anomaly of the body.
+        let cos_e = 1.0 / ecce * (1.0 - rxyz / sema);
+        let dot = xpos[i][0] * xpos[i][3] + xpos[i][1] * xpos[i][4] + xpos[i][2] * xpos[i][5];
+        let sin_e = 1.0 / ecce / (sema * gmsm).sqrt() * dot;
+        let ny0 = 2.0 * (((1.0 + ecce) / (1.0 - ecce)).sqrt() * sin_e / (1.0 + cos_e)).atan();
+
+        // Perihelion direction: distance of perihelion from the ascending node.
+        let mut q = [
+            crate::math::normalize_radians(uu - ny0),
+            0.0,
+            sema * (1.0 - ecce),
+        ];
+        q = crate::math::polar_to_cartesian(q);
+        q = rotate_x_sincos(q, -sinincl, cosincl);
+        q = crate::math::cartesian_to_polar(q);
+        q[0] += sinnode.atan2(cosnode);
+
+        // Aphelion, or the ellipse's 2nd focal point (SE_NODBIT_FOPOINT).
+        let a = [
+            crate::math::normalize_radians(q[0] + std::f64::consts::PI),
+            -q[1],
+            if do_focal_point {
+                sema * ecce * 2.0
+            } else {
+                sema * (1.0 + ecce)
+            },
+        ];
+        xq[i] = crate::math::polar_to_cartesian(q);
+        xa[i] = crate::math::polar_to_cartesian(a);
+
+        // Ellipse-corrected ascending/descending node distance (reusing this
+        // sample's ecce/sema/uu), replacing A.4.3's tangent-line approximation.
+        let ny_node = crate::math::normalize_radians(ny0 - uu);
+        let ny_desc = crate::math::normalize_radians(ny_node + std::f64::consts::PI);
+        let cos_e_node =
+            (2.0 * ((ny_node / 2.0).tan() / ((1.0 + ecce) / (1.0 - ecce)).sqrt()).atan()).cos();
+        let cos_e_desc =
+            (2.0 * ((ny_desc / 2.0).tan() / ((1.0 + ecce) / (1.0 - ecce)).sqrt()).atan()).cos();
+        let rn = sema * (1.0 - ecce * cos_e_node);
+        let rn2 = sema * (1.0 - ecce * cos_e_desc);
+        let ro = (xn_tan[0] * xn_tan[0] + xn_tan[1] * xn_tan[1] + xn_tan[2] * xn_tan[2]).sqrt();
+        let ro2 = (xs_tan[0] * xs_tan[0] + xs_tan[1] * xs_tan[1] + xs_tan[2] * xs_tan[2]).sqrt();
+        for j in 0..3 {
+            xn[i][j] = xn_tan[j] * rn / ro;
+            xs[i][j] = xs_tan[j] * rn2 / ro2;
+        }
+    }
+
+    // A.4.5 — assemble output + (central-difference) speed.
+    let mut xna = [0.0f64; 6];
+    let mut xnd = [0.0f64; 6];
+    let mut xpe = [0.0f64; 6];
+    let mut xap = [0.0f64; 6];
+    for i in 0..3 {
+        if has_speed {
+            xpe[i] = xq[1][i];
+            xpe[i + 3] = (xq[2][i] - xq[0][i]) / dt / 2.0;
+            xap[i] = xa[1][i];
+            xap[i + 3] = (xa[2][i] - xa[0][i]) / dt / 2.0;
+            xna[i] = xn[1][i];
+            xna[i + 3] = (xn[2][i] - xn[0][i]) / dt / 2.0;
+            xnd[i] = xs[1][i];
+            xnd[i + 3] = (xs[2][i] - xs[0][i]) / dt / 2.0;
+        } else {
+            xpe[i] = xq[0][i];
+            xap[i] = xa[0][i];
+            xna[i] = xn[0][i];
+            xnd[i] = xs[0][i];
+        }
+    }
+
+    Ok(([xna, xnd, xpe, xap], ellipse_is_bary))
 }
 
 /// A.5 — shared output-transform pipeline (swecl.c:5401-5652). Takes the four raw

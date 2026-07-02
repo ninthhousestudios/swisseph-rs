@@ -344,30 +344,55 @@ src/
 │                          actually used". Everything goes through Ephemeris::calc (constraint
 │                          app-uses-calc-not-backends:phenomena). Ephemeris::pheno/pheno_ut
 │                          delegates in context.rs; Phenomena re-exported in lib.rs.
-├── nodaps.rs           — swe_nod_aps / swe_nod_aps_ut mean branch (swisseph-rs/85, PNOC 4):
-│                          NodApsMethod bitflags (MEAN/OSCU/OSCU_BAR/FOPOINT), NodesApsides output
-│                          (asc/desc/peri/aphe [f64;6]), the 5 VSOP mean-equinox-of-date element
-│                          tables EL_NODE/PERI/INCL/ECCE/SEMA[8][4]; nod_aps (A.1 remap+reject,
-│                          A.2 setup, A.3 mean_branch: Moon via calc::mean_lunar_elements else 4-term
+├── nodaps.rs           — swe_nod_aps / swe_nod_aps_ut, mean (swisseph-rs/85, PNOC 4) + osculating
+│                          (swisseph-rs/86, PNOC 5) branches: NodApsMethod bitflags
+│                          (MEAN/OSCU/OSCU_BAR/FOPOINT), NodesApsides output (asc/desc/peri/aphe
+│                          [f64;6]), the 5 VSOP mean-equinox-of-date element tables
+│                          EL_NODE/PERI/INCL/ECCE/SEMA[8][4]; nod_aps (A.1 remap+reject, A.2 setup,
+│                          dispatches to mean_branch or osculating_branch by A.3's eligibility gate);
+│                          mean_branch (A.3: Moon via calc::mean_lunar_elements else 4-term
 │                          polynomials + cotrans orbital->ecliptic + eccentric-anomaly node distance);
-│                          transform_nodaps_output (A.5 shared pipeline, factored for PNOC 5's
-│                          osculating branch to reuse with is_true_nodaps=true: ecl->equ, precess to
-│                          J2000, barycenter/observer, deflect_light+aberr_light, precess back,
-│                          app_pos_rest tail, apply_sidereal, extract_output). OSCU/OSCU_BAR return
-│                          Err (PNOC 5). Goes through calc/context, not backends
-│                          (app-uses-calc-not-backends:nodaps): Moon elements via calc::mean_lunar_elements
-│                          re-export; observer vectors via Ephemeris::nodaps_observer (Moshier-only for
-│                          now; Swiss/JPL Err). CONSTRAINT-BOUND PRECISION: raw geometry (SEFLG_TRUEPOS)
-│                          bit-exact vs C every body/point, but the apparent (deflection+aberration)
-│                          DESCENDING NODE is ill-conditioned — C's node-distance formula divides by
-│                          cos((180-parg)) which is ~0.067 for low-incl planets (Jupiter desc "distance"
-│                          6.19 AU > 5.45 AU aphelion), so a ~5e-10 FP-order seed amplifies to ~3.5e-4°
-│                          pos / 1.2e-2°/day speed. All light-effect stages verified byte-identical to C
-│                          in isolation; only the combination diverges, on that one ill-conditioned point.
-│                          See docs/swisseph-c-potential-bugs.md §7. NodApsMethod/NodesApsides re-exported
-│                          in lib.rs. PLMASS/IPL_TO_ELEM/OSCU_BAR_DISTANCE_THRESHOLD_AU in constants.rs
-│                          (orbit.rs PNOC 6 needs them too). swi_mean_lunar_elements ported in
-│                          moshier/moon.rs (mean_lunar_elements; note mean_elements_t2 stale-T2 quirk).
+│                          osculating_branch (A.4: instantaneous two-body/angular-momentum ellipse —
+│                          A.4.1 reference distance/Gmsm/dt/ellipse_is_bary via
+│                          Ephemeris::nodaps_osc_body_j2000, A.4.2 up to 3 samples rotated via
+│                          calc::plan_for_osc_elem, A.4.3-A.4.4 per-sample node-tangent-line +
+│                          angular-momentum ellipse elements [uu/sema/ecce/ny] producing all FOUR
+│                          points [xq perihelion, xa aphelion-or-2nd-focal-point, xn/xs
+│                          ellipse-corrected asc/desc node] — the retrograde cosincl flip IS present
+│                          here (absent in lunar_osc_elem's D.3, Moon is never retrograde), A.4.5
+│                          central-difference assembly); transform_nodaps_output (A.5 shared
+│                          pipeline, reused unchanged by both branches with is_true_nodaps=true for
+│                          osculating: ecl->equ, precess to J2000, barycenter/observer,
+│                          deflect_light+aberr_light, precess back, app_pos_rest tail,
+│                          apply_sidereal, extract_output). Goes through calc/context, not backends
+│                          (app-uses-calc-not-backends:nodaps): Moon elements via
+│                          calc::mean_lunar_elements re-export; observer vectors via
+│                          Ephemeris::nodaps_observer (all 3 backends: Moshier xear=heliocentric
+│                          Earth/sun_bary=0, Swiss/JPL xear=real barycentric Earth via
+│                          SwephProvider/JplProvider.positions(Sun,...) dummy-body call — earth_bary/
+│                          sun_bary/earth_helio are always populated regardless of the queried body);
+│                          Ephemeris::nodaps_osc_body_j2000 (A.4.1/A.4.2 body-position helper: TRUEPOS
+│                          J2000-equatorial pos+speed in the requested helio/bary frame across all 3
+│                          backends, Moon always geocentric via the existing raw_moon_at, Earth gets
+│                          the EMB correction added back via the same raw_moon_at — Moshier rejects
+│                          want_bary=true with Error::UnsupportedFlags(BARYCTR), matching calc_inner's
+│                          general BARYCTR gate: Moshier has no real solar-system barycenter).
+│                          CONSTRAINT-BOUND PRECISION: mean branch's apparent DESCENDING NODE is
+│                          ill-conditioned (docs/swisseph-c-potential-bugs.md §7, ~3.5e-4°pos/
+│                          1.2e-2°/day speed, tolerances in tests/golden/nodaps.rs::tolerance);
+│                          osculating branch's node-direction `fac=z/ż` division similarly amplifies
+│                          backend FP noise into BOTH asc/desc nodes (§8, verified via
+│                          identical-input formula check — feeding C's own dumped xpos[1] reproduces
+│                          C's uu/cosnode/sinnode to ~12 digits, so the divergence is 100% upstream
+│                          backend noise, not a formula bug; worst observed ~1.2e-3°pos/1.9e-2°/day
+│                          for Jupiter OSCU_BAR descending node), tiered tolerances in
+│                          tests/golden/nodaps.rs::osc_tolerance (peri/aphe tightest, asc looser, desc
+│                          loosest). NodApsMethod/NodesApsides re-exported in lib.rs.
+│                          PLMASS/IPL_TO_ELEM/OSCU_BAR_DISTANCE_THRESHOLD_AU/NODE_CALC_INTV in
+│                          constants.rs (orbit.rs PNOC 6 needs them too). swi_mean_lunar_elements
+│                          ported in moshier/moon.rs (mean_lunar_elements; note mean_elements_t2
+│                          stale-T2 quirk). SwephProvider/JplProvider (calc.rs) widened to pub(crate)
+│                          for context.rs's nodaps_observer/nodaps_osc_body_j2000 reuse.
 └── stars.rs            — StarCatalog, Star, load_catalog, builtin_star (8 ayanamsa ref stars), search, parse
 
 tests/
@@ -482,14 +507,28 @@ tests/
 │                          EXCEPT Moshier node/apogee speed relaxed to 5e-6 for the documented C
 │                          global-cache finite-difference artifact — see CLAUDE.md
 │                          <stateless_tolerance> §3)
-│   ├── nodaps.rs        — golden tests for swe_nod_aps mean branch (swisseph-rs/85: 200 Moshier
-│                          cases — 10 bodies {Sun/Moon/Mercury..Neptune/Earth} × 4 epochs (incl.
-│                          pre-1900) × 5 flags {SPEED, SPEED|EQUATORIAL, no_speed, SPEED|TRUEPOS,
-│                          SPEED|EQUATORIAL|TRUEPOS}, asserting all four asc/desc/peri/aphe [f64;6]).
-│                          Per-point/flag tolerance (see the `tolerance` fn): TRUEPOS geometry tight
-│                          (1e-9 pos/1e-8 speed, bit-exact), apparent asc/peri/aphe 1e-6, apparent
-│                          descending node relaxed to 1e-3°/2e-2°/day for the C node-distance
-│                          ill-conditioning (docs/swisseph-c-potential-bugs.md §7))
+│   ├── nodaps.rs        — golden tests for swe_nod_aps mean (swisseph-rs/85) + osculating
+│                          (swisseph-rs/86) branches. mean: 200 Moshier cases — 10 bodies
+│                          {Sun/Moon/Mercury..Neptune/Earth} × 4 epochs (incl. pre-1900) × 5 flags
+│                          {SPEED, SPEED|EQUATORIAL, no_speed, SPEED|TRUEPOS, SPEED|EQUATORIAL|
+│                          TRUEPOS}, asserting all four asc/desc/peri/aphe [f64;6]. Per-point/flag
+│                          tolerance (see the `tolerance` fn): TRUEPOS geometry tight (1e-9 pos/1e-8
+│                          speed, bit-exact), apparent asc/peri/aphe 1e-6, apparent descending node
+│                          relaxed to 1e-3°/2e-2°/day for the C node-distance ill-conditioning
+│                          (docs/swisseph-c-potential-bugs.md §7). oscu: 72 cases — 9 bodies
+│                          {Moon/Mercury..Neptune/Pluto} × 4 epochs (pre-1900 nudged to 1800-Jan-5,
+│                          `osc_epochs` in gen_nodaps.c, off the sepl_18 file boundary) × 2 backends
+│                          {MOSEPH, SWIEPH} × SEFLG_SPEED, method=OSCU. oscu_bar: 8 SWIEPH cases —
+│                          Jupiter/Saturn/Pluto (beyond 6 AU)/Mercury (inside it) × 2 epochs,
+│                          method=OSCU_BAR (Moshier has no real barycenter, rejects with
+│                          Error::UnsupportedFlags — untested by this SWIEPH-only battery). fopoint:
+│                          6 MOSEPH cases — Moon/Mars/Jupiter × 2 epochs, method=OSCU|FOPOINT.
+│                          Shared `check_case`/`ephemeris_for` (backend-keyed Ephemeris cache) helpers.
+│                          Osculating tolerance is tiered by point (see `osc_tolerance` fn) —
+│                          peri/aphe 5e-5°pos/1e-4°/day, asc 1e-3°/1e-4°/day, desc 2e-3°/3e-2°/day —
+│                          for the `fac=z/ż` node-direction division amplifying backend FP noise into
+│                          BOTH nodes (docs/swisseph-c-potential-bugs.md §8, verified via an
+│                          identical-input formula check, not guessed))
 │   ├── moshier_backend.rs — golden tests for backend::compute (110 cases: 10 bodies × 11 epochs + Earth zero-check)
 │   ├── moshier_moon.rs — golden tests for moshmoon2 (11 cases: Moon at 11 epochs)
 │   ├── moshier_planet.rs — golden tests for moshplan2 (81 cases: 9 planets × 9 epochs)
