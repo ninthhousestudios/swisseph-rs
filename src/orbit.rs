@@ -223,8 +223,17 @@ fn get_gmsm(
                     plm += 1.0 / PLMASS[IPL_TO_ELEM[j as usize]];
                 }
             }
-            let x = eph.calc(tjd_et, Body::Earth, iflj2000p)?;
-            if r > x.data[2] {
+            // calc(Body::Earth) returns [0;6] in this stateless port (Earth
+            // is the observer origin).  Geocentric Sun distance == Earth's
+            // heliocentric distance, so query Sun without HELCTR/BARYCTR.
+            let earth_r = eph
+                .calc(
+                    tjd_et,
+                    Body::Sun,
+                    iflj2000p & !(CalcFlags::HELCTR | CalcFlags::BARYCTR),
+                )?
+                .data[2];
+            if r > earth_r {
                 plm += 1.0 / PLMASS[IPL_TO_ELEM[14]];
             }
         }
