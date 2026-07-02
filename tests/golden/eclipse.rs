@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use swisseph::{CalcFlags, EclipseFlags, Ephemeris};
+use swisseph::{Body, CalcFlags, EclipseFlags, Ephemeris, EphemerisConfig};
 
 #[derive(Deserialize)]
 struct SolWhereCase {
@@ -64,6 +64,26 @@ struct LunWhenLocCase {
 }
 
 #[derive(Deserialize)]
+struct OccWhereCase {
+    tjd_ut: f64,
+    ipl: i32,
+    starname: Option<String>,
+    retval: i32,
+    geopos: [f64; 10],
+    dcore: [f64; 7],
+}
+
+#[derive(Deserialize)]
+struct OccWhenGlobCase {
+    tjd_start: f64,
+    ipl: i32,
+    starname: Option<String>,
+    backward: bool,
+    retval: i32,
+    tret: [f64; 10],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     sol_where: Vec<SolWhereCase>,
     sol_how: Vec<SolHowCase>,
@@ -72,6 +92,8 @@ struct GoldenData {
     lun_how: Vec<LunHowCase>,
     lun_when: Vec<LunWhenCase>,
     lun_when_loc: Vec<LunWhenLocCase>,
+    occ_where: Vec<OccWhereCase>,
+    occ_when_glob: Vec<OccWhenGlobCase>,
 }
 
 fn load() -> GoldenData {
@@ -80,6 +102,17 @@ fn load() -> GoldenData {
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
     serde_json::from_str(&data)
         .unwrap_or_else(|e| panic!("Failed to parse {}: {e}", path.display()))
+}
+
+/// Ephemeris with `ephe_path` set (unlike this file's other tests' `Default::default()`) so the
+/// occ_where/occ_when_glob Aldebaran cases can load the fixed-star catalog (same setup as
+/// `tests/golden/fixstar.rs`).
+fn make_eph() -> Ephemeris {
+    let config = EphemerisConfig {
+        ephe_path: Some("../swisseph/ephe".into()),
+        ..Default::default()
+    };
+    Ephemeris::new(config).unwrap()
 }
 
 /// `swe_sol_eclipse_where` (`Ephemeris::sol_eclipse_where`): shadow-cone geometry only. C's
@@ -758,6 +791,171 @@ fn lun_when_loc() {
             &format!("{label}.attr[10] (saros_member)"),
             c.attr[10],
             result.attr.saros_member,
+            1e-5,
+        );
+    }
+}
+
+/// `swe_lun_occult_where` (`Ephemeris::lun_occult_where`): shadow-cone geometry for two planets
+/// (Venus, Mars) and one fixed star (Aldebaran, via `starname`; `ipl` is then just C's `-1`
+/// sentinel, translated verbatim through `Body::try_from` -- unused once `starname` is set).
+/// `dcore[1..6]` come from the same `swi_test_eclipse_where_dcore` test-only hook `sol_where`
+/// uses (generic over `ipl`/`starname` already).
+#[test]
+fn occ_where() {
+    let data = load();
+    let ephe = make_eph();
+    for (i, c) in data.occ_where.iter().enumerate() {
+        let label = format!(
+            "occ_where[{i}][tjd_ut={},ipl={},starname={:?}]",
+            c.tjd_ut, c.ipl, c.starname
+        );
+        let body = Body::try_from(c.ipl).unwrap();
+        let result = ephe
+            .lun_occult_where(c.tjd_ut, body, c.starname.as_deref(), CalcFlags::MOSEPH)
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.central_longitude"),
+            c.geopos[0],
+            result.central_longitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.central_latitude"),
+            c.geopos[1],
+            result.central_latitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.core_diameter_km (dcore[0])"),
+            c.dcore[0],
+            result.core_diameter_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.penumbra_diameter_km"),
+            c.dcore[1],
+            result.penumbra_diameter_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.shadow_axis_distance_km"),
+            c.dcore[2],
+            result.shadow_axis_distance_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.umbra_diameter_fundamental_km"),
+            c.dcore[3],
+            result.umbra_diameter_fundamental_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.penumbra_diameter_fundamental_km"),
+            c.dcore[4],
+            result.penumbra_diameter_fundamental_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.cos_umbra_half_angle"),
+            c.dcore[5],
+            result.cos_umbra_half_angle,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.cos_penumbra_half_angle"),
+            c.dcore[6],
+            result.cos_penumbra_half_angle,
+            1e-7,
+        );
+    }
+}
+
+/// `swe_lun_occult_when_glob` (`Ephemeris::lun_occult_when_glob`): global occultation search for
+/// the same three occulted bodies as `occ_where`, `ifltype = 0` (all types valid for the occulted
+/// body), both search directions.
+#[test]
+fn occ_when_glob() {
+    let data = load();
+    let ephe = make_eph();
+    for (i, c) in data.occ_when_glob.iter().enumerate() {
+        let label = format!(
+            "occ_when_glob[{i}][tjd_start={},ipl={},starname={:?},backward={}]",
+            c.tjd_start, c.ipl, c.starname, c.backward
+        );
+        let body = Body::try_from(c.ipl).unwrap();
+        let result = ephe
+            .lun_occult_when_glob(
+                c.tjd_start,
+                body,
+                c.starname.as_deref(),
+                CalcFlags::MOSEPH,
+                EclipseFlags::empty(),
+                c.backward,
+            )
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[0] (time_maximum)"),
+            c.tret[0],
+            result.time_maximum,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[1] (time_ra_conjunction)"),
+            c.tret[1],
+            result.time_ra_conjunction,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[2] (time_begin)"),
+            c.tret[2],
+            result.time_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[3] (time_end)"),
+            c.tret[3],
+            result.time_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[4] (time_totality_begin)"),
+            c.tret[4],
+            result.time_totality_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[5] (time_totality_end)"),
+            c.tret[5],
+            result.time_totality_end,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[6] (time_centerline_begin)"),
+            c.tret[6],
+            result.time_centerline_begin,
+            1e-5,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.tret[7] (time_centerline_end)"),
+            c.tret[7],
+            result.time_centerline_end,
             1e-5,
         );
     }

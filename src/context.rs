@@ -539,6 +539,37 @@ impl Ephemeris {
         crate::eclipse::lun_eclipse_when_loc(self, tjd_start, ifl, geopos, backward)
     }
 
+    /// Geographic position of maximal occultation of `body`/`starname` by the Moon at `tjd_ut`
+    /// (UT). `starname` (if given, non-empty) takes precedence over `body`. Port of
+    /// `swe_lun_occult_where` (swecl.c:606-630).
+    pub fn lun_occult_where(
+        &self,
+        tjd_ut: f64,
+        body: Body,
+        starname: Option<&str>,
+        ifl: CalcFlags,
+    ) -> Result<crate::eclipse::EclipseWhere, Error> {
+        crate::eclipse::lun_occult_where(self, tjd_ut, body, starname, ifl)
+    }
+
+    /// Global occultation search: next/previous occultation of `body`/`starname` by the Moon
+    /// anywhere on Earth from `tjd_start` (UT), restricted to types in `ifltype` (empty = all
+    /// types valid for the occulted body). `starname` (if given, non-empty) takes precedence
+    /// over `body`. Port of `swe_lun_occult_when_glob` (swecl.c:1572-1984).
+    pub fn lun_occult_when_glob(
+        &self,
+        tjd_start: f64,
+        body: Body,
+        starname: Option<&str>,
+        ifl: CalcFlags,
+        ifltype: EclipseFlags,
+        backward: bool,
+    ) -> Result<crate::eclipse::OccultGlobal, Error> {
+        crate::eclipse::lun_occult_when_glob(
+            self, tjd_start, body, starname, ifl, ifltype, backward,
+        )
+    }
+
     /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
     /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
     /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`

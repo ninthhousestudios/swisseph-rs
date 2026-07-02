@@ -31,7 +31,7 @@ pub mod topocentric;
 pub use config::{EphemerisConfig, TopoPosition};
 pub use context::{CalcResult, Ephemeris};
 pub use eclipse::{
-    EclipseHow, EclipseWhere, LunarEclipseGlobal, LunarEclipseHow, LunarEclipseLocal,
+    EclipseHow, EclipseWhere, LunarEclipseGlobal, LunarEclipseHow, LunarEclipseLocal, OccultGlobal,
     SolarEclipseGlobal, SolarEclipseLocal,
 };
 pub use error::Error;

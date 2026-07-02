@@ -237,6 +237,27 @@ src/
 │                          visible phase / degenerate rise-set ordering / final-instant no-eclipse,
 │                          retries with `tjd_start = tret[0] ± 25` days). Ephemeris::
 │                          lun_eclipse_when_loc in context.rs delegates.
+│                          normalize_occulted_body (asteroid-134340->Pluto aliasing, shared by
+│                          lun_occult_where/lun_occult_when_glob, swisseph-rs/78); lun_occult_where
+│                          (swe_lun_occult_where port: thin wrapper over eclipse_where threading
+│                          ipl/starname in place of the Sun — no attr[]/eclipse_how call, same
+│                          "geometry only" scope as sol_eclipse_where); OccultGlobal (tret[0..7],
+│                          same slot layout as SolarEclipseGlobal but tret[1] is the occulted
+│                          body's transit instant, not specifically the Sun's); lun_occult_when_glob
+│                          (swe_lun_occult_when_glob port: generic `dl/13` Newton-style Moon-body
+│                          ecliptic-longitude bracketing in place of solar's Meeus lunation-number
+│                          estimate — occultation search must work for any sidereal period incl. a
+│                          fixed star's zero proper motion; reuses contact_dc/find_zero/find_maximum
+│                          verbatim from the solar port; two C `eclipse_where` calls with identical
+│                          arguments collapsed into one reused result, since eclipse_where is pure
+│                          and `tjd` is unchanged between them — makes C's dead "extremely small
+│                          percentage" fallback branch provably unreachable; `dtb` NOT divided by 3
+│                          here unlike solar's contact-time refinement — literal C divergence;
+│                          ifltype ANNULAR/HYBRID validity gated on `ipl==Body::Sun` — ported via
+│                          `starname` presence rather than replicating C's `ipl<0`->0 sentinel
+│                          clamp; no `SE_ECL_ONE_TRY` support, matching sol_eclipse_when_glob's
+│                          bool-only `backward`). Ephemeris::lun_occult_where/lun_occult_when_glob
+│                          in context.rs delegate.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -332,7 +353,21 @@ tests/
 │                          4 cases — 1 geopos (near-central Zurich) × the same 2 tjd_start × 2
 │                          backward, asserts tret[0,2..9] eps 1e-5 day + all attr[] fields except
 │                          attr[8] (duplicate) + exact retval flags bitmask; both passed on the
-│                          first implementation attempt, no escape-hatch escalation needed)
+│                          first implementation attempt, no escape-hatch escalation needed;
+│                          occ_where: 3 cases — Venus/Mars (ipl) + Aldebaran (starname) all at
+│                          tjd_ut=2458800.5, via a `make_eph()` with `ephe_path` set (unlike this
+│                          file's other tests) so Aldebaran resolves through the fixstar catalog;
+│                          asserts central_longitude/central_latitude + all 6 dcore[] shadow-cone
+│                          fields (via the same swi_test_eclipse_where_dcore hook sol_where uses,
+│                          already generic over ipl/starname) eps 1e-7 + exact retval flags
+│                          bitmask; occ_when_glob: 6 cases — same 3 occulted bodies ×
+│                          2 backward, tjd_start=2451545.0, ifltype=0, asserts tret[0..7] eps 1e-5
+│                          day + exact retval flags bitmask; both passed on the first
+│                          implementation attempt (after fixing gen_eclipse.c's star-name buffer:
+│                          swe_fixstar strcpy()s into its `starname` argument in place, so a
+│                          string-literal pointer segfaults — must copy into a local `char[]`
+│                          first, and `swe_set_ephe_path` needs an explicit path for the same
+│                          reason fixstar tests do), no escape-hatch escalation needed)
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)

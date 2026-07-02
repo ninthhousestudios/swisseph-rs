@@ -2,9 +2,10 @@
  * Generates golden reference data for the eclipse module: swe_sol_eclipse_where
  * (RSE 5, swisseph-rs/72), swe_sol_eclipse_how (RSE 6, swisseph-rs/73),
  * swe_sol_eclipse_when_glob (RSE 7, swisseph-rs/74), swe_sol_eclipse_when_loc
- * (RSE 8, swisseph-rs/75), swe_lun_eclipse_how (RSE 9, swisseph-rs/76), and
- * swe_lun_eclipse_when + swe_lun_eclipse_when_loc (RSE 10, swisseph-rs/77). Later RSE
- * tasks (11-12) add more keys to this same file.
+ * (RSE 8, swisseph-rs/75), swe_lun_eclipse_how (RSE 9, swisseph-rs/76),
+ * swe_lun_eclipse_when + swe_lun_eclipse_when_loc (RSE 10, swisseph-rs/77), and
+ * swe_lun_occult_where + swe_lun_occult_when_glob (RSE 11, swisseph-rs/78). Later RSE
+ * task (12) adds more keys to this same file.
  *
  * The "dcore" field in each sol_where case comes from swi_test_eclipse_where_dcore, a
  * non-static test-only hook added to ../swisseph/swecl.c (right after calc_planet_star) that
@@ -22,6 +23,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include "swephexp.h"
 
 /* swi_test_eclipse_where_dcore: see ../swisseph/swecl.c patch note above. Not declared in any
@@ -54,9 +56,24 @@ static double sol_how_geopos[][3] = {
 };
 #define N_SOL_HOW_GEOPOS (sizeof(sol_how_geopos) / sizeof(sol_how_geopos[0]))
 
+/* Occulted bodies for occ_where/occ_when_glob: two planets (Venus, Mars) plus one fixed star
+ * (Aldebaran, via starname -- ipl is ignored by calc_planet_star/body_radius_au once starname is
+ * non-empty, so any placeholder ipl works; -1 mirrors C's own "ipl<0 -> clamp to SE_SUN"
+ * convention for star-only calls). */
+struct occ_body { int32 ipl; const char *starname; };
+static struct occ_body occ_bodies[] = {
+    { SE_VENUS, NULL },
+    { SE_MARS, NULL },
+    { -1, "Aldebaran" },
+};
+#define N_OCC_BODIES (sizeof(occ_bodies) / sizeof(occ_bodies[0]))
+
 int main(void) {
     int first;
-    swe_set_ephe_path(NULL);
+    /* Explicit path (rather than NULL's compiled-in default) so the occ_where/occ_when_glob
+     * Aldebaran cases can find sefstars.txt (swisseph-rs/78) -- everything else in this file only
+     * uses SEFLG_MOSEPH, which needs no ephemeris files. */
+    swe_set_ephe_path("../swisseph/ephe");
 
     printf("{\n");
 
@@ -260,6 +277,77 @@ int main(void) {
                 for (int k = 0; k < 11; k++) printf("%s%.20e", k ? ", " : "", attr[k]);
                 printf("]}");
             }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* === occ_where === */
+    static double occ_where_tjd_ut = 2458800.5;
+    printf("  \"occ_where\": [\n");
+    first = 1;
+    for (size_t i = 0; i < N_OCC_BODIES; i++) {
+        double tjd_ut = occ_where_tjd_ut;
+        int32 ipl = occ_bodies[i].ipl;
+        /* swe_fixstar (reached via calc_planet_star when starname is set) strcpy()s into this
+         * buffer in place (e.g. resolving traditional names) -- must be a writable buffer, not a
+         * string-literal pointer, or it segfaults. */
+        char starbuf[AS_MAXCH] = { 0 };
+        if (occ_bodies[i].starname != NULL)
+            strcpy(starbuf, occ_bodies[i].starname);
+        char *starname = occ_bodies[i].starname != NULL ? starbuf : NULL;
+        int32 ifl = SEFLG_MOSEPH;
+        double geopos[10] = { 0 };
+        double attr[20] = { 0 };
+        char serr[256] = { 0 };
+        int32 retval = swe_lun_occult_where(tjd_ut, ipl, starname, ifl, geopos, attr, serr);
+
+        /* swe_lun_occult_where masks ifl &= SEFLG_EPHMASK before calling eclipse_where
+         * (swecl.c:619) -- replicate that here so the dcore we capture (via the same test-only
+         * hook used for sol_where) matches what swe_lun_occult_where's own eclipse_where call
+         * actually saw. */
+        double geopos2[10] = { 0 };
+        double dcore[10] = { 0 };
+        char serr2[256] = { 0 };
+        swi_test_eclipse_where_dcore(tjd_ut, ipl, starname, ifl & SEFLG_EPHMASK, geopos2, dcore,
+                                      serr2);
+
+        if (!first) printf(",\n");
+        first = 0;
+        printf("    {\"tjd_ut\": %.17g, \"ipl\": %d, \"starname\": %s, \"retval\": %d, \"geopos\": [",
+               tjd_ut, ipl, starname ? "\"Aldebaran\"" : "null", retval);
+        for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", geopos[k]);
+        printf("], \"dcore\": [");
+        for (int k = 0; k < 7; k++) printf("%s%.20e", k ? ", " : "", dcore[k]);
+        printf("]}");
+    }
+    printf("\n  ],\n");
+
+    /* === occ_when_glob === */
+    static double occ_when_glob_tjd_start = 2451545.0;
+    printf("  \"occ_when_glob\": [\n");
+    first = 1;
+    for (size_t i = 0; i < N_OCC_BODIES; i++) {
+        for (int backward = 0; backward <= 1; backward++) {
+            double tjd_start = occ_when_glob_tjd_start;
+            int32 ipl = occ_bodies[i].ipl;
+            char starbuf[AS_MAXCH] = { 0 };
+            if (occ_bodies[i].starname != NULL)
+                strcpy(starbuf, occ_bodies[i].starname);
+            char *starname = occ_bodies[i].starname != NULL ? starbuf : NULL;
+            int32 ifltype = 0;
+            double tret[10] = { 0 };
+            char serr[256] = { 0 };
+            int32 retval = swe_lun_occult_when_glob(tjd_start, ipl, starname, SEFLG_MOSEPH,
+                                                      ifltype, tret, backward, serr);
+
+            if (!first) printf(",\n");
+            first = 0;
+            printf("    {\"tjd_start\": %.17g, \"ipl\": %d, \"starname\": %s, \"backward\": %s, "
+                   "\"retval\": %d, \"tret\": [",
+                   tjd_start, ipl, starname ? "\"Aldebaran\"" : "null",
+                   backward ? "true" : "false", retval);
+            for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+            printf("]}");
         }
     }
     printf("\n  ]\n");

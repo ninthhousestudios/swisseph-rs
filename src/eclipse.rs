@@ -2295,3 +2295,405 @@ pub(crate) fn lun_eclipse_when_loc(
         });
     }
 }
+
+// === Occultations (Moon occults a planet/asteroid/fixed star) ===
+//
+// `swe_lun_occult_where` and `swe_lun_occult_when_glob` (swecl.c:606-630, 1572-1984,
+// docs/c-ref-occultation.md). Both reuse `eclipse_where`/`calc_planet_star`/`body_radius_au`
+// verbatim -- the Sun is just the `ipl=Body::Sun, starname=None` special case those already
+// handle generically. The delta from the solar port is confined to: asteroid-134340->Pluto
+// aliasing, and (for `_when_glob`) a generic Moon-body elongation bracketing search in place of
+// solar's Meeus lunation-number estimate (occultation search must work for any sidereal period,
+// including a fixed star's zero proper motion).
+
+/// Asteroid-134340 (numbered-asteroid Pluto) aliasing to `Body::Pluto`, applied by all three
+/// `swe_lun_occult_*` entry points (swecl.c:620-623, 1599-1600, 2084-2085).
+fn normalize_occulted_body(ipl: Body) -> Body {
+    match ipl {
+        Body::Asteroid(id) if id.mpc_number() == 134340 => Body::Pluto,
+        other => other,
+    }
+}
+
+/// Geographic position of maximal occultation of `ipl`/`starname` by the Moon at `tjd_ut` (UT).
+/// Port of `swe_lun_occult_where` (swecl.c:606-630, §1) -- a thin wrapper over [`eclipse_where`]
+/// threading the occulted body through in place of the Sun; same shape/masking as
+/// [`sol_eclipse_where`]. C additionally calls `eclipse_how` here purely to catch an error from
+/// it and to fill `attr[3]`, both of which the Rust port omits for the same reason
+/// `sol_eclipse_where` does: local-circumstance attributes live in a separate function
+/// ([`eclipse_how`], exposed for occultations by a later task).
+pub(crate) fn lun_occult_where(
+    eph: &Ephemeris,
+    tjd_ut: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    ifl: CalcFlags,
+) -> Result<EclipseWhere, Error> {
+    let ipl = normalize_occulted_body(ipl);
+    eclipse_where(eph, tjd_ut, ipl, starname, ifl & crate::calc::EPHMASK)
+}
+
+/// Global occultation search result: `tret[0..10]` per `swe_lun_occult_when_glob`
+/// (swecl.c:1572-1984, §2). Same slot layout as [`SolarEclipseGlobal`], but `time_ra_conjunction`
+/// (`tret[1]`) is the transit instant of the *occulted body* (not necessarily the Sun), and the
+/// search never produces `ANNULAR`/`HYBRID` for `ipl != Body::Sun` (rejected/stripped from
+/// `ifltype` up front -- see [`lun_occult_when_glob`]).
+#[derive(Debug, Clone, Copy)]
+pub struct OccultGlobal {
+    /// Time (UT) of maximum occultation: geocentric minimum Moon-body angular separation.
+    /// `tret[0]`.
+    pub time_maximum: f64,
+    /// Time (UT) when the occulted body transits the meridian relative to the Moon (geocentric
+    /// ecliptic-longitude conjunction), or `0.0` if no such instant falls within the occultation
+    /// window. `tret[1]`.
+    pub time_ra_conjunction: f64,
+    /// Time (UT) of occultation begin, first contact anywhere on Earth. `tret[2]`.
+    pub time_begin: f64,
+    /// Time (UT) of occultation end, last contact anywhere on Earth. `tret[3]`.
+    pub time_end: f64,
+    /// Time (UT) of totality/annularity begin, `0.0` if partial. `tret[4]`.
+    pub time_totality_begin: f64,
+    /// Time (UT) of totality/annularity end, `0.0` if partial. `tret[5]`.
+    pub time_totality_end: f64,
+    /// Time (UT) of center-line begin, `0.0` if noncentral. `tret[6]`.
+    pub time_centerline_begin: f64,
+    /// Time (UT) of center-line end, `0.0` if noncentral. `tret[7]`.
+    pub time_centerline_end: f64,
+    /// Occultation-type classification (CENTRAL/NONCENTRAL combined with TOTAL/PARTIAL, plus
+    /// ANNULAR/HYBRID when `ipl == Body::Sun`). Never empty -- the search retries indefinitely
+    /// (bounded only by ephemeris range) until a matching occultation is found.
+    pub flags: EclipseFlags,
+}
+
+/// Global occultation search: find the next (or, if `backward`, previous) occultation of
+/// `ipl`/`starname` by the Moon anywhere on Earth after/before `tjd_start` (UT), restricted to
+/// types in `ifltype`. Port of `swe_lun_occult_when_glob` (swecl.c:1572-1984, §2).
+/// `ifltype = EclipseFlags::empty()` means all types.
+///
+/// Structurally a near-duplicate of [`sol_eclipse_when_glob`] -- same contact-time refinement
+/// (`contact_dc`/`find_zero`), annular-total detection, and transit computation -- but the rough
+/// initial estimate uses a generic Newton-style Moon-body elongation bracket (`dl/13` per
+/// swecl.c:1640-1666) instead of solar's Meeus lunation-number formula, since occultation search
+/// must work for any occulted body's sidereal period (including a fixed star's zero proper
+/// motion). C's `SE_ECL_ONE_TRY` early-return optimization (a single-conjunction-check mode for
+/// callers willing to resume the search themselves) has no equivalent here -- this always
+/// searches until a matching occultation is found, matching the exposed `backward: bool`-only
+/// signature (same choice already made for [`sol_eclipse_when_glob`], which has no one-try mode
+/// at all).
+pub(crate) fn lun_occult_when_glob(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    ifl: CalcFlags,
+    ifltype: EclipseFlags,
+    backward: bool,
+) -> Result<OccultGlobal, Error> {
+    let ipl = normalize_occulted_body(ipl);
+    let ifl = ifl & crate::calc::EPHMASK;
+    let config = eph.config();
+
+    if ifltype == (EclipseFlags::PARTIAL | EclipseFlags::CENTRAL) {
+        return Err(Error::CError(
+            "central partial eclipses do not exist".to_string(),
+        ));
+    }
+
+    // `ipl == SE_SUN` (as opposed to a real occultation of a planet/asteroid/star) is the only
+    // case where annular/annular-total ("hybrid") occultations are geometrically meaningful --
+    // C's `ipl != SE_SUN` predicate, ported directly here rather than replicating C's separate
+    // `if (ipl < 0) ipl = 0` clamp (a raw-int sentinel for "star lookup, ignore ipl" with no
+    // equivalent needed once `starname: Option<&str>` already carries that distinction).
+    let is_sun = ipl == Body::Sun && starname.unwrap_or("").is_empty();
+    let mut ifltype = ifltype;
+    if !is_sun {
+        // C tests this with `&`/`==` differently for the hard-error vs silent-strip cases
+        // (swecl.c:1626-1634) -- ported literally, not unified.
+        let stripped = ifltype & !(EclipseFlags::NONCENTRAL | EclipseFlags::CENTRAL);
+        if stripped == EclipseFlags::ANNULAR || ifltype == EclipseFlags::HYBRID {
+            return Err(Error::CError(format!(
+                "annular occulation do not exist for object {} {}",
+                ipl.to_raw_id(),
+                starname.unwrap_or("")
+            )));
+        }
+        if ifltype.intersects(EclipseFlags::ANNULAR | EclipseFlags::HYBRID) {
+            ifltype &= !(EclipseFlags::ANNULAR | EclipseFlags::HYBRID);
+        }
+    }
+    if ifltype.is_empty() {
+        ifltype = EclipseFlags::TOTAL
+            | EclipseFlags::PARTIAL
+            | EclipseFlags::NONCENTRAL
+            | EclipseFlags::CENTRAL;
+        if is_sun {
+            ifltype |= EclipseFlags::ANNULAR | EclipseFlags::HYBRID;
+        }
+    }
+    // C tests these two with a bitwise `&` (any-bit-set), unlike solar's `==` (bare-type-only)
+    // expansion (swecl.c:1640-1642 vs swecl.c:1234-1236) -- literal divergence, not a typo.
+    if ifltype.intersects(EclipseFlags::TOTAL | EclipseFlags::ANNULAR | EclipseFlags::HYBRID) {
+        ifltype |= EclipseFlags::NONCENTRAL | EclipseFlags::CENTRAL;
+    }
+    if ifltype.contains(EclipseFlags::PARTIAL) {
+        ifltype |= EclipseFlags::NONCENTRAL;
+    }
+
+    let direction = if backward { -1.0 } else { 1.0 };
+    let iflag = CalcFlags::EQUATORIAL | ifl;
+    let iflag_cart = iflag | CalcFlags::XYZ;
+    let de_km = 6378.140;
+
+    let mut t = tjd_start;
+
+    'next_try: loop {
+        // §2 step 1: rough conjunction in ecliptic longitude (swecl.c:1640-1666). Plain `ifl`
+        // (no EQUATORIAL/SPEED) -- polar ecliptic lon/lat/dist in degrees.
+        let ls0 = calc_planet_star(eph, t, ipl, starname, ifl)?;
+        if let Some(name) = starname
+            && !name.is_empty()
+            && ls0[1].abs() > 7.0
+        {
+            return Err(Error::CError(format!(
+                "occultation never occurs: star {name} has ecl. lat. {:.1}",
+                ls0[1]
+            )));
+        }
+        let mut ls = ls0;
+        let mut lm = eph.calc(t, Body::Moon, ifl)?.data;
+        let mut dl = normalize_degrees(ls[0] - lm[0]);
+        if backward {
+            dl -= 360.0;
+        }
+        while dl.abs() > 0.1 {
+            t += dl / 13.0;
+            ls = calc_planet_star(eph, t, ipl, starname, ifl)?;
+            lm = eph.calc(t, Body::Moon, ifl)?.data;
+            dl = normalize_degrees(ls[0] - lm[0]);
+            if dl > 180.0 {
+                dl -= 360.0;
+            }
+        }
+        let mut tjd = t;
+
+        // §2 step 2: latitude-difference gate.
+        if (ls[1] - lm[1]).abs() > 2.0 {
+            t += direction * 20.0;
+            continue 'next_try;
+        }
+
+        // §2 step 3: occulted-body angular radius (reuses the same helper as eclipse_where).
+        let body_radius = body_radius_au(ipl, starname);
+
+        // §2 step 4: refine time of maximum occultation (parabola-vertex bracketing,
+        // dtstart=1, dtdiv=3 -- fixed, unlike solar's conditional dtstart).
+        let mut dt = 1.0;
+        while dt > 0.0001 {
+            let mut dc = [0.0f64; 3];
+            let mut tt = tjd - dt;
+            for dc_i in dc.iter_mut() {
+                let ls2 = calc_planet_star(eph, tt, ipl, starname, iflag)?;
+                let lm2 = eph.calc(tt, Body::Moon, iflag)?.data;
+                let xs = calc_planet_star(eph, tt, ipl, starname, iflag_cart)?;
+                let xm = eph.calc(tt, Body::Moon, iflag_cart)?.data;
+                let rmoon = (RMOON / lm2[2]).asin() * RADTODEG;
+                let rsun = (body_radius / ls2[2]).asin() * RADTODEG;
+                *dc_i = dot_prod_unit([xs[0], xs[1], xs[2]], [xm[0], xm[1], xm[2]]).acos()
+                    * RADTODEG
+                    - (rmoon + rsun);
+                tt += dt;
+            }
+            let (dtint, _) = crate::math::find_maximum(dc[0], dc[1], dc[2], dt);
+            tjd += dtint + dt;
+            dt /= 3.0;
+        }
+
+        // §2 step 5: single ET->UT deltaT subtraction (not solar's 3-pass fixed point).
+        let tjd = tjd - crate::deltat::calc_deltat(tjd, config);
+
+        // §2 step 6: C calls `eclipse_where` twice here with identical arguments (once to
+        // confirm an occultation exists anywhere, once more to fetch the classification) --
+        // since `tjd` is unchanged between the two calls and `eclipse_where` is a pure function
+        // of its arguments, the second call is provably redundant, and reusing one result here
+        // makes C's dead "retflag == 0, extremely small percentage" fallback (swecl.c:1762-1766)
+        // genuinely unreachable, since that branch only fires when the *second* (identical) call
+        // returns empty despite the first not being empty.
+        let where_result = eclipse_where(eph, tjd, ipl, starname, ifl)?;
+        if where_result.flags.is_empty() {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+
+        let mut tret = [0.0f64; 8];
+        tret[0] = tjd;
+        if (backward && tret[0] >= tjd_start - 0.0001)
+            || (!backward && tret[0] <= tjd_start + 0.0001)
+        {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+
+        let mut retflag = where_result.flags;
+
+        if !ifltype.contains(EclipseFlags::NONCENTRAL) && retflag.contains(EclipseFlags::NONCENTRAL)
+        {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::CENTRAL) && retflag.contains(EclipseFlags::CENTRAL) {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::ANNULAR) && retflag.contains(EclipseFlags::ANNULAR) {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::PARTIAL) && retflag.contains(EclipseFlags::PARTIAL) {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+        if !ifltype.intersects(EclipseFlags::TOTAL | EclipseFlags::HYBRID)
+            && retflag.contains(EclipseFlags::TOTAL)
+        {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+
+        // Contact-time refinement (§2 step 6 cont'd, reusing solar's shared `contact_dc`): n=0
+        // occultation begin/end (always), n=1 totality/annularity begin/end (skip if PARTIAL),
+        // n=2 center-line begin/end (skip if NONCENTRAL). `dtb` is NOT divided by 3 here, unlike
+        // solar's `dtb` -- literal C divergence (swecl.c:1842-1843 vs swecl.c:1385-1386).
+        let o = if retflag.contains(EclipseFlags::PARTIAL) {
+            0
+        } else if retflag.contains(EclipseFlags::NONCENTRAL) {
+            1
+        } else {
+            2
+        };
+        let dta = 2.0 / 24.0;
+        let dtb = 10.0 / 24.0 / 60.0;
+
+        for n in 0..=o {
+            let (i1, i2) = match n {
+                0 => (2usize, 3usize),
+                1 => (4usize, 5usize),
+                _ => (6usize, 7usize),
+            };
+
+            let mut dc = [0.0f64; 3];
+            let mut t2 = tjd - dta;
+            for dc_i in dc.iter_mut() {
+                let w = eclipse_where(eph, t2, ipl, starname, ifl)?;
+                *dc_i = contact_dc(n, &w, de_km);
+                t2 += dta;
+            }
+            // Same intentional divergence from C on `find_zero` failure as
+            // `sol_eclipse_when_glob`: leave the slots at 0.0 and skip refinement rather than
+            // refining around a stale/zero value -- unreachable for a confirmed occultation.
+            if let Some((dt1, dt2)) = crate::math::find_zero(dc[0], dc[1], dc[2], dta) {
+                tret[i1] = tjd + dt1 + dta;
+                tret[i2] = tjd + dt2 + dta;
+
+                let mut dt = dtb;
+                for _ in 0..3 {
+                    for &j in &[i1, i2] {
+                        let mut dc2 = [0.0f64; 2];
+                        let mut t3 = tret[j] - dt;
+                        for dc_i in dc2.iter_mut() {
+                            let w = eclipse_where(eph, t3, ipl, starname, ifl)?;
+                            *dc_i = contact_dc(n, &w, de_km);
+                            t3 += dt;
+                        }
+                        let dt1 = dc2[1] / ((dc2[1] - dc2[0]) / dt);
+                        tret[j] -= dt1;
+                    }
+                    dt /= 3.0;
+                }
+            }
+        }
+
+        // Annular-total (hybrid) detection -- unreachable in practice for `ipl != Body::Sun`
+        // since `body_radius_au` returns a small (or zero, for a star) disc, but ported
+        // faithfully rather than short-circuited (§ "Radius handling", c-ref-occultation.md).
+        if retflag.contains(EclipseFlags::TOTAL) {
+            let dc0 = eclipse_where(eph, tret[0], ipl, starname, ifl)?.core_diameter_km;
+            let dc1 = eclipse_where(eph, tret[4], ipl, starname, ifl)?.core_diameter_km;
+            let dc2 = eclipse_where(eph, tret[5], ipl, starname, ifl)?.core_diameter_km;
+            if dc0 * dc1 < 0.0 || dc0 * dc2 < 0.0 {
+                retflag |= EclipseFlags::HYBRID;
+                retflag.remove(EclipseFlags::TOTAL);
+            }
+        }
+        if !ifltype.contains(EclipseFlags::TOTAL) && retflag.contains(EclipseFlags::TOTAL) {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+        if !ifltype.contains(EclipseFlags::HYBRID) && retflag.contains(EclipseFlags::HYBRID) {
+            t = tjd + direction * 20.0;
+            continue 'next_try;
+        }
+
+        // Time of maximum occultation at local apparent noon (transit of the occulted body, not
+        // necessarily the Sun): check for a sign change between occultation begin/end, then
+        // secant-iterate to the exact geocentric ecliptic-longitude conjunction instant.
+        let mut dc_transit = [0.0f64; 2];
+        for (i, dc_i) in dc_transit.iter_mut().enumerate() {
+            let tt = tret[2 + i] + crate::deltat::calc_deltat(tret[2 + i], config);
+            let ls = calc_planet_star(eph, tt, ipl, starname, iflag)?;
+            let lm = eph.calc(tt, Body::Moon, iflag)?.data;
+            let mut d = normalize_degrees(ls[0] - lm[0]);
+            if d > 180.0 {
+                d -= 360.0;
+            }
+            *dc_i = d;
+        }
+        if dc_transit[0] * dc_transit[1] >= 0.0 {
+            tret[1] = 0.0;
+        } else {
+            let mut tjd_ra = tjd;
+            let mut dt = 0.1;
+            let dt1_init = (tret[3] - tret[2]) / 2.0;
+            if dt1_init < dt {
+                dt = dt1_init / 2.0;
+            }
+            while dt > 0.01 {
+                let mut dc2 = [0.0f64; 2];
+                let mut t2 = tjd_ra;
+                for dc_i in dc2.iter_mut() {
+                    let tt = t2 + crate::deltat::calc_deltat(t2, config);
+                    let ls = calc_planet_star(eph, tt, ipl, starname, iflag)?;
+                    let lm = eph.calc(tt, Body::Moon, iflag)?.data;
+                    let mut d = normalize_degrees(ls[0] - lm[0]);
+                    if d > 180.0 {
+                        d -= 360.0;
+                    }
+                    if d > 180.0 {
+                        d -= 360.0;
+                    }
+                    *dc_i = d;
+                    t2 -= dt;
+                }
+                let a = (dc2[1] - dc2[0]) / dt;
+                if a < 1e-10 {
+                    break;
+                }
+                let dt1 = dc2[0] / a;
+                tjd_ra += dt1;
+                dt /= 3.0;
+            }
+            tret[1] = tjd_ra;
+        }
+
+        return Ok(OccultGlobal {
+            time_maximum: tret[0],
+            time_ra_conjunction: tret[1],
+            time_begin: tret[2],
+            time_end: tret[3],
+            time_totality_begin: tret[4],
+            time_totality_end: tret[5],
+            time_centerline_begin: tret[6],
+            time_centerline_end: tret[7],
+            flags: retflag,
+        });
+    }
+}
