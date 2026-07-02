@@ -173,3 +173,38 @@ intentional.
 **Our Rust code:** Ported literally (PNOC 6 — swisseph-rs/87) so the refinement starts from
 the same rough candidates C finds; see `docs/c-ref-orbital-elements.md` §8.2's loop-bound
 quirk note.
+
+## 6. lunar_osc_elem node/apogee speed is inconsistent with its own positions (Moshier)
+
+**Location:** `sweph.c:5360–5471` (`lunar_osc_elem` node/apogee central-difference speed),
+via the off-center samples' `swi_plan_for_osc_elem` (`sweph.c:5758`) reads of `swed.oec` /
+`swed.nut`.
+
+**What:** For `SE_TRUE_NODE` / `SE_OSCU_APOG`, the speed is a central difference of the
+node/apogee *position* over `speed_intv` (`(xx[1] - xx[0]) / speed_intv / 2`). The three
+position samples are computed at `t = tjd`, `tjd ± speed_intv` and each is rotated into the
+ecliptic of date by `swi_plan_for_osc_elem`, which reads the global obliquity/nutation caches
+(`swed.oec`, `swed.nut`) with an equality-on-`teps`/`tnut` fast path. The center sample
+(`t == tjd`) hits the cache; the off-center samples (`t == tjd ± speed_intv`) miss it and
+recompute `calc_epsilon`/`swi_nutation` fresh. The cached and freshly-computed values round
+slightly differently, so the off-center node positions carry a ~2.6e-11 AU offset relative to
+the same epoch computed via a clean, cache-free path. The net effect: **C's node/apogee speed
+does not match a finite difference of C's *own* node/apogee positions.** Verified at
+jd=2305447.5 (Moshier): C's internal ecliptic-cartesian node speed is `-3.36864e-6`, but
+differencing C's own standalone `swe_calc` node positions at jd±0.1 gives `-3.36877e-6`
+(~1.3e-10 discrepancy).
+
+**Impact:** Moshier-backend node/apogee speed differs from a stateless recomputation by up to
+~3.6e-6 °/day (≈0.013 arcsec/day) — astronomically negligible. Positions are unaffected
+(bit-identical). The Swiss/JPL backends use a 1000× smaller interval (`NODE_CALC_INTV = 1e-4`
+vs `NODE_CALC_INTV_MOSH = 0.1`) and are not measurably affected.
+
+**Cause:** Global-state architecture — `swi_plan_for_osc_elem`'s obliquity/nutation cache
+fast path makes the center sample take a different arithmetic route than the off-center ones,
+so the finite difference mixes cached and freshly-computed frame rotations.
+
+**Our Rust code:** Stateless — obliquity and nutation are recomputed fresh and consistently at
+every sample epoch (PNOC 3 — swisseph-rs/84, `calc::lunar_osc_elem` / `calc::plan_for_osc_elem`).
+This matches C's node/apogee *positions* bit-for-bit (1e-9) but cannot reproduce the speed
+artifact without re-introducing the cache, so the Moshier speed golden tolerance is relaxed to
+5e-6 (Swiss stays 1e-7). See `CLAUDE.md <stateless_tolerance>` §3.
