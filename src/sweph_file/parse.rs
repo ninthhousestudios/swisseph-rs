@@ -57,6 +57,13 @@ impl<'a> Reader<'a> {
         self.pos += n;
         Ok(())
     }
+
+    fn read_bytes(&mut self, n: usize) -> Result<&'a [u8], Error> {
+        self.ensure(n)?;
+        let slice = &self.data[self.pos..self.pos + n];
+        self.pos += n;
+        Ok(slice)
+    }
 }
 
 fn find_crlf(data: &[u8], start: usize) -> Result<usize, Error> {
@@ -168,7 +175,7 @@ pub(super) fn parse_mpc_elements(line: &[u8]) -> (f64, f64, f64) {
     (h, g, diameter_km)
 }
 
-fn extract_asteroid_name(line: &[u8], ipl0: i32) -> String {
+fn extract_asteroid_name(line: &[u8], ipl0: i32, name_field_30: &[u8]) -> String {
     let mut sp = 0;
     while sp < line.len() && line[sp] == b' ' {
         sp += 1;
@@ -199,7 +206,7 @@ fn extract_asteroid_name(line: &[u8], ipl0: i32) -> String {
         let end = (start + lastnam).min(sastnam.len());
         &sastnam[start..end]
     } else {
-        &[]
+        name_field_30
     };
 
     let mut name = String::from_utf8_lossy(name_bytes).into_owned();
@@ -290,8 +297,8 @@ pub(super) fn parse_file(
     let asteroid = if let Some(line) = mpc_line {
         let (h, g, diameter_km) = parse_mpc_elements(line);
         let ipl0 = ipl.first().copied().unwrap_or(0);
-        let name = extract_asteroid_name(line, ipl0);
-        r.skip(30)?;
+        let name_field_30 = r.read_bytes(30)?;
+        let name = extract_asteroid_name(line, ipl0, name_field_30);
         Some(AsteroidMeta {
             h,
             g,

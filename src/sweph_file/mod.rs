@@ -116,8 +116,10 @@ fn asteroid_file_candidates(dir: &Path, mpc: i32) -> [std::path::PathBuf; 4] {
 pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error> {
     let candidates = asteroid_file_candidates(dir, mpc);
     for path in &candidates {
-        if let Ok(f) = SwissEphFile::open(path) {
-            return Ok(f);
+        match SwissEphFile::open(path) {
+            Ok(f) => return Ok(f),
+            Err(Error::FileNotFound(_)) => continue,
+            Err(e) => return Err(e),
         }
     }
     Err(Error::FileNotFound(candidates[0].clone()))
