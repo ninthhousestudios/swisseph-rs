@@ -170,6 +170,236 @@ int main(void) {
     run_case(&first, 2453371.0, "mercury", SEFLG_MOSEPH, "MOSEPH", SEFLG_MOSEPH);
     run_case(&first, 2453370.8333, "mercury", SEFLG_MOSEPH, "MOSEPH", SEFLG_MOSEPH);
 
+    printf("\n],\n");
+
+    /* ── arcvis: swe_topo_arcus_visionis ────────────────────────────
+     * Grid: mag × (azi_obj,alt_obj) × (azi_sun,azi_moon,alt_moon) × tjd_ut
+     * Rotated (not full cross-product) to keep ~32 cases.
+     */
+    printf("\"arcvis\": [\n");
+    first = 1;
+    {
+        double mags[] = {-4.6, -1.46, 0.5, 2.0};
+        int nmags = 4;
+        double obj_geom[][2] = {{120.0, 10.0}, {240.0, 3.0}};
+        int nobj = 2;
+        double sun_moon[][3] = {{90.0, 270.0, -10.0}, {300.0, 60.0, 20.0}};
+        int nsm = 2;
+        double tjds[] = {2453371.0, 2451545.0};
+        int ntjd = 2;
+
+        for (int im = 0; im < nmags; im++) {
+            /* Rotate obj_geom/sun_moon/tjd indices */
+            int io = im % nobj;
+            int is = im % nsm;
+            int it = im % ntjd;
+            double datm[4], dobs[6], dret_val;
+            char serr[256] = {0};
+            memcpy(datm, datm_default, sizeof(datm));
+            memcpy(dobs, dobs_default, sizeof(dobs));
+            int retval = swe_topo_arcus_visionis(
+                tjds[it], dgeo, datm, dobs,
+                SEFLG_SWIEPH,
+                mags[im],
+                obj_geom[io][0], obj_geom[io][1],
+                sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                &dret_val, serr);
+            if (retval == ERR) {
+                fprintf(stderr, "arcvis ERR: %s mag=%.2f\n", serr, mags[im]);
+                continue;
+            }
+            if (!first) printf(",\n");
+            first = 0;
+            printf("  {\"tjd_ut\": %.20e, \"mag\": %.20e, "
+                   "\"azi_obj\": %.20e, \"alt_obj\": %.20e, "
+                   "\"azi_sun\": %.20e, \"azi_moon\": %.20e, \"alt_moon\": %.20e, "
+                   "\"helflag\": %d, \"retval\": %d, \"dret\": %.20e}",
+                   tjds[it], mags[im],
+                   obj_geom[io][0], obj_geom[io][1],
+                   sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                   SEFLG_SWIEPH, retval, dret_val);
+        }
+        /* Additional cases: vary tjd and sun/moon geometry for each mag */
+        for (int im = 0; im < nmags; im++) {
+            int io = (im + 1) % nobj;
+            int is = (im + 1) % nsm;
+            int it = (im + 1) % ntjd;
+            double datm[4], dobs[6], dret_val;
+            char serr[256] = {0};
+            memcpy(datm, datm_default, sizeof(datm));
+            memcpy(dobs, dobs_default, sizeof(dobs));
+            int retval = swe_topo_arcus_visionis(
+                tjds[it], dgeo, datm, dobs,
+                SEFLG_SWIEPH,
+                mags[im],
+                obj_geom[io][0], obj_geom[io][1],
+                sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                &dret_val, serr);
+            if (retval == ERR) {
+                fprintf(stderr, "arcvis ERR: %s mag=%.2f\n", serr, mags[im]);
+                continue;
+            }
+            if (!first) printf(",\n");
+            first = 0;
+            printf("  {\"tjd_ut\": %.20e, \"mag\": %.20e, "
+                   "\"azi_obj\": %.20e, \"alt_obj\": %.20e, "
+                   "\"azi_sun\": %.20e, \"azi_moon\": %.20e, \"alt_moon\": %.20e, "
+                   "\"helflag\": %d, \"retval\": %d, \"dret\": %.20e}",
+                   tjds[it], mags[im],
+                   obj_geom[io][0], obj_geom[io][1],
+                   sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                   SEFLG_SWIEPH, retval, dret_val);
+        }
+        /* Full cross: mag[0] × all combos for broader coverage */
+        for (int io = 0; io < nobj; io++)
+            for (int is = 0; is < nsm; is++)
+                for (int it = 0; it < ntjd; it++) {
+                    double datm[4], dobs[6], dret_val;
+                    char serr[256] = {0};
+                    memcpy(datm, datm_default, sizeof(datm));
+                    memcpy(dobs, dobs_default, sizeof(dobs));
+                    int retval = swe_topo_arcus_visionis(
+                        tjds[it], dgeo, datm, dobs,
+                        SEFLG_SWIEPH,
+                        mags[0],
+                        obj_geom[io][0], obj_geom[io][1],
+                        sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                        &dret_val, serr);
+                    if (retval == ERR) {
+                        fprintf(stderr, "arcvis ERR: %s\n", serr);
+                        continue;
+                    }
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("  {\"tjd_ut\": %.20e, \"mag\": %.20e, "
+                           "\"azi_obj\": %.20e, \"alt_obj\": %.20e, "
+                           "\"azi_sun\": %.20e, \"azi_moon\": %.20e, \"alt_moon\": %.20e, "
+                           "\"helflag\": %d, \"retval\": %d, \"dret\": %.20e}",
+                           tjds[it], mags[0],
+                           obj_geom[io][0], obj_geom[io][1],
+                           sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                           SEFLG_SWIEPH, retval, dret_val);
+                }
+    }
+    printf("\n],\n");
+
+    /* ── helangle: swe_heliacal_angle ──────────────────────────────
+     * Same grid minus alt_obj. Output: dret[0..2].
+     */
+    printf("\"helangle\": [\n");
+    first = 1;
+    {
+        double mags[] = {-4.6, -1.46, 0.5, 2.0};
+        int nmags = 4;
+        double azi_objs[] = {120.0, 240.0};
+        int nazi = 2;
+        double sun_moon[][3] = {{90.0, 270.0, -10.0}, {300.0, 60.0, 20.0}};
+        int nsm = 2;
+        double tjds[] = {2453371.0, 2451545.0};
+        int ntjd = 2;
+
+        for (int im = 0; im < nmags; im++) {
+            int ia = im % nazi;
+            int is = im % nsm;
+            int it = im % ntjd;
+            double datm[4], dobs[6], dret[3];
+            char serr[256] = {0};
+            memcpy(datm, datm_default, sizeof(datm));
+            memcpy(dobs, dobs_default, sizeof(dobs));
+            memset(dret, 0, sizeof(dret));
+            int retval = swe_heliacal_angle(
+                tjds[it], dgeo, datm, dobs,
+                SEFLG_SWIEPH,
+                mags[im],
+                azi_objs[ia],
+                sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                dret, serr);
+            if (retval == ERR) {
+                fprintf(stderr, "helangle ERR: %s mag=%.2f\n", serr, mags[im]);
+                continue;
+            }
+            if (!first) printf(",\n");
+            first = 0;
+            printf("  {\"tjd_ut\": %.20e, \"mag\": %.20e, "
+                   "\"azi_obj\": %.20e, "
+                   "\"azi_sun\": %.20e, \"azi_moon\": %.20e, \"alt_moon\": %.20e, "
+                   "\"helflag\": %d, \"retval\": %d, "
+                   "\"dret\": [%.20e, %.20e, %.20e]}",
+                   tjds[it], mags[im],
+                   azi_objs[ia],
+                   sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                   SEFLG_SWIEPH, retval,
+                   dret[0], dret[1], dret[2]);
+        }
+        /* Second rotation */
+        for (int im = 0; im < nmags; im++) {
+            int ia = (im + 1) % nazi;
+            int is = (im + 1) % nsm;
+            int it = (im + 1) % ntjd;
+            double datm[4], dobs[6], dret[3];
+            char serr[256] = {0};
+            memcpy(datm, datm_default, sizeof(datm));
+            memcpy(dobs, dobs_default, sizeof(dobs));
+            memset(dret, 0, sizeof(dret));
+            int retval = swe_heliacal_angle(
+                tjds[it], dgeo, datm, dobs,
+                SEFLG_SWIEPH,
+                mags[im],
+                azi_objs[ia],
+                sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                dret, serr);
+            if (retval == ERR) {
+                fprintf(stderr, "helangle ERR: %s mag=%.2f\n", serr, mags[im]);
+                continue;
+            }
+            if (!first) printf(",\n");
+            first = 0;
+            printf("  {\"tjd_ut\": %.20e, \"mag\": %.20e, "
+                   "\"azi_obj\": %.20e, "
+                   "\"azi_sun\": %.20e, \"azi_moon\": %.20e, \"alt_moon\": %.20e, "
+                   "\"helflag\": %d, \"retval\": %d, "
+                   "\"dret\": [%.20e, %.20e, %.20e]}",
+                   tjds[it], mags[im],
+                   azi_objs[ia],
+                   sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                   SEFLG_SWIEPH, retval,
+                   dret[0], dret[1], dret[2]);
+        }
+        /* Full cross for mag[0] */
+        for (int ia = 0; ia < nazi; ia++)
+            for (int is = 0; is < nsm; is++)
+                for (int it = 0; it < ntjd; it++) {
+                    double datm[4], dobs[6], dret[3];
+                    char serr[256] = {0};
+                    memcpy(datm, datm_default, sizeof(datm));
+                    memcpy(dobs, dobs_default, sizeof(dobs));
+                    memset(dret, 0, sizeof(dret));
+                    int retval = swe_heliacal_angle(
+                        tjds[it], dgeo, datm, dobs,
+                        SEFLG_SWIEPH,
+                        mags[0],
+                        azi_objs[ia],
+                        sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                        dret, serr);
+                    if (retval == ERR) {
+                        fprintf(stderr, "helangle ERR: %s\n", serr);
+                        continue;
+                    }
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("  {\"tjd_ut\": %.20e, \"mag\": %.20e, "
+                           "\"azi_obj\": %.20e, "
+                           "\"azi_sun\": %.20e, \"azi_moon\": %.20e, \"alt_moon\": %.20e, "
+                           "\"helflag\": %d, \"retval\": %d, "
+                           "\"dret\": [%.20e, %.20e, %.20e]}",
+                           tjds[it], mags[0],
+                           azi_objs[ia],
+                           sun_moon[is][0], sun_moon[is][1], sun_moon[is][2],
+                           SEFLG_SWIEPH, retval,
+                           dret[0], dret[1], dret[2]);
+                }
+    }
     printf("\n]}\n");
+
     return 0;
 }

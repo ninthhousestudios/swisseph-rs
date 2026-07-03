@@ -602,6 +602,50 @@ impl Ephemeris {
         )
     }
 
+    /// Topocentric arcus visionis at `tjd_ut` (UT). Port of
+    /// `swe_topo_arcus_visionis` (swehel.c:1601-1610). All geometry is
+    /// caller-supplied; no ephemeris lookups beyond the crude `sun_ra`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn topo_arcus_visionis(
+        &self,
+        tjd_ut: f64,
+        dgeo: &[f64; 3],
+        datm: &mut [f64; 4],
+        dobs: &mut [f64; 6],
+        helflag: crate::flags::HeliacalFlags,
+        mag: f64,
+        azi_obj: f64,
+        alt_obj: f64,
+        azi_sun: f64,
+        azi_moon: f64,
+        alt_moon: f64,
+    ) -> f64 {
+        crate::heliacal::topo_arcus_visionis(
+            tjd_ut, dgeo, datm, dobs, helflag, mag, azi_obj, alt_obj, azi_sun, azi_moon, alt_moon,
+        )
+    }
+
+    /// Heliacal angle (optimal altitude / arcus visionis) at `tjd_ut` (UT).
+    /// Port of `swe_heliacal_angle` (swehel.c:1695-1705).
+    #[allow(clippy::too_many_arguments)]
+    pub fn heliacal_angle(
+        &self,
+        tjd_ut: f64,
+        dgeo: &[f64; 3],
+        datm: &mut [f64; 4],
+        dobs: &mut [f64; 6],
+        helflag: crate::flags::HeliacalFlags,
+        mag: f64,
+        azi_obj: f64,
+        azi_sun: f64,
+        azi_moon: f64,
+        alt_moon: f64,
+    ) -> Result<crate::heliacal::HeliacalAngleResult, Error> {
+        crate::heliacal::heliacal_angle(
+            tjd_ut, dgeo, datm, dobs, helflag, mag, azi_obj, azi_sun, azi_moon, alt_moon,
+        )
+    }
+
     /// Nodes & apsides of `body` at `tjd_et` (TT). Port of `swe_nod_aps`
     /// (swecl.c:5075-5654). `method` selects mean vs osculating elements
     /// ([`NodApsMethod`](crate::NodApsMethod)); the mean branch (Sun..Neptune,

@@ -1361,6 +1361,304 @@ pub fn vis_limit_mag(
     })
 }
 
+// ── TopoArcVisionis: bisection for arcus visionis ──────────────────
+
+/// Bisection search for the Sun-depression angle at which an object of known
+/// magnitude becomes exactly visible. Port of `TopoArcVisionis` (swehel.c:1562-1599).
+pub fn topo_arc_visionis(
+    magn: f64,
+    dobs: &[f64; 6],
+    alt_o: f64,
+    azi_o: f64,
+    alt_m: f64,
+    azi_m: f64,
+    jdn_days_ut: f64,
+    azi_s: f64,
+    sunra: f64,
+    lat: f64,
+    height_eye: f64,
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> f64 {
+    let epsilon = 0.001;
+    let mut xl = 45.0_f64;
+    let mut xr = 0.0_f64;
+
+    let yl_vlm = vis_lim_magn(
+        dobs,
+        alt_o,
+        azi_o,
+        alt_m,
+        azi_m,
+        jdn_days_ut,
+        alt_o - xl,
+        azi_s,
+        sunra,
+        lat,
+        height_eye,
+        datm,
+        helflag,
+    );
+    let mut yl = magn - yl_vlm.0;
+
+    let yr_vlm = vis_lim_magn(
+        dobs,
+        alt_o,
+        azi_o,
+        alt_m,
+        azi_m,
+        jdn_days_ut,
+        alt_o - xr,
+        azi_s,
+        sunra,
+        lat,
+        height_eye,
+        datm,
+        helflag,
+    );
+    let yr = magn - yr_vlm.0;
+
+    let mut xm;
+    if yl * yr <= 0.0 {
+        while (xr - xl).abs() > epsilon {
+            xm = (xr + xl) / 2.0;
+            let alt_si = alt_o - xm;
+            let ym_vlm = vis_lim_magn(
+                dobs,
+                alt_o,
+                azi_o,
+                alt_m,
+                azi_m,
+                jdn_days_ut,
+                alt_si,
+                azi_s,
+                sunra,
+                lat,
+                height_eye,
+                datm,
+                helflag,
+            );
+            let ym = magn - ym_vlm.0;
+            if yl * ym > 0.0 {
+                xl = xm;
+                yl = ym;
+            } else {
+                xr = xm;
+            }
+        }
+        xm = (xr + xl) / 2.0;
+    } else {
+        xm = 99.0;
+    }
+    if xm < alt_o {
+        xm = alt_o;
+    }
+    xm
+}
+
+/// Public wrapper for `topo_arc_visionis`. Port of `swe_topo_arcus_visionis`
+/// (swehel.c:1601-1610). All geometry is caller-supplied; no ephemeris lookups
+/// beyond the crude `sun_ra` calendar approximation.
+#[allow(clippy::too_many_arguments)]
+pub fn topo_arcus_visionis(
+    tjd_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    helflag: HeliacalFlags,
+    mag: f64,
+    azi_obj: f64,
+    alt_obj: f64,
+    azi_sun: f64,
+    azi_moon: f64,
+    alt_moon: f64,
+) -> f64 {
+    let sunra = sun_ra(tjd_ut);
+    default_heliacal_parameters(datm, dgeo, dobs, helflag);
+    topo_arc_visionis(
+        mag, dobs, alt_obj, azi_obj, alt_moon, azi_moon, tjd_ut, azi_sun, sunra, dgeo[1], dgeo[2],
+        datm, helflag,
+    )
+}
+
+// ── HeliacalAngle: optimum-altitude / arcus-visionis search ────────
+
+/// Output of `heliacal_angle`: the optimal object altitude, arcus visionis,
+/// and implied Sun altitude for first/last visibility.
+#[derive(Debug, Clone, Copy)]
+pub struct HeliacalAngleResult {
+    /// Object's altitude at the optimum (degrees).
+    pub optimal_altitude: f64,
+    /// Arcus visionis at the optimum (degrees).
+    pub arcus_visionis: f64,
+    /// Implied Sun altitude at the optimum (degrees) = optimal_altitude - arcus_visionis.
+    pub sun_altitude_diff: f64,
+}
+
+/// 2-D search for the optimal object-altitude / arcus-visionis pair. Port of
+/// `HeliacalAngle` (swehel.c:1636-1693). For each candidate altitude 2..20°,
+/// calls `topo_arc_visionis`; then refines the minimum via bisection.
+pub fn heliacal_angle_core(
+    magn: f64,
+    dobs: &[f64; 6],
+    azi_o: f64,
+    alt_m: f64,
+    azi_m: f64,
+    jdn_days_ut: f64,
+    azi_s: f64,
+    dgeo: &[f64; 3],
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> HeliacalAngleResult {
+    let sunra = sun_ra(jdn_days_ut);
+    let lat = dgeo[1];
+    let height_eye = dgeo[2];
+
+    // Coarse scan: integer altitudes 2..=20
+    let mut xmin = 0.0_f64;
+    let mut ymin = 10000.0_f64;
+    for ix in 2..=20 {
+        let x = ix as f64;
+        let arc = topo_arc_visionis(
+            magn,
+            dobs,
+            x,
+            azi_o,
+            alt_m,
+            azi_m,
+            jdn_days_ut,
+            azi_s,
+            sunra,
+            lat,
+            height_eye,
+            datm,
+            helflag,
+        );
+        if arc < ymin {
+            ymin = arc;
+            xmin = x;
+        }
+    }
+
+    // Bracket the coarse minimum by ±1°
+    let mut xl = xmin - 1.0;
+    let mut xr = xmin + 1.0;
+    let mut _yl = topo_arc_visionis(
+        magn,
+        dobs,
+        xl,
+        azi_o,
+        alt_m,
+        azi_m,
+        jdn_days_ut,
+        azi_s,
+        sunra,
+        lat,
+        height_eye,
+        datm,
+        helflag,
+    );
+    let mut _yr = topo_arc_visionis(
+        magn,
+        dobs,
+        xr,
+        azi_o,
+        alt_m,
+        azi_m,
+        jdn_days_ut,
+        azi_s,
+        sunra,
+        lat,
+        height_eye,
+        datm,
+        helflag,
+    );
+
+    // Minimum-finding bisection (one-sided finite-difference slope check)
+    while (xr - xl).abs() > 0.1 {
+        let xm = (xr + xl) / 2.0;
+        let delta_x = 0.025;
+        let xmd = xm + delta_x;
+        let ym = topo_arc_visionis(
+            magn,
+            dobs,
+            xm,
+            azi_o,
+            alt_m,
+            azi_m,
+            jdn_days_ut,
+            azi_s,
+            sunra,
+            lat,
+            height_eye,
+            datm,
+            helflag,
+        );
+        let ymd = topo_arc_visionis(
+            magn,
+            dobs,
+            xmd,
+            azi_o,
+            alt_m,
+            azi_m,
+            jdn_days_ut,
+            azi_s,
+            sunra,
+            lat,
+            height_eye,
+            datm,
+            helflag,
+        );
+        if ym >= ymd {
+            xl = xm;
+            _yl = ym;
+        } else {
+            xr = xm;
+            _yr = ym;
+        }
+    }
+
+    let xm = (xr + xl) / 2.0;
+    // C averages the last iteration's Yl/Yr, not a fresh evaluation at Xm
+    let ym = (_yr + _yl) / 2.0;
+
+    HeliacalAngleResult {
+        optimal_altitude: xm,
+        arcus_visionis: ym,
+        sun_altitude_diff: xm - ym,
+    }
+}
+
+/// Public wrapper for `heliacal_angle_core`. Port of `swe_heliacal_angle`
+/// (swehel.c:1695-1705). Validates observer altitude, applies defaults, delegates.
+#[allow(clippy::too_many_arguments)]
+pub fn heliacal_angle(
+    tjd_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    helflag: HeliacalFlags,
+    mag: f64,
+    azi_obj: f64,
+    azi_sun: f64,
+    azi_moon: f64,
+    alt_moon: f64,
+) -> Result<HeliacalAngleResult, Error> {
+    if !(crate::constants::RISE_SET_GEOALT_MIN..=crate::constants::RISE_SET_GEOALT_MAX)
+        .contains(&dgeo[2])
+    {
+        return Err(Error::CError(format!(
+            "location for heliacal events must be between {} and {} m above sea",
+            crate::constants::RISE_SET_GEOALT_MIN,
+            crate::constants::RISE_SET_GEOALT_MAX,
+        )));
+    }
+    default_heliacal_parameters(datm, dgeo, dobs, helflag);
+    Ok(heliacal_angle_core(
+        mag, dobs, azi_obj, alt_moon, azi_moon, tjd_ut, azi_sun, dgeo, datm, helflag,
+    ))
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]

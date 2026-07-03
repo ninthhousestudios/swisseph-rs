@@ -14,8 +14,37 @@ struct VisLimitCase {
 }
 
 #[derive(Deserialize)]
+struct ArcVisCase {
+    tjd_ut: f64,
+    mag: f64,
+    azi_obj: f64,
+    alt_obj: f64,
+    azi_sun: f64,
+    azi_moon: f64,
+    alt_moon: f64,
+    helflag: u32,
+    retval: i32,
+    dret: f64,
+}
+
+#[derive(Deserialize)]
+struct HelAngleCase {
+    tjd_ut: f64,
+    mag: f64,
+    azi_obj: f64,
+    azi_sun: f64,
+    azi_moon: f64,
+    alt_moon: f64,
+    helflag: u32,
+    retval: i32,
+    dret: [f64; 3],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     vis_limit: Vec<VisLimitCase>,
+    arcvis: Vec<ArcVisCase>,
+    helangle: Vec<HelAngleCase>,
 }
 
 fn load() -> GoldenData {
@@ -185,6 +214,95 @@ fn golden_vis_limit_mag() {
                 *expected,
                 *actual,
                 *field_eps,
+            );
+        }
+    }
+}
+
+#[test]
+fn golden_topo_arcus_visionis() {
+    let data = load();
+    let eph = make_eph();
+    let eps = 1e-6;
+
+    for (i, case) in data.arcvis.iter().enumerate() {
+        let helflag = HeliacalFlags::from_bits_truncate(case.helflag);
+        let dgeo = [31.25, 30.1, 30.0];
+        let mut datm = [1013.25, 15.0, 40.0, 40.0];
+        let mut dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+
+        let result = eph.topo_arcus_visionis(
+            case.tjd_ut,
+            &dgeo,
+            &mut datm,
+            &mut dobs,
+            helflag,
+            case.mag,
+            case.azi_obj,
+            case.alt_obj,
+            case.azi_sun,
+            case.azi_moon,
+            case.alt_moon,
+        );
+
+        super::assert_f64_eps(
+            &format!(
+                "arcvis case {i}: mag={:.2} alt_obj={:.1} azi_obj={:.1} jd={:.4}",
+                case.mag, case.alt_obj, case.azi_obj, case.tjd_ut
+            ),
+            case.dret,
+            result,
+            eps,
+        );
+    }
+}
+
+#[test]
+fn golden_heliacal_angle() {
+    let data = load();
+    let eph = make_eph();
+    let eps = 1e-6;
+
+    for (i, case) in data.helangle.iter().enumerate() {
+        let helflag = HeliacalFlags::from_bits_truncate(case.helflag);
+        let dgeo = [31.25, 30.1, 30.0];
+        let mut datm = [1013.25, 15.0, 40.0, 40.0];
+        let mut dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+
+        let result = eph
+            .heliacal_angle(
+                case.tjd_ut,
+                &dgeo,
+                &mut datm,
+                &mut dobs,
+                helflag,
+                case.mag,
+                case.azi_obj,
+                case.azi_sun,
+                case.azi_moon,
+                case.alt_moon,
+            )
+            .unwrap_or_else(|e| {
+                panic!(
+                    "helangle case {i}: mag={:.2} azi_obj={:.1} jd={:.4}: {e}",
+                    case.mag, case.azi_obj, case.tjd_ut
+                )
+            });
+
+        let fields: &[(&str, f64, f64)] = &[
+            ("optimal_altitude", case.dret[0], result.optimal_altitude),
+            ("arcus_visionis", case.dret[1], result.arcus_visionis),
+            ("sun_altitude_diff", case.dret[2], result.sun_altitude_diff),
+        ];
+        for (name, expected, actual) in fields {
+            super::assert_f64_eps(
+                &format!(
+                    "helangle case {i}: mag={:.2} azi_obj={:.1} jd={:.4}: {name}",
+                    case.mag, case.azi_obj, case.tjd_ut
+                ),
+                *expected,
+                *actual,
+                eps,
             );
         }
     }
