@@ -385,7 +385,30 @@ src/
 │                          vis_limit_mag (swe_vis_limit_mag port: default_heliacal_parameters,
 │                          ObjectLoc for object/Sun/Moon, VISLIM_DARK/NOMOON flag handling,
 │                          vis_lim_magn + Magnitude assembly); VisLimFlags bitflags in flags.rs;
-│                          Ephemeris::vis_limit_mag delegate in context.rs
+│                          Ephemeris::vis_limit_mag delegate in context.rs.
+│                          Heliacal pheno (swisseph-rs/109, sub-task 6/8):
+│                          Moon crescent geometry: width_moon (Yallop 1998 crescent width),
+│                          length_moon (Sultan 2005 crescent length, AvgRadiusMoon fallback),
+│                          q_yallop (Yallop q-test), yallop_grade (6-grade A–F table with strict
+│                          `<`/`>` boundaries — exact boundary values fall through to grade 0);
+│                          interpolation helpers: crossing (2-point linear crossing), x2min
+│                          (3-point parabola vertex), funct2 (3-point parabola eval);
+│                          deter_tav (DeterTAV port: single-instant arcus-visionis threshold via
+│                          SunRA + Magnitude + ObjectLoc + TopoArcVisionis delegation);
+│                          HeliacalPheno (28 named fields mapping darr[0..27], as_array());
+│                          heliacal_pheno_ut (swe_heliacal_pheno_ut port: altitude bounds check,
+│                          Sun/object geometry via object_loc, refraction via app_alt_from_topo_alt,
+│                          pheno_ut for elongation/illumination, kt extinction, Moon Yallop
+│                          crescent block, rise_set for Sun/object, early-exit guard for
+│                          TypeEvent 3/4 + Mars-or-beyond/stars, visibility-window search loop
+│                          with DeterTAV sampling + local-min parabola refinement + crossing
+│                          detection, post-loop clamp/fallback/TJD_INVALID sentinel assignment);
+│                          Ephemeris::heliacal_pheno_ut delegate in context.rs.
+│                          Bug fixes found during 6/8 golden testing: object_loc angle=7
+│                          TOPOCTR ordering (was: 7→0 rewrite before TOPOCTR check, incorrectly
+│                          adding TOPOCTR; fixed: TOPOCTR check runs first, then 7→0 rewrite);
+│                          calc_rise_and_set SET+below-horizon day-anchoring (was: [tjd0-1,tjd0];
+│                          fixed: [tjd0,tjd0+1] matching C swehel.c:449-456)
 ├── phenomena.rs        — swe_pheno/swe_pheno_ut port (swisseph-rs/83): Phenomena output struct
 │                          (phase_angle, phase, elongation, apparent_diameter, apparent_magnitude,
 │                          horizontal_parallax = attr[0..5]); MAG_ELEM[21][4] table + EULER/
@@ -647,7 +670,14 @@ tests/
 │                          14 photopic (retval 0), 14 scotopic (retval 1), 5 below-horizon
 │                          (retval -2). Positions eps 1e-7, limiting magnitude eps 5e-7 (chain
 │                          compounds azalt+refraction+brightness+extinction+optics). C harness
-│                          gen_heliacal.c links libswe.a (public API, not swehel.c internals)
+│                          gen_heliacal.c links libswe.a (public API, not swehel.c internals).
+│                          Also: swe_heliacal_pheno_ut (swisseph-rs/109, sub-task 6/8):
+│                          15 cases — Moon crescent × TypeEvent=3 at Mecca (2 young-crescent
+│                          evenings + 1 HIGH_PRECISION), Venus × TypeEvent=1/2 at Cairo/Mecca,
+│                          Sirius × TypeEvent=1 at Cairo (± HIGH_PRECISION), Mercury morning first,
+│                          Moon morning last, Mars/Jupiter evening first (early-exit guard path),
+│                          MOSEPH duplicates (Venus + Moon). Geometry slots eps 1e-7, time/duration
+│                          slots (TfirstVR/TbVR/TlastVR/TbYallop/RiseO/RiseS/Lag/TvisVR) eps 1e-5
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -816,8 +846,10 @@ tests/
 │   ├── azalt.json      — C-generated reference data for swe_refrac/swe_refrac_extended/swe_azalt/swe_azalt_rev (refrac: 28, refrac_ext: 56, azalt: 8, azalt_rev: 8)
 │   ├── houses.json     — C-generated reference data for swe_houses_armc_ex2 (battery: 6 armc × 5 geolat × 1 eps, reused across all houses sub-tasks; iterative/gauquelin36 keys add a 7th/8th polar geolat (±78) to exercise the Placidus/Koch/Gauquelin Porphyry fallback; closed_form_misc key reuses the standard 5-geolat battery for U/Y/L/Q; sunshine key reuses the standard 6 armc × 5 geolat battery for I/i, crossed with a rotated (not full cross-product) Sun-declination set {-23,-10,0,10,23}, plus a dedicated circumpolar-Sun sub-battery (geolat {70,-70} × sundec {23,-23}) to exercise Makransky's ERR→Porphyry fallback; ut_wrapper key: swe_houses_ex2 (UT-based) over 6 (tjd_ut,geolat,geolon) triples × 6 systems, + a SEFLG_NONUT variant at 1 triple; sidereal_trad key: swe_houses_ex2 with SEFLG_SIDEREAL + swe_set_sid_mode(SE_SIDM_LAHIRI) over 3 triples × 3 systems P/W/E; house_pos key: swe_house_pos over all 25 house-system chars × 2 (armc,geolat,eps) triples × 3 xpin, "err" field is hpos==0.0 (Koch's real failure sentinel), NOT serr-non-empty (P/G/J/L/Q/default set an informational serr on valid results) — the static sundec cache 'I'/'i' need is primed via a preceding swe_houses_armc_ex2(ascmc[9]=sundec) call; gauquelin_sector key: swe_gauquelin_sector imeth∈{0,1} over 6 ut_triples × 3 bodies (Sun/Moon/Mars); gauquelin_riseset key (swisseph-rs/89, PNOC 8): swe_gauquelin_sector imeth∈{2,3,4,5} over 6 ut_triples × 3 bodies × 4 imeth = 72 cases, retval recorded for circumpolar Err)
 │   ├── riseset.json    — C-generated reference data for swe_rise_trans_true_hor + swe_rise_trans (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err; dip key: 6 cases, horhgt=-100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: 12 cases, NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key: 24 cases via swe_rise_trans, 3 geopos all \|lat\|≤60 × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
-│   ├── heliacal.json   — C-generated reference data for swe_vis_limit_mag (vis_limit key, 33 cases;
-│                          see tests/golden/heliacal.rs)
+│   ├── heliacal.json   — C-generated reference data for swe_vis_limit_mag (vis_limit key, 33 cases),
+│                          swe_topo_arcus_visionis (arcvis key), swe_heliacal_angle (helangle key),
+│                          swe_heliacal_pheno_ut (pheno key, 15 cases; swisseph-rs/109);
+│                          see tests/golden/heliacal.rs
 │   └── crossings.json  — C-generated reference data for swe_solcross/mooncross/mooncross_node/helio_cross (66 cases: 18 solcross + 18 mooncross + 6 mooncross_node + 24 helio_cross, all Moshier)
 └── c-gen/
     ├── gen_asteroid.c  — C harness to regenerate asteroid.json (6 bodies × 5 epochs × 10 flags
@@ -884,6 +916,8 @@ tests/
     ├── gen_heliacal.c   — C harness to regenerate heliacal.json (swe_vis_limit_mag: 4 objects ×
     │                       per-object UT instants at Cairo observer, + VISLIM_DARK/NOMOON/PHOTOPIC/
     │                       SCOTOPIC flag variants, OPTICAL_PARAMS, MOSEPH duplicates = 33 cases;
+    │                       swe_heliacal_pheno_ut (swisseph-rs/109): 15 cases — Moon crescent at
+    │                       Mecca, Venus/Sirius/Mercury/Mars/Jupiter at Cairo, MOSEPH duplicates;
     │                       links libswe.a normally, does NOT #include swehel.c)
     └── gen_cross.c      — C harness to regenerate crossings.json (66 cases: solcross 18,
                             mooncross 18, mooncross_node 6, helio_cross 24, all SEFLG_MOSEPH)
