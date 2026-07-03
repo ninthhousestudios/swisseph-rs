@@ -34,6 +34,7 @@ mod precession;
 mod riseset;
 mod se1_header;
 mod sidereal_time;
+mod source_consistency;
 mod sweph_eval;
 mod truenode;
 

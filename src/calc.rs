@@ -2296,3 +2296,47 @@ pub(crate) fn calc_asteroid_moshier(
     };
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::flags::CalcFlags;
+    use crate::types::EphemerisSource;
+
+    #[test]
+    fn requested_source_precedence() {
+        assert_eq!(
+            requested_source(CalcFlags::MOSEPH),
+            Some(EphemerisSource::Moshier)
+        );
+        assert_eq!(
+            requested_source(CalcFlags::JPLEPH),
+            Some(EphemerisSource::Jpl)
+        );
+        assert_eq!(
+            requested_source(CalcFlags::SWIEPH),
+            Some(EphemerisSource::Swiss)
+        );
+        assert_eq!(requested_source(CalcFlags::empty()), None);
+        // MOSEPH wins over JPLEPH (C precedence sweph.c:375-381)
+        assert_eq!(
+            requested_source(CalcFlags::MOSEPH | CalcFlags::JPLEPH),
+            Some(EphemerisSource::Moshier)
+        );
+        // MOSEPH wins over SWIEPH
+        assert_eq!(
+            requested_source(CalcFlags::MOSEPH | CalcFlags::SWIEPH),
+            Some(EphemerisSource::Moshier)
+        );
+        // JPLEPH wins over SWIEPH
+        assert_eq!(
+            requested_source(CalcFlags::JPLEPH | CalcFlags::SWIEPH),
+            Some(EphemerisSource::Jpl)
+        );
+        // All three set → MOSEPH wins
+        assert_eq!(
+            requested_source(CalcFlags::MOSEPH | CalcFlags::JPLEPH | CalcFlags::SWIEPH),
+            Some(EphemerisSource::Moshier)
+        );
+    }
+}
