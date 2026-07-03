@@ -93,7 +93,7 @@ pub(crate) fn rise_trans_true_hor(
     // rather than requiring it to match `eph`'s own configured topographic position (mirrors
     // C's per-call `swe_set_topo`, but stateless; see Ephemeris::calc_with_config's doc comment).
     let topo_config = {
-        let mut c = eph.config().clone();
+        let mut c = eph.effective_config(iflag, eph.config()).into_owned();
         c.topographic = Some(TopoPosition {
             longitude: geopos[0],
             latitude: geopos[1],
@@ -313,7 +313,7 @@ pub(crate) fn rise_set_fast(
     let geoctr_no_ecl_lat = rsmi.contains(RiseSetFlags::GEOCTR_NO_ECL_LAT);
 
     let topo_config = {
-        let mut c = eph.config().clone();
+        let mut c = eph.effective_config(epheflag, eph.config()).into_owned();
         c.topographic = Some(TopoPosition {
             longitude: geopos[0],
             latitude: geopos[1],

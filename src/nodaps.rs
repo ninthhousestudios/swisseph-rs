@@ -414,7 +414,7 @@ fn osculating_branch(
             GEOGCONST * (1.0 + 1.0 / EARTH_MOON_MRAT) / AUNIT / AUNIT / AUNIT * 86400.0 * 86400.0,
         )
     } else {
-        let raw0 = eph.nodaps_osc_body_j2000(tjd_et, ipli, false)?;
+        let raw0 = eph.nodaps_osc_body_j2000(tjd_et, ipli, false, flags)?;
         let dist = (raw0[0] * raw0[0] + raw0[1] * raw0[1] + raw0[2] * raw0[2]).sqrt();
         if method.contains(NodApsMethod::OSCU_BAR) && dist > OSCU_BAR_DISTANCE_THRESHOLD_AU {
             ellipse_is_bary = true;
@@ -451,7 +451,7 @@ fn osculating_branch(
                 _ => tjd_et,
             }
         };
-        let mut raw = eph.nodaps_osc_body_j2000(t, ipli, ellipse_is_bary)?;
+        let mut raw = eph.nodaps_osc_body_j2000(t, ipli, ellipse_is_bary, flags)?;
         plan_for_osc_elem(flags, t, &mut raw, &eph.config().astro_models);
         *slot = raw;
     }
@@ -609,7 +609,8 @@ pub(crate) fn transform_nodaps_output(
     tjd_et: f64,
 ) -> Result<[[f64; 6]; 4], Error> {
     let has_speed = flags.contains(CalcFlags::SPEED);
-    let is_moseph = eph.config().ephemeris_source == crate::types::EphemerisSource::Moshier;
+    let is_moseph = eph.effective_config(flags, eph.config()).ephemeris_source
+        == crate::types::EphemerisSource::Moshier;
 
     // A.5.1 — obliquity frame: J2000 if requested, else of-date.
     let oe = if flags.contains(CalcFlags::J2000) {

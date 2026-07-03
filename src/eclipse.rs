@@ -210,7 +210,8 @@ pub(crate) fn eclipse_where(
     starname: Option<&str>,
     ifl: CalcFlags,
 ) -> Result<EclipseWhere, Error> {
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
     let tjd = tjd_ut + crate::deltat::calc_deltat(tjd_ut, config);
 
     // `iflag2` (polar, radians) is derived from the pre-XYZ flavor of `iflag`; `iflag` is then
@@ -460,7 +461,8 @@ pub(crate) fn eclipse_how(
     geolat: f64,
     geohgt: f64,
 ) -> Result<EclipseHow, Error> {
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
     let te = tjd_ut + crate::deltat::calc_deltat(tjd_ut, config);
 
     let topo_config = {
@@ -634,7 +636,7 @@ pub(crate) fn sol_eclipse_how(
     how.core_diameter_km = where_result.core_diameter_km;
 
     let topo_config = {
-        let mut c = eph.config().clone();
+        let mut c = eph.effective_config(ifl, eph.config()).into_owned();
         c.topographic = Some(TopoPosition {
             longitude: geopos[0],
             latitude: geopos[1],
@@ -776,7 +778,8 @@ pub(crate) fn sol_eclipse_when_glob(
     backward: bool,
 ) -> Result<SolarEclipseGlobal, Error> {
     let ifl = ifl & crate::calc::EPHMASK;
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
 
     if ifltype == (EclipseFlags::PARTIAL | EclipseFlags::CENTRAL) {
         return Err(Error::CError(
@@ -1132,7 +1135,8 @@ pub(crate) fn eclipse_when_loc(
     geopos: [f64; 3],
     backward: bool,
 ) -> Result<SolarEclipseLocal, Error> {
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
     let direction = if backward { -1.0 } else { 1.0 };
 
     let topo_config = {
@@ -1617,7 +1621,8 @@ pub(crate) fn lun_eclipse_how(
     tjd_ut: f64,
     ifl: CalcFlags,
 ) -> Result<LunarEclipseCore, Error> {
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
     let tjd = tjd_ut + crate::deltat::calc_deltat(tjd_ut, config);
 
     let iflag = CalcFlags::SPEED | CalcFlags::EQUATORIAL | ifl | CalcFlags::XYZ;
@@ -1785,7 +1790,7 @@ pub(crate) fn swe_lun_eclipse_how(
     let mut flags = core.flags;
 
     let topo_config = {
-        let mut c = eph.config().clone();
+        let mut c = eph.effective_config(ifl, eph.config()).into_owned();
         c.topographic = Some(TopoPosition {
             longitude: geopos[0],
             latitude: geopos[1],
@@ -1866,7 +1871,8 @@ pub(crate) fn lun_eclipse_when(
     backward: bool,
 ) -> Result<LunarEclipseGlobal, Error> {
     let ifl = ifl & crate::calc::EPHMASK;
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
 
     // `ifltype` normalization (§4.1): solar-only CENTRAL/NONCENTRAL bits are meaningless here and
     // stripped unconditionally; ANNULAR/HYBRID (annular-total) don't exist for lunar eclipses --
@@ -2391,7 +2397,8 @@ pub(crate) fn lun_occult_when_glob(
 ) -> Result<OccultGlobal, Error> {
     let ipl = normalize_occulted_body(ipl);
     let ifl = ifl & crate::calc::EPHMASK;
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
 
     if ifltype == (EclipseFlags::PARTIAL | EclipseFlags::CENTRAL) {
         return Err(Error::CError(
@@ -2754,7 +2761,8 @@ pub(crate) fn occult_when_loc(
     geopos: [f64; 3],
     backward: bool,
 ) -> Result<OccultLocal, Error> {
-    let config = eph.config();
+    let _eff = eph.effective_config(ifl, eph.config());
+    let config = &*_eff;
     let direction = if backward { -1.0 } else { 1.0 };
     let is_planet = starname.unwrap_or("").is_empty();
 

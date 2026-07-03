@@ -40,6 +40,11 @@ fn nodaps_osc_frame(pos: &SwephPositions, ipli: Body, want_bary: bool) -> [f64; 
 
 pub struct Ephemeris {
     config: EphemerisConfig,
+    /// The caller's original `tidal_acceleration` before `Ephemeris::new`
+    /// resolved it from the open file's DE number. Needed by `effective_config`
+    /// to re-derive the correct tid_acc when per-call flags select a different
+    /// ephemeris source than the configured one (e.g. MOSEPH on a Swiss config).
+    user_tidal_acceleration: Option<f64>,
     leap_seconds: Vec<i32>,
     planet_files: Vec<crate::sweph_file::SwissEphFile>,
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
@@ -51,6 +56,7 @@ pub struct Ephemeris {
 
 impl Ephemeris {
     pub fn new(mut config: EphemerisConfig) -> crate::Result<Self> {
+        let user_tidal_acceleration = config.tidal_acceleration;
         let leap_seconds = Self::build_leap_seconds(&config)?;
         let mut jpl_file: Option<crate::jpl::JplFile> = None;
         let (planet_files, moon_files) = match config.ephemeris_source {
@@ -129,6 +135,7 @@ impl Ephemeris {
         let stars = crate::stars::load_catalog(config.ephe_path.as_deref());
         Ok(Self {
             config,
+            user_tidal_acceleration,
             leap_seconds,
             planet_files,
             moon_files,
@@ -141,6 +148,60 @@ impl Ephemeris {
 
     pub fn config(&self) -> &EphemerisConfig {
         &self.config
+    }
+
+    /// Resolve the per-call effective config: if `flags` requests a different
+    /// ephemeris source than `config.ephemeris_source`, clamp it to what this
+    /// `Ephemeris` can actually serve (loaded backends), adjust
+    /// `tidal_acceleration` to match, and return the modified config. When the
+    /// effective source matches the config's, returns a zero-cost borrow.
+    ///
+    /// Capability: Swiss requires `!planet_files.is_empty()`, Jpl requires
+    /// `jpl_file.is_some()`. Unavailable → C's fallback cascade
+    /// (Jpl→Swiss→Moshier), signaled via the returned source.
+    pub(crate) fn effective_config<'a>(
+        &self,
+        flags: CalcFlags,
+        config: &'a EphemerisConfig,
+    ) -> std::borrow::Cow<'a, EphemerisConfig> {
+        let requested = crate::calc::requested_source(flags);
+        let effective = match requested {
+            Some(src) => self.clamp_source(src),
+            None => config.ephemeris_source,
+        };
+        if effective == config.ephemeris_source {
+            std::borrow::Cow::Borrowed(config)
+        } else {
+            let mut c = config.clone();
+            c.ephemeris_source = effective;
+            c.tidal_acceleration = self.user_tidal_acceleration;
+            std::borrow::Cow::Owned(c)
+        }
+    }
+
+    /// Clamp a requested source to what this `Ephemeris` actually loaded.
+    /// Cascade: Jpl→Swiss→Moshier (C never hard-errors on missing files in
+    /// the calc path — it falls back and signals via flags_used).
+    fn clamp_source(&self, requested: EphemerisSource) -> EphemerisSource {
+        match requested {
+            EphemerisSource::Jpl => {
+                if self.jpl_file.is_some() {
+                    EphemerisSource::Jpl
+                } else if !self.planet_files.is_empty() {
+                    EphemerisSource::Swiss
+                } else {
+                    EphemerisSource::Moshier
+                }
+            }
+            EphemerisSource::Swiss => {
+                if !self.planet_files.is_empty() {
+                    EphemerisSource::Swiss
+                } else {
+                    EphemerisSource::Moshier
+                }
+            }
+            EphemerisSource::Moshier => EphemerisSource::Moshier,
+        }
     }
 
     pub fn leap_seconds(&self) -> &[i32] {
@@ -183,6 +244,7 @@ impl Ephemeris {
         flags: CalcFlags,
         config: &EphemerisConfig,
     ) -> Result<CalcResult, Error> {
+        let config = self.effective_config(flags, config);
         let flags = crate::calc::plaus_iflag(flags, config.ephemeris_source);
         if flags.contains(CalcFlags::TOPOCTR) && config.topographic.is_none() {
             return Err(Error::CError(
@@ -198,10 +260,10 @@ impl Ephemeris {
         }
 
         if flags.contains(CalcFlags::SPEED3) {
-            return self.calc_speed3(jd_tt, body, flags, config);
+            return self.calc_speed3(jd_tt, body, flags, &config);
         }
 
-        let (mut xreturn, x2000, flags_used) = self.calc_inner(jd_tt, body, flags, config)?;
+        let (mut xreturn, x2000, flags_used) = self.calc_inner(jd_tt, body, flags, &config)?;
         if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
             self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags_used)?;
         }
@@ -212,7 +274,8 @@ impl Ephemeris {
     }
 
     pub fn calc_ut(&self, jd_ut: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
-        let dt = crate::deltat::calc_deltat(jd_ut, &self.config);
+        let config = self.effective_config(flags, &self.config);
+        let dt = crate::deltat::calc_deltat(jd_ut, &config);
         self.calc(jd_ut + dt, body, flags)
     }
 
@@ -225,8 +288,9 @@ impl Ephemeris {
         flags: CalcFlags,
         config: &EphemerisConfig,
     ) -> Result<CalcResult, Error> {
-        let dt = crate::deltat::calc_deltat(jd_ut, config);
-        self.calc_with_config(jd_ut + dt, body, flags, config)
+        let config = self.effective_config(flags, config);
+        let dt = crate::deltat::calc_deltat(jd_ut, &config);
+        self.calc_with_config(jd_ut + dt, body, flags, &config)
     }
 
     /// Ayanamsa at `jd_tt` (TT), with nutation added unless `NONUT` is set.
@@ -245,7 +309,8 @@ impl Ephemeris {
 
     /// Ayanamsa at `jd_ut` (UT), with nutation added unless `NONUT` is set.
     pub fn get_ayanamsa_ut(&self, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error> {
-        let dt = crate::deltat::calc_deltat(jd_ut, &self.config);
+        let config = self.effective_config(flags, &self.config);
+        let dt = crate::deltat::calc_deltat(jd_ut, &config);
         self.get_ayanamsa_ex(jd_ut + dt, flags)
     }
 
@@ -712,7 +777,8 @@ impl Ephemeris {
         flags: CalcFlags,
         method: crate::nodaps::NodApsMethod,
     ) -> Result<crate::nodaps::NodesApsides, Error> {
-        if flags.contains(CalcFlags::TOPOCTR) && self.config.topographic.is_none() {
+        let eff = self.effective_config(flags, &self.config);
+        if flags.contains(CalcFlags::TOPOCTR) && eff.topographic.is_none() {
             return Err(Error::CError(
                 "topocentric requires topographic position".to_string(),
             ));
@@ -729,7 +795,8 @@ impl Ephemeris {
         flags: CalcFlags,
         method: crate::nodaps::NodApsMethod,
     ) -> Result<crate::nodaps::NodesApsides, Error> {
-        let tjde = tjd_ut + crate::deltat::calc_deltat(tjd_ut, &self.config);
+        let eff = self.effective_config(flags, &self.config);
+        let tjde = tjd_ut + crate::deltat::calc_deltat(tjd_ut, &eff);
         self.nod_aps(tjde, body, flags, method)
     }
 
@@ -840,11 +907,12 @@ impl Ephemeris {
                 "ipl and iplctr must not be identical".to_string(),
             ));
         }
-        let flags = crate::calc::plaus_iflag(flags, self.config.ephemeris_source);
+        let config = self.effective_config(flags, &self.config);
+        let flags = crate::calc::plaus_iflag(flags, config.ephemeris_source);
 
         // C's swe_calc_pctr internally calls swe_calc with SEFLG_BARYCTR.
         // Moshier doesn't support barycentric positions → propagate the error.
-        if self.config.ephemeris_source == EphemerisSource::Moshier {
+        if config.ephemeris_source == EphemerisSource::Moshier {
             return Err(Error::CError(
                 "barycentric Moshier positions are not supported".to_string(),
             ));
@@ -852,7 +920,7 @@ impl Ephemeris {
 
         // Strip HELCTR/BARYCTR from user flags (sweph.c:8059)
         let flags = flags & !(CalcFlags::HELCTR | CalcFlags::BARYCTR);
-        let models = &self.config.astro_models;
+        let models = &config.astro_models;
         let has_speed = flags.contains(CalcFlags::SPEED);
 
         // §1: Prime obliquity/nutation at tjd + Δt(tjd) — a third, distinct epoch.
@@ -860,7 +928,7 @@ impl Ephemeris {
         // (oec2000), not obliquity-of-date, mirroring calc::precess_and_ephem's
         // J2000 branch. (nut_val is unused when J2000 forces NONUT, but priming it
         // is harmless and keeps the non-J2000 path unchanged.)
-        let dt_prime = crate::deltat::calc_deltat(jd_tt, &self.config);
+        let dt_prime = crate::deltat::calc_deltat(jd_tt, &config);
         let eps = if flags.contains(CalcFlags::J2000) {
             crate::obliquity::obliquity(crate::constants::J2000, flags, models)
         } else {
@@ -985,7 +1053,8 @@ impl Ephemeris {
         t: f64,
         flags: CalcFlags,
     ) -> Result<crate::nodaps::ObsFrame, Error> {
-        let config = &self.config;
+        let _eff = self.effective_config(flags, &self.config);
+        let config = &*_eff;
         let models = &config.astro_models;
         let topo = crate::calc::topo_offset(t, flags, config, models);
         match config.ephemeris_source {
@@ -1050,9 +1119,11 @@ impl Ephemeris {
         t: f64,
         ipli: Body,
         want_bary: bool,
+        flags: CalcFlags,
     ) -> Result<[f64; 6], Error> {
-        let source = self.config.ephemeris_source;
-        let models = &self.config.astro_models;
+        let _eff = self.effective_config(flags, &self.config);
+        let source = _eff.ephemeris_source;
+        let models = &_eff.astro_models;
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
@@ -1245,16 +1316,16 @@ impl Ephemeris {
             )));
         }
 
-        let models = &self.config.astro_models;
-        let t_et = t_ut + crate::deltat::calc_deltat(t_ut, &self.config);
+        let eff = self.effective_config(flags, &self.config);
+        let models = &eff.astro_models;
+        let t_et = t_ut + crate::deltat::calc_deltat(t_ut, &eff);
         let eps = crate::obliquity::obliquity(t_et, flags, models).eps * RADTODEG;
         let nut = crate::nutation::nutation(t_et, flags, models);
         let dpsi_deg = nut.dpsi * RADTODEG;
         let deps_deg = nut.deps * RADTODEG;
         let eps_true = eps + deps_deg;
         let armc = crate::math::normalize_degrees(
-            crate::sidereal_time::sidereal_time0(t_ut, eps_true, dpsi_deg, &self.config) * 15.0
-                + geolon,
+            crate::sidereal_time::sidereal_time0(t_ut, eps_true, dpsi_deg, &eff) * 15.0 + geolon,
         );
 
         let x0 = if starname.is_some_and(|s| !s.is_empty()) {
@@ -2059,6 +2130,7 @@ impl Ephemeris {
         flags: CalcFlags,
         config: &EphemerisConfig,
     ) -> Result<(String, CalcResult), Error> {
+        let config = self.effective_config(flags, config);
         // C's swe_fixstar2 returns the original input iflag unchanged (it passes
         // iflag by value to fixstar_calc_from_struct and ignores the return).
         let orig_flags = flags;
@@ -2068,7 +2140,7 @@ impl Ephemeris {
         } else {
             self.stars.search(star)?
         };
-        let data = self.calc_fixstar(&resolved, jd_tt, flags, config)?;
+        let data = self.calc_fixstar(&resolved, jd_tt, flags, &config)?;
         let name = format!("{},{}", resolved.name, resolved.bayer);
         Ok((
             name,

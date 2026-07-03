@@ -98,7 +98,13 @@ pub fn pheno(
     body: Body,
     flags: CalcFlags,
 ) -> Result<(Phenomena, CalcFlags), Error> {
-    pheno_with_config(eph, tjd_et, body, flags, eph.config())
+    pheno_with_config(
+        eph,
+        tjd_et,
+        body,
+        flags,
+        &eph.effective_config(flags, eph.config()),
+    )
 }
 
 pub(crate) fn pheno_with_config(
@@ -297,7 +303,7 @@ pub(crate) fn pheno_with_config(
             } else {
                 let meta = eph.asteroid_meta(ipl).ok_or(Error::EphemerisNotAvailable {
                     body,
-                    source: eph.config().ephemeris_source,
+                    source: config.ephemeris_source,
                 })?;
                 [meta.h, meta.g]
             };
@@ -377,7 +383,13 @@ pub fn pheno_ut(
     body: Body,
     flags: CalcFlags,
 ) -> Result<(Phenomena, CalcFlags), Error> {
-    pheno_ut_with_config(eph, tjd_ut, body, flags, eph.config())
+    pheno_ut_with_config(
+        eph,
+        tjd_ut,
+        body,
+        flags,
+        &eph.effective_config(flags, eph.config()),
+    )
 }
 
 pub(crate) fn pheno_ut_with_config(

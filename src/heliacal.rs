@@ -767,8 +767,12 @@ pub fn bsky(
 
 const LAPSE_RATE_DEFAULT: f64 = 0.0065;
 
-fn topo_config(eph: &Ephemeris, dgeo: &[f64; 3]) -> crate::config::EphemerisConfig {
-    let mut config = eph.config().clone();
+fn topo_config(
+    eph: &Ephemeris,
+    dgeo: &[f64; 3],
+    epheflag: CalcFlags,
+) -> crate::config::EphemerisConfig {
+    let mut config = eph.effective_config(epheflag, eph.config()).into_owned();
     config.topographic = Some(TopoPosition {
         longitude: dgeo[0],
         latitude: dgeo[1],
@@ -804,19 +808,20 @@ pub fn object_loc(
     }
     let angle = if angle == 7 { 0 } else { angle };
 
-    let tjd_tt = jd_ut + crate::deltat::calc_deltat(jd_ut, eph.config());
+    let tjd_tt =
+        jd_ut + crate::deltat::calc_deltat(jd_ut, &eph.effective_config(epheflag, eph.config()));
     let planet = object_to_body(object_name);
 
     let x = if let Some(body) = planet {
         if iflag.contains(CalcFlags::TOPOCTR) {
-            let config = topo_config(eph, dgeo);
+            let config = topo_config(eph, dgeo, epheflag);
             eph.calc_with_config(tjd_tt, body, iflag, &config)?
         } else {
             eph.calc(tjd_tt, body, iflag)?
         }
     } else {
         if iflag.contains(CalcFlags::TOPOCTR) {
-            let config = topo_config(eph, dgeo);
+            let config = topo_config(eph, dgeo, epheflag);
             eph.fixstar2_with_config(object_name, tjd_tt, iflag, &config)?
                 .1
         } else {
@@ -869,9 +874,10 @@ pub fn azalt_cart(
         iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
     }
 
-    let tjd_tt = jd_ut + crate::deltat::calc_deltat(jd_ut, eph.config());
+    let tjd_tt =
+        jd_ut + crate::deltat::calc_deltat(jd_ut, &eph.effective_config(epheflag, eph.config()));
     let planet = object_to_body(object_name);
-    let config = topo_config(eph, dgeo);
+    let config = topo_config(eph, dgeo, epheflag);
 
     let x = if let Some(body) = planet {
         eph.calc_with_config(tjd_tt, body, iflag, &config)?
@@ -913,7 +919,7 @@ pub fn magnitude(
         if !helflag.contains(HeliacalFlags::HIGH_PRECISION) {
             iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
         }
-        let config = topo_config(eph, dgeo);
+        let config = topo_config(eph, dgeo, epheflag);
         let (pheno, _) = crate::phenomena::pheno_ut_with_config(eph, jd_ut, body, iflag, &config)?;
         Ok(pheno.apparent_magnitude)
     } else {
@@ -1035,7 +1041,7 @@ pub fn calc_rise_and_set(
     };
 
     // Step 11: refinement loop (2 iterations)
-    let config = topo_config(eph, dgeo);
+    let config = topo_config(eph, dgeo, epheflag);
     let mut refine_iflag = (epheflag & calc::EPHMASK) | CalcFlags::SPEED | CalcFlags::EQUATORIAL;
     if ipl == Body::Moon {
         refine_iflag |= CalcFlags::TOPOCTR;
@@ -1927,7 +1933,7 @@ pub fn heliacal_pheno_ut(
     let planet = object_to_body(&name);
     let (elong, illum) = if let Some(body) = planet {
         let pheno_iflag = iflag | CalcFlags::TOPOCTR | CalcFlags::EQUATORIAL;
-        let config = topo_config(eph, dgeo);
+        let config = topo_config(eph, dgeo, epheflag);
         let (pheno, _) =
             crate::phenomena::pheno_ut_with_config(eph, tjd_ut, body, pheno_iflag, &config)?;
         (pheno.elongation, pheno.phase * 100.0)
@@ -3346,7 +3352,7 @@ fn heliacal_ut_arc_vis(
     } else {
         efl | CalcFlags::NONUT | CalcFlags::TRUEPOS
     };
-    let tc = topo_config(eph, dgeo);
+    let tc = topo_config(eph, dgeo, epheflag);
 
     let (mut day_step, maxlength): (f64, f64) = match planet {
         Some(Body::Mercury) => (1.0, 100.0),
@@ -3414,7 +3420,8 @@ fn heliacal_ut_arc_vis(
             )?;
 
             // Sun equatorial position at its rise/set
-            let dt = crate::deltat::calc_deltat(tret, eph.config());
+            let dt =
+                crate::deltat::calc_deltat(tret, &eph.effective_config(epheflag, eph.config()));
             let tjd_tt = tret + dt;
             let xs = eph.calc_with_config(tjd_tt, Body::Sun, efl, &tc)?;
             let xaz_sun = eph.azalt(
@@ -3446,7 +3453,10 @@ fn heliacal_ut_arc_vis(
             jdn_arc_vis_ut = tret - t_delta / 24.0;
 
             // Recompute Sun position at candidate instant
-            let dt2 = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
+            let dt2 = crate::deltat::calc_deltat(
+                jdn_arc_vis_ut,
+                &eph.effective_config(epheflag, eph.config()),
+            );
             let xs2 = eph.calc_with_config(jdn_arc_vis_ut + dt2, Body::Sun, efl, &tc)?;
             let xaz_sun2 = eph.azalt(
                 jdn_arc_vis_ut,
@@ -3461,8 +3471,9 @@ fn heliacal_ut_arc_vis(
             let alt_s = xaz_sun2[1];
 
             // Object/star position at candidate instant
+            let eff = eph.effective_config(epheflag, eph.config());
             let (azi_o, alt_o) = if let Some(body) = planet {
-                let dt3 = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
+                let dt3 = crate::deltat::calc_deltat(jdn_arc_vis_ut, &eff);
                 let xp = eph.calc_with_config(jdn_arc_vis_ut + dt3, body, efl, &tc)?;
                 objectmagn = magnitude(eph, jdn_arc_vis_ut, dgeo, object_name, epheflag, helflag)?;
                 let xaz_p = eph.azalt(
@@ -3477,7 +3488,7 @@ fn heliacal_ut_arc_vis(
                 (normalize_degrees(xaz_p[0] + 180.0), xaz_p[1])
             } else {
                 // Fixed star — magnitude NOT refreshed per §6 step 5
-                let dt3 = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
+                let dt3 = crate::deltat::calc_deltat(jdn_arc_vis_ut, &eff);
                 let star_result =
                     eph.fixstar2_with_config(object_name, jdn_arc_vis_ut + dt3, efl, &tc)?;
                 let xaz_s = eph.azalt(
@@ -3626,7 +3637,10 @@ fn heliacal_ut_arc_vis(
             jdn_arc_vis_ut -= direct;
 
             // Object altitude at this instant
-            let dt = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
+            let dt = crate::deltat::calc_deltat(
+                jdn_arc_vis_ut,
+                &eph.effective_config(epheflag, eph.config()),
+            );
             let tjd_tt = jdn_arc_vis_ut + dt;
             if let Some(body) = planet {
                 let xp = eph.calc_with_config(tjd_tt, body, efl, &tc)?;

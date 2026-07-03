@@ -26,6 +26,21 @@ pub(crate) const EPHMASK: CalcFlags = CalcFlags::MOSEPH
     .union(CalcFlags::SWIEPH)
     .union(CalcFlags::JPLEPH);
 
+/// Extract the caller's requested ephemeris source from the EPHMASK bits in
+/// `flags`, using C's precedence (sweph.c:375-381): MOSEPH > JPLEPH > SWIEPH.
+/// Returns `None` when no EPHMASK bit is set (caller accepts the config default).
+pub(crate) fn requested_source(flags: CalcFlags) -> Option<EphemerisSource> {
+    if flags.contains(CalcFlags::MOSEPH) {
+        Some(EphemerisSource::Moshier)
+    } else if flags.contains(CalcFlags::JPLEPH) {
+        Some(EphemerisSource::Jpl)
+    } else if flags.contains(CalcFlags::SWIEPH) {
+        Some(EphemerisSource::Swiss)
+    } else {
+        None
+    }
+}
+
 pub fn plaus_iflag(mut flags: CalcFlags, source: EphemerisSource) -> CalcFlags {
     if flags.contains(CalcFlags::DPSIDEPS_1980) && flags.contains(CalcFlags::JPLHOR_APPROX) {
         flags.remove(CalcFlags::JPLHOR_APPROX);
