@@ -673,6 +673,34 @@ impl Ephemeris {
         )
     }
 
+    /// Find the next heliacal event (rising, setting, evening first, morning last,
+    /// acronychal) for `object_name` after `tjd_start_ut`. Port of `swe_heliacal_ut`
+    /// (swehel.c:3385-3511).
+    #[allow(clippy::too_many_arguments)]
+    pub fn heliacal_ut(
+        &self,
+        tjd_start_ut: f64,
+        dgeo: &[f64; 3],
+        datm: &mut [f64; 4],
+        dobs: &mut [f64; 6],
+        object_name: &str,
+        event: crate::heliacal::HeliacalEventType,
+        epheflag: crate::flags::CalcFlags,
+        helflag: crate::flags::HeliacalFlags,
+    ) -> Result<crate::heliacal::HeliacalEvent, Error> {
+        crate::heliacal::heliacal_ut(
+            self,
+            tjd_start_ut,
+            dgeo,
+            datm,
+            dobs,
+            object_name,
+            event,
+            epheflag,
+            helflag,
+        )
+    }
+
     /// Nodes & apsides of `body` at `tjd_et` (TT). Port of `swe_nod_aps`
     /// (swecl.c:5075-5654). `method` selects mean vs osculating elements
     /// ([`NodApsMethod`](crate::NodApsMethod)); the mean branch (Sun..Neptune,

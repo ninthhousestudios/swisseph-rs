@@ -40,7 +40,7 @@ pub use eclipse::{
 };
 pub use error::Error;
 pub use flags::{CalcFlags, EclipseFlags, RiseSetFlags, VisLimFlags};
-pub use heliacal::{HeliacalAngleResult, HeliacalPheno, VisLimitResult};
+pub use heliacal::{HeliacalAngleResult, HeliacalEvent, HeliacalPheno, VisLimitResult};
 pub use houses::{AscMc, HouseResult};
 pub use nodaps::{NodApsMethod, NodesApsides};
 pub use orbit::OrbitalElements;
