@@ -395,6 +395,50 @@ static void print_magnitude(void) {
     printf("]");
 }
 
+/* ── AzaltCart battery ─────────────────────────────────────────── */
+
+static void print_azaltcart(void) {
+    const char *objects[] = {"venus", "sirius", "moon"};
+    double jd_ut_vals[] = {2451545.0, 2453371.0};
+    double dgeo[3] = {31.25, 30.1, 30.0};
+    double datm[4] = {1013.25, 15, 40, 40};
+    int helflag = SEFLG_SWIEPH;
+
+    int n_obj = sizeof(objects)/sizeof(objects[0]);
+    int n_jd = sizeof(jd_ut_vals)/sizeof(jd_ut_vals[0]);
+
+    char serr[AS_MAXCH];
+    char object_name[AS_MAXCH];
+
+    printf("\"azaltcart\":[");
+    first_item = 1;
+
+    for (int io = 0; io < n_obj; io++) {
+        for (int ij = 0; ij < n_jd; ij++) {
+            double jd_ut = jd_ut_vals[ij];
+
+            strcpy(object_name, objects[io]);
+            double dret[6] = {0};
+            int32 retval = azalt_cart(jd_ut, dgeo, datm, object_name, helflag, dret, serr);
+            if (retval == ERR)
+                continue;
+
+            comma();
+            printf("{\"object\":\"%s\",\"jd_ut\":%.17g,"
+                   "\"dgeo\":[%.17g,%.17g,%.17g],"
+                   "\"datm\":[%.17g,%.17g,%.17g,%.17g],"
+                   "\"helflag\":%d,"
+                   "\"dret\":[%.17g,%.17g,%.17g,%.17g,%.17g,%.17g]}\n",
+                   objects[io], jd_ut,
+                   dgeo[0], dgeo[1], dgeo[2],
+                   datm[0], datm[1], datm[2], datm[3],
+                   helflag,
+                   dret[0], dret[1], dret[2], dret[3], dret[4], dret[5]);
+        }
+    }
+    printf("]");
+}
+
 /* ── Main ────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -417,6 +461,8 @@ int main(void) {
     print_objectloc();
     printf(",");
     print_magnitude();
+    printf(",");
+    print_azaltcart();
     printf("}\n");
     return 0;
 }

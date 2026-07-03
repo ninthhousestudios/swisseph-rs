@@ -377,22 +377,7 @@ pub fn pheno_ut(
     body: Body,
     flags: CalcFlags,
 ) -> Result<(Phenomena, CalcFlags), Error> {
-    let mut epheflag = flags & calc::EPHMASK;
-    let mut iflag = flags;
-    if epheflag.is_empty() {
-        epheflag = CalcFlags::SWIEPH;
-        iflag |= CalcFlags::SWIEPH;
-    }
-    let deltat = crate::deltat::calc_deltat(tjd_ut, eph.config());
-    let (attr, retflag) = pheno(eph, tjd_ut + deltat, body, iflag)?;
-    if (retflag & calc::EPHMASK) != epheflag {
-        // Ephemeris fallback: C recomputes deltaT with the actually-used flags. In this stateless
-        // port deltaT is derived from the Ephemeris config (not the flags), so the recomputed
-        // value is identical and the re-call is idempotent — kept for structural fidelity.
-        let deltat = crate::deltat::calc_deltat(tjd_ut, eph.config());
-        return pheno(eph, tjd_ut + deltat, body, iflag);
-    }
-    Ok((attr, retflag))
+    pheno_ut_with_config(eph, tjd_ut, body, flags, eph.config())
 }
 
 pub(crate) fn pheno_ut_with_config(
@@ -411,6 +396,9 @@ pub(crate) fn pheno_ut_with_config(
     let deltat = crate::deltat::calc_deltat(tjd_ut, config);
     let (attr, retflag) = pheno_with_config(eph, tjd_ut + deltat, body, iflag, config)?;
     if (retflag & calc::EPHMASK) != epheflag {
+        // Ephemeris fallback: C recomputes deltaT with the actually-used flags. In this stateless
+        // port deltaT is derived from the config (not the flags), so the recomputed value is
+        // identical and the re-call is idempotent — kept for structural fidelity.
         let deltat = crate::deltat::calc_deltat(tjd_ut, config);
         return pheno_with_config(eph, tjd_ut + deltat, body, iflag, config);
     }

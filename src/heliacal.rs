@@ -890,8 +890,9 @@ pub fn azalt_cart(
         xin,
     );
 
-    // C: xaz[1]=xaz[2] (swap app alt in), xaz[2]=1 (unit), then polcart in-place
-    let cart = polar_to_cartesian([xaz[0] * DEGTORAD, xaz[2] * DEGTORAD, 1.0]);
+    // C feeds degree-valued az/alt directly to swi_polcart (which calls cos/sin
+    // expecting radians) — intentional reproduction for golden parity.
+    let cart = polar_to_cartesian([xaz[0], xaz[2], 1.0]);
 
     Ok([xaz[0], xaz[1], xaz[2], cart[0], cart[1], cart[2]])
 }

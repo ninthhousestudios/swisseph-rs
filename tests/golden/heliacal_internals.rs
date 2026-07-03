@@ -135,6 +135,16 @@ struct MagnitudeCase {
 }
 
 #[derive(Deserialize)]
+struct AzaltCartCase {
+    object: String,
+    jd_ut: f64,
+    dgeo: [f64; 3],
+    datm: [f64; 4],
+    helflag: u32,
+    dret: [f64; 6],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     extinction: Vec<ExtinctionCase>,
     airmass: Vec<AirmassCase>,
@@ -143,6 +153,7 @@ struct GoldenData {
     brightness: Vec<BrightnessCase>,
     objectloc: Vec<ObjectLocCase>,
     magnitude: Vec<MagnitudeCase>,
+    azaltcart: Vec<AzaltCartCase>,
 }
 
 fn load() -> GoldenData {
@@ -489,6 +500,30 @@ fn golden_magnitude() {
         match actual {
             Ok(val) => {
                 super::assert_f64_eps(&label_base, c.dmag, val, 1e-8);
+            }
+            Err(e) => panic!("{label_base}: unexpected error: {e}"),
+        }
+    }
+}
+
+#[test]
+fn golden_azaltcart() {
+    let data = load();
+    let eph = make_eph();
+    for (i, c) in data.azaltcart.iter().enumerate() {
+        let helflag = HeliacalFlags::from_bits_truncate(c.helflag);
+        let epheflag = CalcFlags::from_bits_truncate(c.helflag);
+        let label_base = format!("azaltcart[{i}][obj={},jd={}]", c.object, c.jd_ut);
+
+        let actual = heliacal::azalt_cart(
+            &eph, c.jd_ut, &c.dgeo, &c.datm, &c.object, epheflag, helflag,
+        );
+        match actual {
+            Ok(val) => {
+                let labels = ["az", "topo_alt", "app_alt", "cart_x", "cart_y", "cart_z"];
+                for (j, &lbl) in labels.iter().enumerate() {
+                    super::assert_f64_eps(&format!("{label_base}/{lbl}"), c.dret[j], val[j], 1e-7);
+                }
             }
             Err(e) => panic!("{label_base}: unexpected error: {e}"),
         }
