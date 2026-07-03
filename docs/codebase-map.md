@@ -349,7 +349,26 @@ src/
 │                          dispatcher port) picks fast vs rise_trans_true_hor(horhgt=0.0) by the
 │                          §4 eligibility gate (not fixstar, RISE/SET only, !FORCE_SLOW, no
 │                          twilight, body in Sun..=TrueNode, |geolat|≤60 or Sun≤65).
-├── heliacal.rs         — EMPTY stub
+├── heliacal.rs         — heliacal visibility module (swisseph-rs/104, sub-task 1/8):
+│                          HeliacalEventType enum (MorningFirst..AcronymchalSetting, TryFrom<i32>);
+│                          object_to_body (DeterObject port: case-insensitive planet-name prefix
+│                          match, asteroid-number parse, None=fixed-star); tolower_string_star
+│                          (lowercase preserving Bayer designation after comma);
+│                          default_heliacal_parameters (ISA pressure estimate, observer/optics
+│                          defaults, SIMULATE_VICTORVB RH clamp is DEAD per §11);
+│                          meteorological helpers: mymin/mymax (C's non-commutative-under-NaN
+│                          semantics), tanh_manual (exp-based, NOT f64::tanh), kelvin,
+│                          topo_alt_from_app_alt/app_alt_from_topo_alt (refraction model, Newton
+│                          inversion with nloop+1 iterations), hour_angle, distance_angle
+│                          (haversine, radians in/out), temp_e_from_temp_s, pres_e_from_pres_s;
+│                          extinction layer: kw/koz/kr/ka (4 atmospheric components — ka has
+│                          SIMULATE_VICTORVB RH clamp on VR==0 path), kt (dispatcher/summer),
+│                          airmass (Kasten-style, effectively unreachable via Deltam under
+│                          staticAirmass=0), xext/xlay (optical path through exponential/thin
+│                          layers), deltam (total extinction magnitude); optics layer: cva
+│                          (contrast visual acuity, scotopic threshold 1394), pupil_dia (Garstang
+│                          age model), optic_factor (intensity/background correction factors,
+│                          scotopic threshold 1645). All functions pure math, no Ephemeris calls
 ├── phenomena.rs        — swe_pheno/swe_pheno_ut port (swisseph-rs/83): Phenomena output struct
 │                          (phase_angle, phase, elongation, apparent_diameter, apparent_magnitude,
 │                          horizontal_parallax = attr[0..5]); MAG_ELEM[21][4] table + EULER/
@@ -593,6 +612,16 @@ tests/
 │                          (planets+Moon, Moshier+Swiss) at 1e-9. Pre-1900 epoch nudged to
 │                          1800-Jan-5 (off sepl_18's tfstart) to avoid a documented C stateless
 │                          file-boundary artifact in swe_pheno's elongation.
+│   ├── heliacal_internals.rs — golden tests for heliacal atmospheric/optics layer
+│                          (swisseph-rs/104, sub-task 1/8): extinction battery 48 cases
+│                          (AltO×AltS×sunra rotated over Lat/HeightEye/datm, asserts Deltam + kt +
+│                          kR + kOZ + kW + ka at 1e-12); airmass battery 14 cases (AppAltO×Press,
+│                          asserts Airmass + Xext{rayleigh,water,aerosol} + Xlay_ozone); app_alt
+│                          battery 36 cases (alt×TempE×PresE, asserts AppAltfromTopoAlt +
+│                          TopoAltfromAppAlt at 1e-12); optic battery 20 cases (B×4 dobs configs
+│                          {default,age60,binocular,optical_params}, asserts CVA + PupilDia +
+│                          OpticFactor{intensity,background} at 1e-12). C harness includes
+│                          swehel.c directly for access to static functions
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)

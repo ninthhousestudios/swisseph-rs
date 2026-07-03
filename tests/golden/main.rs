@@ -14,6 +14,7 @@ mod deltat;
 mod eclipse;
 mod fixstar;
 mod fixstar_ayanamsa;
+mod heliacal_internals;
 mod houses;
 mod jpl_header;
 mod jpl_pleph;
