@@ -2158,12 +2158,13 @@ impl<'a, P: PositionProvider> PositionProvider for AsteroidProvider<'a, P> {
         let pos = self.inner.positions(Body::Sun, jd, need_speed)?;
         let n = if need_speed { 6 } else { 3 };
         let (mut ast, _) = evaluate_body(self.ast_file, self.ast_id, jd, need_speed)?;
-        if let Some(pd) = self.ast_file.planet_data(self.ast_id)
-            && pd.iflg & SEI_FLG_HELIO != 0
-        {
-            for i in 0..n {
-                ast[i] += pos.sun_bary[i];
-            }
+        // C's sweph() adds sun_bary unconditionally for ipl >= SEI_ANYBODY (slot-index
+        // check, sweph.c:2332-2343) — the file's SEI_FLG_HELIO flag is NOT checked for
+        // asteroids (seas files don't set it, even though their data is heliocentric).
+        // MoshierEarthProvider returns sun_bary=[0;6], making this a no-op under MOSEPH
+        // — matching C's flag guard that skips the add when !(SWIEPH|JPLEPH).
+        for (a, &s) in ast.iter_mut().zip(pos.sun_bary.iter()).take(n) {
+            *a += s;
         }
         Ok(SwephPositions {
             planet_bary: ast,

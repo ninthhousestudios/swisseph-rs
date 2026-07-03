@@ -1,3 +1,4 @@
+mod asteroid;
 mod ayanamsa;
 mod ayanamsa_calc;
 mod azalt;

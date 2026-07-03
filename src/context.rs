@@ -1377,7 +1377,7 @@ impl Ephemeris {
         }
 
         if body == Body::Chiron
-            && (jd_tt < crate::constants::CHIRON_START || jd_tt > crate::constants::CHIRON_END)
+            && !(crate::constants::CHIRON_START..=crate::constants::CHIRON_END).contains(&jd_tt)
         {
             return Err(Error::BeyondEphemerisLimits {
                 jd_tt,
@@ -1386,7 +1386,7 @@ impl Ephemeris {
             });
         }
         if body == Body::Pholus
-            && (jd_tt < crate::constants::PHOLUS_START || jd_tt > crate::constants::PHOLUS_END)
+            && !(crate::constants::PHOLUS_START..=crate::constants::PHOLUS_END).contains(&jd_tt)
         {
             return Err(Error::BeyondEphemerisLimits {
                 jd_tt,
