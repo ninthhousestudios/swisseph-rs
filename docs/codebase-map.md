@@ -44,6 +44,15 @@ src/
 │                          Err (BARYCTR unsupported). Ephemeris::calc_pctr in context.rs orchestrates
 │                          (§0-§2 validation + provider-level barycentric fetches via pctr_bary_state,
 │                          §3d re-eval at t, delegates to pctr_pipeline for §4-§9, sidereal tail)
+│                          Asteroid calc (swisseph-rs/101): normalize_asteroid_aliases
+│                          (Pluto-134340 + Ceres..Vesta(1..4) alias, called at top of
+│                          calc_inner); AsteroidProvider<P: PositionProvider> wraps an inner
+│                          provider (SwephProvider/JplProvider/MoshierEarthProvider), evaluates
+│                          asteroid from .se1 file, unconditionally adds sun_bary for helio→bary
+│                          (seas files don't set SEI_FLG_HELIO, C checks slot index not flag);
+│                          MoshierEarthProvider returns Earth via Moshier + all-zero sun_bary
+│                          (fresh-process MOSEPH semantics); calc_asteroid_sweph/jpl/moshier
+│                          construct the provider stack and delegate to apparent_planet
 ├── topocentric.rs      — get_observer: swi_get_observer port (NONUT-forced mean-frame path only, docs/c-ref-topocentric.md §3), geodetic→geocentric flattening + diurnal rotation + precession to J2000, returns observer position+velocity offset (AU/AU-day) from the geocenter
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
@@ -475,6 +484,12 @@ src/
 tests/
 ├── golden/
 │   ├── main.rs         — test harness: golden_data_path(), assert_f64_exact(), assert_f64_eps()
+│   ├── asteroid.rs    — golden tests for asteroid calc (swisseph-rs/101: 300 cases, 6 bodies
+│                         {Chiron..Vesta} × 5 epochs × 10 flag combos {SWIEPH×9, JPLEPH×1},
+│                         positions 1e-9 / speeds 1e-7 for SWIEPH; JPLEPH widened to 2e-6 pos /
+│                         1e-5 speed (JPL vs SWIEPH Earth/Sun source diff); TopoPosition
+│                         configured; retflag checked for SWIEPH only (C returns SWIEPH for
+│                         JPLEPH+asteroid since the asteroid file is .se1))
 │   ├── azalt.rs        — golden tests for refraction/horizontal coords (swisseph-rs/69: refrac
 │                          28 cases (7 inalt × 2 atpress × 2 dir, exact-or-1e-9 fallback);
 │                          refrac_ext 56 cases (× 2 geoalt, out + dret[0..4], exact-or-1e-9);
@@ -701,6 +716,8 @@ tests/
 │                         RISE/SET (no FORCE_SLOW — that's what selects the fast path), eps 1e-6
 │                         vs C tret0 + a same-input fast-vs-full cross-check eps 1e-5 day)
 ├── golden-data/
+│   ├── asteroid.json   — C-generated reference data for asteroid calc (300 cases: 6 bodies ×
+│                          5 epochs × 10 flag combos; see tests/golden/asteroid.rs)
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
 │   ├── math.json       — C-generated reference data for math
@@ -735,6 +752,9 @@ tests/
 │   ├── riseset.json    — C-generated reference data for swe_rise_trans_true_hor + swe_rise_trans (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err; dip key: 6 cases, horhgt=-100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: 12 cases, NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key: 24 cases via swe_rise_trans, 3 geopos all \|lat\|≤60 × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
 │   └── crossings.json  — C-generated reference data for swe_solcross/mooncross/mooncross_node/helio_cross (66 cases: 18 solcross + 18 mooncross + 6 mooncross_node + 24 helio_cross, all Moshier)
 └── c-gen/
+    ├── gen_asteroid.c  — C harness to regenerate asteroid.json (6 bodies × 5 epochs × 10 flags
+    │                       = 300 cases; swe_close+swe_set_ephe_path("ephe")+swe_set_topo per call;
+    │                       no MOSEPH cases per decision 1; aborts on any swe_calc error)
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
     ├── gen_eclipse.c   — C harness to regenerate eclipse.json (swe_sol_eclipse_where: 3 known
     │                       central eclipses at their real maximum-eclipse UT instants + 1
