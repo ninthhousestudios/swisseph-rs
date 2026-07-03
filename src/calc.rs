@@ -75,6 +75,16 @@ pub fn plaus_iflag(mut flags: CalcFlags, source: EphemerisSource) -> CalcFlags {
     flags
 }
 
+pub(crate) fn normalize_asteroid_aliases(body: Body) -> Body {
+    match body {
+        Body::Asteroid(id) if id.mpc_number() == 134340 => Body::Pluto,
+        Body::Asteroid(id) if (1..=4).contains(&id.mpc_number()) => {
+            Body::try_from(17 + id.mpc_number() - 1).expect("Ceres..Vesta are valid body ids")
+        }
+        other => other,
+    }
+}
+
 /// Observer offset (position + velocity, AU / AU-day, J2000 mean equatorial)
 /// at `jd`, or the zero vector when TOPOCTR isn't requested. Stateless
 /// equivalent of C's `swed.topd.xobs` cache: recomputed fresh every call
@@ -2131,4 +2141,125 @@ pub(crate) fn pctr_pipeline(
     };
 
     (app_pos_rest(&mut xx, flags, eps, nut, nutv.as_ref()), x2000)
+}
+
+// ---------------------------------------------------------------------------
+// Asteroid calc pipeline
+// ---------------------------------------------------------------------------
+
+pub(crate) struct AsteroidProvider<'a, P: PositionProvider> {
+    inner: &'a P,
+    ast_file: &'a SwissEphFile,
+    ast_id: i32,
+}
+
+impl<'a, P: PositionProvider> PositionProvider for AsteroidProvider<'a, P> {
+    fn positions(&self, _body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
+        let pos = self.inner.positions(Body::Sun, jd, need_speed)?;
+        let n = if need_speed { 6 } else { 3 };
+        let (mut ast, _) = evaluate_body(self.ast_file, self.ast_id, jd, need_speed)?;
+        if let Some(pd) = self.ast_file.planet_data(self.ast_id)
+            && pd.iflg & SEI_FLG_HELIO != 0
+        {
+            for i in 0..n {
+                ast[i] += pos.sun_bary[i];
+            }
+        }
+        Ok(SwephPositions {
+            planet_bary: ast,
+            earth_bary: pos.earth_bary,
+            earth_helio: pos.earth_helio,
+            sun_bary: pos.sun_bary,
+        })
+    }
+
+    fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
+        self.inner.moon_geo(jd, need_speed)
+    }
+}
+
+pub(crate) struct MoshierEarthProvider<'a> {
+    pub(crate) eps_j2000: &'a Epsilon,
+}
+
+impl<'a> PositionProvider for MoshierEarthProvider<'a> {
+    fn positions(&self, _body: Body, jd: f64, _need_speed: bool) -> Result<SwephPositions, Error> {
+        let pp = compute_pipeline(jd, Body::Sun, self.eps_j2000)?;
+        Ok(SwephPositions {
+            planet_bary: [0.0; 6],
+            earth_bary: pp.earth_helio,
+            earth_helio: pp.earth_helio,
+            sun_bary: [0.0; 6],
+        })
+    }
+
+    fn moon_geo(&self, jd: f64, _need_speed: bool) -> Result<[f64; 6], Error> {
+        raw_osc_moon_moshier(jd, self.eps_j2000)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_asteroid_sweph(
+    jd: f64,
+    body: Body,
+    ast_file: &SwissEphFile,
+    ast_id: i32,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = SwephProvider {
+        planet_files,
+        moon_files,
+    };
+    let p = AsteroidProvider {
+        inner: &inner,
+        ast_file,
+        ast_id,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_asteroid_jpl(
+    jd: f64,
+    body: Body,
+    ast_file: &SwissEphFile,
+    ast_id: i32,
+    jpl_file: &crate::jpl::JplFile,
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = JplProvider { file: jpl_file };
+    let p = AsteroidProvider {
+        inner: &inner,
+        ast_file,
+        ast_id,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_asteroid_moshier(
+    jd: f64,
+    body: Body,
+    ast_file: &SwissEphFile,
+    ast_id: i32,
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = MoshierEarthProvider { eps_j2000 };
+    let p = AsteroidProvider {
+        inner: &inner,
+        ast_file,
+        ast_id,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }

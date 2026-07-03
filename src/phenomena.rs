@@ -28,8 +28,6 @@ const EULER_SATURN: f64 = 2.7182818;
 
 /// Number of built-in bodies with a `mag_elem` row (`NMAG_ELEM = SE_VESTA + 1`, swecl.c:3759).
 const NMAG_ELEM: i32 = 21;
-/// First main-belt asteroid raw id (`SE_CERES`, swephexp.h:118).
-const SE_CERES: i32 = 17;
 /// Boundary between the "planet" and Bowell-H-G magnitude branches (`SE_CHIRON`, swephexp.h:116).
 const SE_CHIRON: i32 = 15;
 
@@ -80,20 +78,10 @@ pub struct Phenomena {
     pub horizontal_parallax: f64,
 }
 
-/// §1 body remapping (swecl.c:3820-3835): asteroid-134340 → Pluto, and asteroids given as
-/// `SE_AST_OFFSET + 1..4` (Ceres..Vesta) → the built-in `SE_CERES..SE_VESTA` ids. Distinct from
-/// `eclipse::normalize_occulted_body` (which only does the 134340 alias) — kept local because the
-/// Ceres..Vesta remap is `swe_pheno`-specific.
+/// §1 body remapping (swecl.c:3820-3835): delegates to the shared
+/// `normalize_asteroid_aliases` (identical mapping: 134340→Pluto, 1..4→Ceres..Vesta).
 fn normalize_pheno_body(body: Body) -> Body {
-    match body {
-        Body::Asteroid(id) if id.mpc_number() == 134340 => Body::Pluto,
-        Body::Asteroid(id) if (1..=4).contains(&id.mpc_number()) => {
-            // 10001..10004 → 17..20 (Ceres..Vesta)
-            Body::try_from(SE_CERES + id.mpc_number() - 1)
-                .expect("SE_CERES..SE_VESTA are valid body ids")
-        }
-        other => other,
-    }
+    crate::calc::normalize_asteroid_aliases(body)
 }
 
 /// Compute planetary phenomena at `tjd_et` (Ephemeris/Dynamical Time). Port of `swe_pheno`

@@ -1311,6 +1311,7 @@ impl Ephemeris {
         flags: CalcFlags,
         config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6], CalcFlags), Error> {
+        let body = crate::calc::normalize_asteroid_aliases(body);
         let models = &config.astro_models;
 
         if body == Body::EclipticNutation {
@@ -1375,6 +1376,25 @@ impl Ephemeris {
             return Ok((xr, x2000, flags_used));
         }
 
+        if body == Body::Chiron
+            && (jd_tt < crate::constants::CHIRON_START || jd_tt > crate::constants::CHIRON_END)
+        {
+            return Err(Error::BeyondEphemerisLimits {
+                jd_tt,
+                start: crate::constants::CHIRON_START,
+                end: crate::constants::CHIRON_END,
+            });
+        }
+        if body == Body::Pholus
+            && (jd_tt < crate::constants::PHOLUS_START || jd_tt > crate::constants::PHOLUS_END)
+        {
+            return Err(Error::BeyondEphemerisLimits {
+                jd_tt,
+                start: crate::constants::PHOLUS_START,
+                end: crate::constants::PHOLUS_END,
+            });
+        }
+
         // Heliocentric (SEFLG_HELCTR) is supported below (per-backend/-body branches in calc.rs);
         // plaus_iflag has already forced NOABERR|NOGDEFL for it. Barycentric is still unported.
         if flags.contains(CalcFlags::BARYCTR) {
@@ -1425,6 +1445,36 @@ impl Ephemeris {
         }
     }
 
+    fn asteroid_file_for(
+        &self,
+        body: Body,
+        jd: f64,
+    ) -> Result<(&crate::sweph_file::SwissEphFile, i32), Error> {
+        let sei_id = crate::sweph_file::body_file_id(body).ok_or(Error::EphemerisNotAvailable {
+            body,
+            source: self.config.ephemeris_source,
+        })?;
+        let files = match body {
+            Body::Chiron | Body::Pholus | Body::Ceres | Body::Pallas | Body::Juno | Body::Vesta => {
+                &self.main_asteroid_files
+            }
+            Body::Asteroid(_) => &self.asteroid_files,
+            _ => {
+                return Err(Error::EphemerisNotAvailable {
+                    body,
+                    source: self.config.ephemeris_source,
+                });
+            }
+        };
+        let file = crate::sweph_file::find_file_for_jd(files, sei_id, jd).ok_or(
+            Error::EphemerisNotAvailable {
+                body,
+                source: self.config.ephemeris_source,
+            },
+        )?;
+        Ok((file, sei_id))
+    }
+
     fn calc_body_moshier(
         &self,
         jd_tt: f64,
@@ -1446,6 +1496,18 @@ impl Ephemeris {
             | Body::Neptune
             | Body::Pluto => {
                 crate::calc::calc_planet(jd_tt, body, eps_j2000, flags, config, models)
+            }
+            Body::Chiron
+            | Body::Pholus
+            | Body::Ceres
+            | Body::Pallas
+            | Body::Juno
+            | Body::Vesta
+            | Body::Asteroid(_) => {
+                let (f, id) = self.asteroid_file_for(body, jd_tt)?;
+                crate::calc::calc_asteroid_moshier(
+                    jd_tt, body, f, id, eps_j2000, flags, config, models,
+                )
             }
             _ => Err(Error::EphemerisNotAvailable {
                 body,
@@ -1497,6 +1559,27 @@ impl Ephemeris {
                 config,
                 models,
             ),
+            Body::Chiron
+            | Body::Pholus
+            | Body::Ceres
+            | Body::Pallas
+            | Body::Juno
+            | Body::Vesta
+            | Body::Asteroid(_) => {
+                let (f, id) = self.asteroid_file_for(body, jd_tt)?;
+                crate::calc::calc_asteroid_sweph(
+                    jd_tt,
+                    body,
+                    f,
+                    id,
+                    &self.planet_files,
+                    &self.moon_files,
+                    eps_j2000,
+                    flags,
+                    config,
+                    models,
+                )
+            }
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Swiss,
@@ -1526,6 +1609,18 @@ impl Ephemeris {
             | Body::Neptune
             | Body::Pluto => {
                 crate::calc::calc_planet_jpl(jd_tt, body, file, eps_j2000, flags, config, models)
+            }
+            Body::Chiron
+            | Body::Pholus
+            | Body::Ceres
+            | Body::Pallas
+            | Body::Juno
+            | Body::Vesta
+            | Body::Asteroid(_) => {
+                let (f, id) = self.asteroid_file_for(body, jd_tt)?;
+                crate::calc::calc_asteroid_jpl(
+                    jd_tt, body, f, id, file, eps_j2000, flags, config, models,
+                )
             }
             _ => Err(Error::EphemerisNotAvailable {
                 body,

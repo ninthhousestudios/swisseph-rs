@@ -94,6 +94,13 @@ pub fn body_file_id(body: Body) -> Option<i32> {
         Body::Uranus => Some(7),
         Body::Neptune => Some(8),
         Body::Pluto => Some(9),
+        Body::Chiron => Some(12),
+        Body::Pholus => Some(13),
+        Body::Ceres => Some(14),
+        Body::Pallas => Some(15),
+        Body::Juno => Some(16),
+        Body::Vesta => Some(17),
+        Body::Asteroid(id) => Some(10000 + id.mpc_number()),
         _ => None,
     }
 }
