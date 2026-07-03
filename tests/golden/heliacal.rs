@@ -23,6 +23,7 @@ struct ArcVisCase {
     azi_moon: f64,
     alt_moon: f64,
     helflag: u32,
+    #[allow(dead_code)]
     retval: i32,
     dret: f64,
 }
@@ -36,6 +37,7 @@ struct HelAngleCase {
     azi_moon: f64,
     alt_moon: f64,
     helflag: u32,
+    #[allow(dead_code)]
     retval: i32,
     dret: [f64; 3],
 }
@@ -231,19 +233,26 @@ fn golden_topo_arcus_visionis() {
         let mut datm = [1013.25, 15.0, 40.0, 40.0];
         let mut dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
 
-        let result = eph.topo_arcus_visionis(
-            case.tjd_ut,
-            &dgeo,
-            &mut datm,
-            &mut dobs,
-            helflag,
-            case.mag,
-            case.azi_obj,
-            case.alt_obj,
-            case.azi_sun,
-            case.azi_moon,
-            case.alt_moon,
-        );
+        let result = eph
+            .topo_arcus_visionis(
+                case.tjd_ut,
+                &dgeo,
+                &mut datm,
+                &mut dobs,
+                helflag,
+                case.mag,
+                case.azi_obj,
+                case.alt_obj,
+                case.azi_sun,
+                case.azi_moon,
+                case.alt_moon,
+            )
+            .unwrap_or_else(|e| {
+                panic!(
+                    "arcvis case {i}: mag={:.2} alt_obj={:.1} azi_obj={:.1} jd={:.4}: {e}",
+                    case.mag, case.alt_obj, case.azi_obj, case.tjd_ut
+                )
+            });
 
         super::assert_f64_eps(
             &format!(

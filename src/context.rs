@@ -619,7 +619,7 @@ impl Ephemeris {
         azi_sun: f64,
         azi_moon: f64,
         alt_moon: f64,
-    ) -> f64 {
+    ) -> Result<f64, Error> {
         crate::heliacal::topo_arcus_visionis(
             tjd_ut, dgeo, datm, dobs, helflag, mag, azi_obj, alt_obj, azi_sun, azi_moon, alt_moon,
         )

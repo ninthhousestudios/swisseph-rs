@@ -1472,13 +1472,13 @@ pub fn topo_arcus_visionis(
     azi_sun: f64,
     azi_moon: f64,
     alt_moon: f64,
-) -> f64 {
+) -> Result<f64, Error> {
     let sunra = sun_ra(tjd_ut);
     default_heliacal_parameters(datm, dgeo, dobs, helflag);
-    topo_arc_visionis(
+    Ok(topo_arc_visionis(
         mag, dobs, alt_obj, azi_obj, alt_moon, azi_moon, tjd_ut, azi_sun, sunra, dgeo[1], dgeo[2],
         datm, helflag,
-    )
+    ))
 }
 
 // ── HeliacalAngle: optimum-altitude / arcus-visionis search ────────
