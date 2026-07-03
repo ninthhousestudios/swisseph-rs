@@ -2982,14 +2982,14 @@ fn heliacal_ut_vis_lim(
 
     let tjd_seed;
     if is_heliacal {
-        if ipl.is_none() {
+        if let Some(body) = ipl {
+            // Planet: conjunction search
+            tjd_seed = find_conjunct_sun(eph, tjd, body, epheflag, type_event)?;
+        } else {
             // Fixed star: oblique ascension search
             tjd_seed = get_asc_obl_with_sun(
                 eph, tjd, body_arg, star_arg, epheflag, type_event, 0.0, dgeo,
             )?;
-        } else {
-            // Planet: conjunction search
-            tjd_seed = find_conjunct_sun(eph, tjd, ipl.unwrap(), epheflag, type_event)?;
         }
 
         let tday = get_heliacal_day(
@@ -3193,7 +3193,9 @@ fn moon_event_arc_vis(
         ));
     }
 
-    let efl = (epheflag & calc::EPHMASK) | CalcFlags::TOPOCTR | CalcFlags::EQUATORIAL;
+    // C sets TOPOCTR|EQUATORIAL but pheno_ut only needs the phase angle — strip
+    // TOPOCTR to avoid requiring a topographic config (C relies on global swe_set_topo).
+    let efl = (epheflag & calc::EPHMASK) | CalcFlags::EQUATORIAL;
     let efl = if helflag.contains(HeliacalFlags::HIGH_PRECISION) {
         efl
     } else {
@@ -3276,7 +3278,7 @@ fn moon_event_arc_vis(
             min_tav_oud = min_tav;
             delta_alt_oud = delta_alt;
 
-            tjd_moonevent -= (1.0 / 60.0 / 24.0) * sgn(daystep) as f64;
+            tjd_moonevent -= (1.0 / 60.0 / 24.0) * sgn(daystep);
 
             let alt_s = object_loc(eph, tjd_moonevent, dgeo, datm, "sun", 0, epheflag, helflag)?;
             let alt_o = object_loc(eph, tjd_moonevent, dgeo, datm, "moon", 0, epheflag, helflag)?;
@@ -3293,7 +3295,7 @@ fn moon_event_arc_vis(
                 helflag,
             )?;
 
-            let time_check = tjd_moonevent - (8.0 / 60.0 / 24.0) * sgn(daystep) as f64;
+            let time_check = tjd_moonevent - (8.0 / 60.0 / 24.0) * sgn(daystep);
             let localmin_check =
                 deter_tav(eph, dobs, time_check, dgeo, datm, "moon", epheflag, helflag)?;
 
@@ -3315,7 +3317,7 @@ fn moon_event_arc_vis(
 
     if (jdn_days_ut - jdn_days_ut_i).abs() < 15.0 {
         let extrax = x2min(min_tav, min_tav_oud, oldest_min_tav);
-        tjd_moonevent += (1.0 - extrax) * sgn(daystep) as f64 / 60.0 / 24.0;
+        tjd_moonevent += (1.0 - extrax) * sgn(daystep) / 60.0 / 24.0;
     } else {
         return Err(Error::CError("no date found for lunar event".into()));
     }
@@ -3344,6 +3346,7 @@ fn heliacal_ut_arc_vis(
     } else {
         efl | CalcFlags::NONUT | CalcFlags::TRUEPOS
     };
+    let tc = topo_config(eph, dgeo);
 
     let (mut day_step, maxlength): (f64, f64) = match planet {
         Some(Body::Mercury) => (1.0, 100.0),
@@ -3413,7 +3416,7 @@ fn heliacal_ut_arc_vis(
             // Sun equatorial position at its rise/set
             let dt = crate::deltat::calc_deltat(tret, eph.config());
             let tjd_tt = tret + dt;
-            let xs = eph.calc(tjd_tt, Body::Sun, efl)?;
+            let xs = eph.calc_with_config(tjd_tt, Body::Sun, efl, &tc)?;
             let xaz_sun = eph.azalt(
                 tret,
                 AzAltDir::EquToHor,
@@ -3444,7 +3447,7 @@ fn heliacal_ut_arc_vis(
 
             // Recompute Sun position at candidate instant
             let dt2 = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
-            let xs2 = eph.calc(jdn_arc_vis_ut + dt2, Body::Sun, efl)?;
+            let xs2 = eph.calc_with_config(jdn_arc_vis_ut + dt2, Body::Sun, efl, &tc)?;
             let xaz_sun2 = eph.azalt(
                 jdn_arc_vis_ut,
                 AzAltDir::EquToHor,
@@ -3460,7 +3463,7 @@ fn heliacal_ut_arc_vis(
             // Object/star position at candidate instant
             let (azi_o, alt_o) = if let Some(body) = planet {
                 let dt3 = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
-                let xp = eph.calc(jdn_arc_vis_ut + dt3, body, efl)?;
+                let xp = eph.calc_with_config(jdn_arc_vis_ut + dt3, body, efl, &tc)?;
                 objectmagn = magnitude(eph, jdn_arc_vis_ut, dgeo, object_name, epheflag, helflag)?;
                 let xaz_p = eph.azalt(
                     jdn_arc_vis_ut,
@@ -3475,7 +3478,8 @@ fn heliacal_ut_arc_vis(
             } else {
                 // Fixed star — magnitude NOT refreshed per §6 step 5
                 let dt3 = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
-                let star_result = eph.fixstar2(object_name, jdn_arc_vis_ut + dt3, efl)?;
+                let star_result =
+                    eph.fixstar2_with_config(object_name, jdn_arc_vis_ut + dt3, efl, &tc)?;
                 let xaz_s = eph.azalt(
                     jdn_arc_vis_ut,
                     AzAltDir::EquToHor,
@@ -3508,24 +3512,24 @@ fn heliacal_ut_arc_vis(
             arcus_vis_delta = delta_alt - arcus_vis;
 
             if !((arcus_vis_delta_oud > 0.0 || arcus_vis_delta < 0.0)
-                && (jdn_days_ut_final - jdn_days_ut_step) * sgn(day_step) as f64 > 0.0)
+                && (jdn_days_ut_final - jdn_days_ut_step) * sgn(day_step) > 0.0)
             {
                 break;
             }
         }
 
         // Backoff-on-first-bracket
-        if !doneoneday && (jdn_days_ut_final - jdn_days_ut_step) * sgn(day_step) as f64 > 0.0 {
+        if !doneoneday && (jdn_days_ut_final - jdn_days_ut_step) * sgn(day_step) > 0.0 {
             arcus_vis_delta = arcus_vis_delta_oud;
             jdn_days_ut_step = jdn_days_ut_step_oud;
-            day_step = ((day_step.abs() / 2.0) as i32) as f64 * sgn(day_step) as f64;
+            day_step = ((day_step.abs() / 2.0) as i32) as f64 * sgn(day_step);
         } else {
             break;
         }
     }
 
     // Window-exhaustion check
-    let d = (jdn_days_ut_final - jdn_days_ut_step) * sgn(day_step) as f64;
+    let d = (jdn_days_ut_final - jdn_days_ut_step) * sgn(day_step);
     if d <= 0.0 || d >= maxlength {
         return Err(Error::CError(format!(
             "heliacal event not found within maxlength {}",
@@ -3620,7 +3624,7 @@ fn heliacal_ut_arc_vis(
             let dt = crate::deltat::calc_deltat(jdn_arc_vis_ut, eph.config());
             let tjd_tt = jdn_arc_vis_ut + dt;
             if let Some(body) = planet {
-                let xp = eph.calc(tjd_tt, body, efl)?;
+                let xp = eph.calc_with_config(tjd_tt, body, efl, &tc)?;
                 let xaz_p = eph.azalt(
                     jdn_arc_vis_ut,
                     AzAltDir::EquToHor,
@@ -3632,7 +3636,7 @@ fn heliacal_ut_arc_vis(
                 );
                 angle = xaz_p[1];
             } else {
-                let star_result = eph.fixstar2(object_name, tjd_tt, efl)?;
+                let star_result = eph.fixstar2_with_config(object_name, tjd_tt, efl, &tc)?;
                 let xaz_s = eph.azalt(
                     jdn_arc_vis_ut,
                     AzAltDir::EquToHor,
@@ -3654,7 +3658,7 @@ fn heliacal_ut_arc_vis(
     }
 
     // Sanity bound — C uses stale JDNDaysUT variable; we use tjd_start (intentional fix)
-    if jdn_arc_vis_ut < -9999999.0 || jdn_arc_vis_ut > 9999999.0 {
+    if !(-9999999.0..=9999999.0).contains(&jdn_arc_vis_ut) {
         return Err(Error::CError("no heliacal date found".into()));
     }
 
@@ -3789,14 +3793,15 @@ pub fn heliacal_ut(
     if !helflag.intersects(HeliacalFlags::AVKIND) {
         // vis_lim path
         if (planet.is_none() || planet_id >= 4) && (type_event == 3 || type_event == 4) {
-            return Err(Error::CError(format!(
+            return Err(Error::CError(
                 "evening first/morning last not provided for outer planets/stars via vis_lim path"
-            )));
+                    .into(),
+            ));
         }
         if type_event == 5 || type_event == 6 {
-            return Err(Error::CError(format!(
-                "acronychal rising/setting is not provided for the vis_lim path"
-            )));
+            return Err(Error::CError(
+                "acronychal rising/setting is not provided for the vis_lim path".into(),
+            ));
         }
     } else {
         // arc_vis path: remap acronychal TypeEvent 5/6 to 3/4
@@ -3862,9 +3867,7 @@ pub fn heliacal_ut(
                     found = true;
                 }
             }
-            Err(Error::CircumpolarBody) | Err(Error::CError(_)) => {
-                // Continue to next synodic period
-            }
+            Err(Error::CircumpolarBody) | Err(Error::CError(_)) => {}
             Err(e) => return Err(e),
         }
         tjd += tadd;

@@ -57,11 +57,24 @@ struct PhenoCase {
 }
 
 #[derive(Deserialize)]
+struct EventCase {
+    tjd_start: f64,
+    object: String,
+    type_event: i32,
+    geo: [f64; 3],
+    helflag: u32,
+    desc: String,
+    retval: i32,
+    dret: [f64; 3],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     vis_limit: Vec<VisLimitCase>,
     arcvis: Vec<ArcVisCase>,
     helangle: Vec<HelAngleCase>,
     pheno: Vec<PhenoCase>,
+    events: Vec<EventCase>,
 }
 
 fn load() -> GoldenData {
@@ -399,6 +412,84 @@ fn golden_heliacal_pheno_ut() {
                 ),
                 *expected,
                 *got,
+                eps,
+            );
+        }
+    }
+}
+
+#[test]
+fn golden_heliacal_ut() {
+    let data = load();
+    let eph = make_eph();
+
+    let eps_vis_lim = 2e-5; // day, ~1.7 seconds
+    let eps_arc_vis = 1e-4; // day, ~8.6 seconds (coarser search)
+
+    for (i, case) in data.events.iter().enumerate() {
+        let helflag = HeliacalFlags::from_bits_truncate(case.helflag);
+        let epheflag = CalcFlags::from_bits_truncate(case.helflag & 0x07);
+        let event = HeliacalEventType::try_from(case.type_event).unwrap_or_else(|_| {
+            panic!(
+                "event case {i} ({}): invalid type_event {}",
+                case.desc, case.type_event
+            )
+        });
+
+        let mut dgeo = case.geo;
+        let mut datm = [1013.25, 15.0, 40.0, 40.0];
+        let mut dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+
+        let result = eph.heliacal_ut(
+            case.tjd_start,
+            &dgeo,
+            &mut datm,
+            &mut dobs,
+            &case.object,
+            event,
+            epheflag,
+            helflag,
+        );
+
+        if case.retval < 0 {
+            assert!(
+                result.is_err(),
+                "event case {i} ({}): expected error retval={}, got Ok",
+                case.desc,
+                case.retval
+            );
+            continue;
+        }
+
+        let he = result.unwrap_or_else(|e| {
+            panic!("event case {i} ({}): expected Ok, got Err({e})", case.desc)
+        });
+
+        let is_arc_vis = helflag.intersects(HeliacalFlags::AVKIND);
+        let eps = if is_arc_vis { eps_arc_vis } else { eps_vis_lim };
+
+        let got = [he.start_visible, he.optimum_visibility, he.end_visible];
+        let slot_names = ["start_visible", "optimum_visibility", "end_visible"];
+
+        for slot in 0..3 {
+            if case.dret[slot] == 0.0 && is_arc_vis && slot > 0 {
+                assert_eq!(
+                    got[slot], 0.0,
+                    "event case {i} ({}) slot {slot} ({}): expected 0.0 for arc_vis, got {}",
+                    case.desc, slot_names[slot], got[slot]
+                );
+                continue;
+            }
+            if case.dret[slot] == 0.0 {
+                continue;
+            }
+            super::assert_f64_eps(
+                &format!(
+                    "event case {i} ({}) {} [{}]: obj={} te={}",
+                    case.desc, slot_names[slot], slot, case.object, case.type_event
+                ),
+                case.dret[slot],
+                got[slot],
                 eps,
             );
         }

@@ -493,6 +493,89 @@ int main(void) {
             printf("]}");
         }
     }
+    printf("\n],\n");
+
+    /* ── events: swe_heliacal_ut ──────────────────────────────────────
+     * Morning-first/evening-last/evening-first/morning-last events for
+     * Venus, Sirius, and Moon at Cairo/Mecca/Athens, plus flag variants
+     * (LONG_SEARCH, AVKIND_VR, HIGH_PRECISION).
+     */
+    printf("\"events\": [\n");
+    first = 1;
+    {
+        double dgeo_mecca[3] = {39.83, 21.42, 300.0};
+        double dgeo_athens[3] = {23.7, 38.0, 100.0};
+
+        struct event_case {
+            const char *obj;
+            int type_event;
+            double tjd_start;
+            double *geo;
+            int helflag;
+            const char *desc;
+        };
+
+        struct event_case cases[] = {
+            /* 1: Sirius morning first, Cairo — historically significant */
+            {"sirius", 1, 2453552.5, dgeo, SEFLG_SWIEPH, "sirius_mf_cairo"},
+            /* 2-3: Venus morning first / evening last, Cairo */
+            {"venus", 1, 2453391.0, dgeo, SEFLG_SWIEPH, "venus_mf_cairo"},
+            {"venus", 2, 2453000.0, dgeo, SEFLG_SWIEPH, "venus_el_cairo"},
+            /* 4-5: Venus evening first / morning last, Cairo */
+            {"venus", 3, 2453100.0, dgeo, SEFLG_SWIEPH, "venus_ef_cairo"},
+            {"venus", 4, 2453100.0, dgeo, SEFLG_SWIEPH, "venus_ml_cairo"},
+            /* 6-7: Moon evening first, Mecca */
+            {"moon", 3, 2453461.5, dgeo_mecca, SEFLG_SWIEPH, "moon_ef_mecca1"},
+            {"moon", 3, 2453491.0, dgeo_mecca, SEFLG_SWIEPH, "moon_ef_mecca2"},
+            /* 8: Sirius evening last, Athens */
+            {"sirius", 2, 2453450.0, dgeo_athens, SEFLG_SWIEPH, "sirius_el_athens"},
+            /* 9: LONG_SEARCH variant */
+            {"venus", 1, 2452500.0, dgeo, SEFLG_SWIEPH | SE_HELFLAG_LONG_SEARCH, "venus_mf_cairo_longsearch"},
+            /* 10: AVKIND_VR arc-vis variant (x2) */
+            {"venus", 1, 2453391.0, dgeo, SEFLG_SWIEPH | SE_HELFLAG_AVKIND_VR, "venus_mf_cairo_avkindvr"},
+            {"venus", 2, 2453000.0, dgeo, SEFLG_SWIEPH | SE_HELFLAG_AVKIND_VR, "venus_el_cairo_avkindvr"},
+            /* 11: HIGH_PRECISION variant */
+            {"sirius", 1, 2453552.5, dgeo, SEFLG_SWIEPH | SE_HELFLAG_HIGH_PRECISION, "sirius_mf_cairo_highprec"},
+        };
+        int ncases = sizeof(cases) / sizeof(cases[0]);
+
+        for (int i = 0; i < ncases; i++) {
+            double datm[4], dobs[6], dret[3];
+            char objname[256], serr[256];
+            memcpy(datm, datm_default, sizeof(datm));
+            memcpy(dobs, dobs_default, sizeof(dobs));
+            memset(dret, 0, sizeof(dret));
+            strncpy(objname, cases[i].obj, sizeof(objname)-1);
+            objname[sizeof(objname)-1] = '\0';
+            serr[0] = '\0';
+
+            int retval = swe_heliacal_ut(
+                cases[i].tjd_start,
+                cases[i].geo,
+                datm, dobs,
+                objname,
+                cases[i].type_event,
+                cases[i].helflag,
+                dret, serr);
+
+            if (retval == ERR || retval == -2) {
+                fprintf(stderr, "events retval=%d: %s obj=%s jd=%.4f desc=%s\n",
+                        retval, serr, cases[i].obj, cases[i].tjd_start, cases[i].desc);
+            }
+            if (!first) printf(",\n");
+            first = 0;
+            printf("  {\"tjd_start\": %.20e, \"object\": \"%s\", \"type_event\": %d, "
+                   "\"geo\": [%.20e, %.20e, %.20e], "
+                   "\"helflag\": %d, \"desc\": \"%s\", "
+                   "\"retval\": %d, "
+                   "\"dret\": [%.20e, %.20e, %.20e]}",
+                   cases[i].tjd_start, cases[i].obj, cases[i].type_event,
+                   cases[i].geo[0], cases[i].geo[1], cases[i].geo[2],
+                   cases[i].helflag, cases[i].desc,
+                   retval,
+                   dret[0], dret[1], dret[2]);
+        }
+    }
     printf("\n]}\n");
 
     return 0;
