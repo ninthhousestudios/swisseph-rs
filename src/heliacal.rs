@@ -31,12 +31,16 @@ impl TryFrom<i32> for HeliacalEventType {
 }
 
 // ── Constants (live only — swehel.c:76–200) ────────────────────────
-
+// Staged for sub-task 2/8 (sky brightness model: Bn, Bm, Bday, Btwi, VisLimMagn)
+#[allow(dead_code)]
 const BNIGHT: f64 = 1479.0; // [nL]
+#[allow(dead_code)]
 const BNIGHT_FACTOR: f64 = 1.0;
-
+#[allow(dead_code)]
 const NL2ERG: f64 = 1.02e-15;
+#[allow(dead_code)]
 const ERG2NL: f64 = 1.0 / NL2ERG;
+#[allow(dead_code)]
 const MOON_DISTANCE: f64 = 384410.4978; // [km]
 
 const SCALE_H_WATER: f64 = 3000.0; // [m]
@@ -86,9 +90,13 @@ pub fn object_to_body(name: &str) -> Option<Body> {
     if lower.starts_with("moon") {
         return Some(Body::Moon);
     }
-    if let Ok(n) = lower.parse::<i32>() {
-        if n > 0 {
-            return Body::try_from(n + AST_OFFSET).ok();
+    // C uses atoi(s) which parses leading digits, ignoring trailing text
+    let leading: String = lower.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if !leading.is_empty() {
+        if let Ok(n) = leading.parse::<i32>() {
+            if n > 0 {
+                return Body::try_from(n + AST_OFFSET).ok();
+            }
         }
     }
     None
@@ -530,6 +538,11 @@ mod tests {
     fn object_to_body_asteroid() {
         let b = object_to_body("433").unwrap();
         assert_eq!(b.to_raw_id(), 433 + AST_OFFSET);
+        // C atoi semantics: leading digits with trailing text
+        let b2 = object_to_body("433 Eros").unwrap();
+        assert_eq!(b2.to_raw_id(), 433 + AST_OFFSET);
+        let b3 = object_to_body("433, Eros").unwrap();
+        assert_eq!(b3.to_raw_id(), 433 + AST_OFFSET);
     }
 
     #[test]
@@ -537,6 +550,8 @@ mod tests {
         assert_eq!(object_to_body("Aldebaran"), None);
         assert_eq!(object_to_body("0"), None);
         assert_eq!(object_to_body(""), None);
+        // Non-numeric leading text → star
+        assert_eq!(object_to_body("alpha Tau"), None);
     }
 
     #[test]
