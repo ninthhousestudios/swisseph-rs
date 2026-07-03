@@ -7,7 +7,7 @@ use crate::constants::{AST_OFFSET, DEGTORAD};
 use crate::context::Ephemeris;
 use crate::date::revjul;
 use crate::error::Error;
-use crate::flags::{CalcFlags, HeliacalFlags, RiseSetFlags};
+use crate::flags::{CalcFlags, HeliacalFlags, RiseSetFlags, VisLimFlags};
 use crate::math::{normalize_degrees, polar_to_cartesian};
 use crate::types::{Body, CalendarType};
 
@@ -1198,6 +1198,167 @@ pub fn rise_set(
             datm,
         )
     }
+}
+
+// ── VisLimMagn & swe_vis_limit_mag (c-ref-heliacal-vision.md §8) ──
+
+#[derive(Debug, Clone)]
+pub struct VisLimitResult {
+    pub limiting_magnitude: f64,
+    pub altitude_object: f64,
+    pub azimuth_object: f64,
+    pub altitude_sun: f64,
+    pub azimuth_sun: f64,
+    pub altitude_moon: f64,
+    pub azimuth_moon: f64,
+    pub magnitude_object: f64,
+    pub vision: VisLimFlags,
+    pub below_horizon: bool,
+}
+
+#[allow(clippy::approx_constant, clippy::impossible_comparisons)]
+pub fn vis_lim_magn(
+    dobs: &[f64; 6],
+    alt_o: f64,
+    azi_o: f64,
+    alt_m: f64,
+    azi_m: f64,
+    jdn_days_ut: f64,
+    alt_s: f64,
+    azi_s: f64,
+    sunra: f64,
+    lat: f64,
+    height_eye: f64,
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> (f64, VisLimFlags) {
+    let bsk = bsky(
+        alt_o,
+        azi_o,
+        alt_m,
+        azi_m,
+        jdn_days_ut,
+        alt_s,
+        azi_s,
+        sunra,
+        lat,
+        height_eye,
+        datm,
+        helflag,
+    );
+    let k_x = deltam(alt_o, alt_s, sunra, lat, height_eye, datm, helflag);
+    let corr_factor1 = optic_factor(bsk, k_x, dobs, false, 1, helflag);
+    let corr_factor2 = optic_factor(bsk, k_x, dobs, false, 0, helflag);
+
+    let mut is_scotopic = bsk < 1645.0;
+    if helflag.contains(HeliacalFlags::VISLIM_PHOTOPIC) {
+        is_scotopic = false;
+    }
+    if helflag.contains(HeliacalFlags::VISLIM_SCOTOPIC) {
+        is_scotopic = true;
+    }
+
+    let (c1, c2) = if is_scotopic {
+        (1.5848931924611e-10, 0.012589254117942)
+    } else {
+        (4.4668359215096e-9, 1.2589254117942e-6)
+    };
+
+    let mut scotopic_flag = if is_scotopic {
+        VisLimFlags::SCOTOPIC
+    } else {
+        VisLimFlags::empty()
+    };
+
+    if BNIGHT * BNIGHT_FACTOR > bsk && BNIGHT / BNIGHT_FACTOR < bsk {
+        scotopic_flag |= VisLimFlags::MIXED;
+    }
+
+    let bsk_corr = bsk * corr_factor1;
+    let th = c1 * (1.0 + (c2 * bsk_corr).sqrt()).powi(2) * corr_factor2;
+    let log10_val: f64 = 2.302585092994;
+    let mag = -16.57 - 2.5 * (th.ln() / log10_val);
+
+    (mag, scotopic_flag)
+}
+
+pub fn vis_limit_mag(
+    eph: &Ephemeris,
+    tjd_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<VisLimitResult, Error> {
+    let name = tolower_string_star(object_name);
+
+    if object_to_body(&name) == Some(Body::Sun) {
+        return Err(Error::CError("object name is Sun for vis_limit_mag".into()));
+    }
+
+    let sunra = sun_ra(tjd_ut);
+    default_heliacal_parameters(datm, dgeo, dobs, helflag);
+
+    let alt_o = object_loc(eph, tjd_ut, dgeo, datm, &name, 0, epheflag, helflag)?;
+
+    if alt_o < 0.0 {
+        return Ok(VisLimitResult {
+            limiting_magnitude: -100.0,
+            altitude_object: 0.0,
+            azimuth_object: 0.0,
+            altitude_sun: 0.0,
+            azimuth_sun: 0.0,
+            altitude_moon: 0.0,
+            azimuth_moon: 0.0,
+            magnitude_object: 0.0,
+            vision: VisLimFlags::empty(),
+            below_horizon: true,
+        });
+    }
+
+    let azi_o = object_loc(eph, tjd_ut, dgeo, datm, &name, 1, epheflag, helflag)?;
+
+    let (alt_s, azi_s) = if helflag.contains(HeliacalFlags::VISLIM_DARK) {
+        (-90.0, 0.0)
+    } else {
+        let a = object_loc(eph, tjd_ut, dgeo, datm, "sun", 0, epheflag, helflag)?;
+        let z = object_loc(eph, tjd_ut, dgeo, datm, "sun", 1, epheflag, helflag)?;
+        (a, z)
+    };
+
+    let is_moon_object = name.starts_with("moon");
+    let (alt_m, azi_m) = if is_moon_object
+        || helflag.contains(HeliacalFlags::VISLIM_DARK)
+        || helflag.contains(HeliacalFlags::VISLIM_NOMOON)
+    {
+        (-90.0, 0.0)
+    } else {
+        let a = object_loc(eph, tjd_ut, dgeo, datm, "moon", 0, epheflag, helflag)?;
+        let z = object_loc(eph, tjd_ut, dgeo, datm, "moon", 1, epheflag, helflag)?;
+        (a, z)
+    };
+
+    let (lim_mag, scotopic_flag) = vis_lim_magn(
+        dobs, alt_o, azi_o, alt_m, azi_m, tjd_ut, alt_s, azi_s, sunra, dgeo[1], dgeo[2], datm,
+        helflag,
+    );
+
+    let mag_obj = magnitude(eph, tjd_ut, dgeo, &name, epheflag, helflag)?;
+
+    Ok(VisLimitResult {
+        limiting_magnitude: lim_mag,
+        altitude_object: alt_o,
+        azimuth_object: azi_o,
+        altitude_sun: alt_s,
+        azimuth_sun: azi_s,
+        altitude_moon: alt_m,
+        azimuth_moon: azi_m,
+        magnitude_object: mag_obj,
+        vision: scotopic_flag,
+        below_horizon: false,
+    })
 }
 
 // ── Tests ──────────────────────────────────────────────────────────

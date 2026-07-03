@@ -39,7 +39,8 @@ pub use eclipse::{
     OccultLocal, SolarEclipseGlobal, SolarEclipseLocal,
 };
 pub use error::Error;
-pub use flags::{CalcFlags, EclipseFlags, RiseSetFlags};
+pub use flags::{CalcFlags, EclipseFlags, RiseSetFlags, VisLimFlags};
+pub use heliacal::VisLimitResult;
 pub use houses::{AscMc, HouseResult};
 pub use nodaps::{NodApsMethod, NodesApsides};
 pub use orbit::OrbitalElements;

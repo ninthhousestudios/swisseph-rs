@@ -577,6 +577,31 @@ impl Ephemeris {
         crate::phenomena::pheno_ut(self, tjd_ut, body, flags)
     }
 
+    /// Limiting visual magnitude at `tjd_ut` (UT). Port of `swe_vis_limit_mag`
+    /// (swehel.c:1464-1541).
+    #[allow(clippy::too_many_arguments)]
+    pub fn vis_limit_mag(
+        &self,
+        tjd_ut: f64,
+        dgeo: &[f64; 3],
+        datm: &mut [f64; 4],
+        dobs: &mut [f64; 6],
+        object_name: &str,
+        epheflag: crate::flags::CalcFlags,
+        helflag: crate::flags::HeliacalFlags,
+    ) -> Result<crate::heliacal::VisLimitResult, Error> {
+        crate::heliacal::vis_limit_mag(
+            self,
+            tjd_ut,
+            dgeo,
+            datm,
+            dobs,
+            object_name,
+            epheflag,
+            helflag,
+        )
+    }
+
     /// Nodes & apsides of `body` at `tjd_et` (TT). Port of `swe_nod_aps`
     /// (swecl.c:5075-5654). `method` selects mean vs osculating elements
     /// ([`NodApsMethod`](crate::NodApsMethod)); the mean branch (Sun..Neptune,

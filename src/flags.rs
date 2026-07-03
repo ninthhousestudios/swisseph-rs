@@ -152,3 +152,11 @@ bitflags! {
             | Self::AVKIND_MIN9.bits();
     }
 }
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct VisLimFlags: u32 {
+        const SCOTOPIC = 1;
+        const MIXED    = 2;
+    }
+}
