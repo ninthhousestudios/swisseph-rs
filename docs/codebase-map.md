@@ -489,7 +489,18 @@ tests/
 │                         positions 1e-9 / speeds 1e-7 for SWIEPH; JPLEPH widened to 2e-6 pos /
 │                         1e-5 speed (JPL vs SWIEPH Earth/Sun source diff); TopoPosition
 │                         configured; retflag checked for SWIEPH only (C returns SWIEPH for
-│                         JPLEPH+asteroid since the asteroid file is .se1))
+│                         JPLEPH+asteroid since the asteroid file is .se1);
+│                         swisseph-rs/102: golden_asteroid_numbered — 72 cases, 4 numbered
+│                         asteroids {433 Eros, 7066 Nessus, 136199 Eris (>99999 s%06d naming),
+│                         2060 Chiron-as-numbered (SEI_FILE_ANY_AST path)} × 3 epochs × 6 flags
+│                         {SWIEPH×5, JPLEPH×1}, same tolerances as main battery;
+│                         golden_asteroid_moseph — 27 cases, {Ceres, Vesta, Eros(433)} × 3
+│                         epochs × 3 MOSEPH flags, process-isolated generator (separate binary,
+│                         no SWIEPH/JPLEPH calls to keep sun_bary zero), positions 5e-7 / speeds
+│                         1e-7 (stateless architecture tolerance ~0.4 mas); error/alias tests:
+│                         Chiron/Pholus beyond-limits guard (Swiss + Moshier), asteroid not in
+│                         asteroid_numbers, asteroid outside file range, alias identities
+│                         134340↔Pluto and 1↔Ceres (bitwise-exact))
 │   ├── azalt.rs        — golden tests for refraction/horizontal coords (swisseph-rs/69: refrac
 │                          28 cases (7 inalt × 2 atpress × 2 dir, exact-or-1e-9 fallback);
 │                          refrac_ext 56 cases (× 2 geoalt, out + dret[0..4], exact-or-1e-9);
