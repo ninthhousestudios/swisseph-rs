@@ -349,86 +349,54 @@ src/
 │                          dispatcher port) picks fast vs rise_trans_true_hor(horhgt=0.0) by the
 │                          §4 eligibility gate (not fixstar, RISE/SET only, !FORCE_SLOW, no
 │                          twilight, body in Sun..=TrueNode, |geolat|≤60 or Sun≤65).
-├── heliacal.rs         — heliacal visibility module (swisseph-rs/104, sub-task 1/8):
-│                          HeliacalEventType enum (MorningFirst..AcronymchalSetting, TryFrom<i32>);
-│                          object_to_body (DeterObject port: case-insensitive planet-name prefix
-│                          match, asteroid-number parse, None=fixed-star); tolower_string_star
-│                          (lowercase preserving Bayer designation after comma);
-│                          default_heliacal_parameters (ISA pressure estimate, observer/optics
-│                          defaults, SIMULATE_VICTORVB RH clamp is DEAD per §11);
-│                          meteorological helpers: mymin/mymax (C's non-commutative-under-NaN
-│                          semantics), tanh_manual (exp-based, NOT f64::tanh), kelvin,
-│                          topo_alt_from_app_alt/app_alt_from_topo_alt (refraction model, Newton
-│                          inversion with nloop+1 iterations), hour_angle, distance_angle
-│                          (haversine, radians in/out), temp_e_from_temp_s, pres_e_from_pres_s;
-│                          extinction layer: kw/koz/kr/ka (4 atmospheric components — ka has
-│                          SIMULATE_VICTORVB RH clamp on VR==0 path), kt (dispatcher/summer),
-│                          airmass (Kasten-style, effectively unreachable via Deltam under
-│                          staticAirmass=0), xext/xlay (optical path through exponential/thin
-│                          layers), deltam (total extinction magnitude); optics layer: cva
-│                          (contrast visual acuity, scotopic threshold 1394), pupil_dia (Garstang
-│                          age model), optic_factor (intensity/background correction factors,
-│                          scotopic threshold 1645). All functions pure math, no Ephemeris calls.
-│                          Object location & magnitude layer (swisseph-rs/106, sub-task 3/8):
-│                          sun_ra (crude calendar approx, SIMULATE_VICTORVB always active);
-│                          object_loc (ObjectLoc port: 7 angle types, topocentric via
-│                          calc_with_config, argument-order quirk on Angle==4 preserved);
-│                          azalt_cart (az/alt + cartesian apparent-altitude vector, polcart
-│                          in-degrees C quirk); magnitude (via pheno_ut_with_config for planets,
-│                          fixstar2_mag for stars); calc_rise_and_set/my_rise_trans/rise_set
-│                          (fast Newton rise/set, |lat|<63° gate).
-│                          VisLimMagn + vis_limit_mag public API (swisseph-rs/107, sub-task 4/8):
-│                          vis_lim_magn (contrast-threshold model: Bsky→OpticFactor→scotopic/
-│                          photopic C1/C2→threshold→magnitude; scotopic_flag classification with
-│                          BNIGHT/BNIGHT_FACTOR mixed-flag interval, currently always empty);
-│                          VisLimitResult (dret[0..7] + vision flags + below_horizon sentinel);
-│                          vis_limit_mag (swe_vis_limit_mag port: default_heliacal_parameters,
-│                          ObjectLoc for object/Sun/Moon, VISLIM_DARK/NOMOON flag handling,
-│                          vis_lim_magn + Magnitude assembly); VisLimFlags bitflags in flags.rs;
-│                          Ephemeris::vis_limit_mag delegate in context.rs.
-│                          Heliacal pheno (swisseph-rs/109, sub-task 6/8):
-│                          Moon crescent geometry: width_moon (Yallop 1998 crescent width),
-│                          length_moon (Sultan 2005 crescent length, AvgRadiusMoon fallback),
-│                          q_yallop (Yallop q-test), yallop_grade (6-grade A–F table with strict
-│                          `<`/`>` boundaries — exact boundary values fall through to grade 0);
-│                          interpolation helpers: crossing (2-point linear crossing), x2min
-│                          (3-point parabola vertex), funct2 (3-point parabola eval);
-│                          deter_tav (DeterTAV port: single-instant arcus-visionis threshold via
-│                          SunRA + Magnitude + ObjectLoc + TopoArcVisionis delegation);
-│                          HeliacalPheno (28 named fields mapping darr[0..27], as_array());
-│                          heliacal_pheno_ut (swe_heliacal_pheno_ut port: altitude bounds check,
-│                          Sun/object geometry via object_loc, refraction via app_alt_from_topo_alt,
-│                          pheno_ut for elongation/illumination, kt extinction, Moon Yallop
-│                          crescent block, rise_set for Sun/object, early-exit guard for
-│                          TypeEvent 3/4 + Mars-or-beyond/stars, visibility-window search loop
-│                          with DeterTAV sampling + local-min parabola refinement + crossing
-│                          detection, post-loop clamp/fallback/TJD_INVALID sentinel assignment);
-│                          Ephemeris::heliacal_pheno_ut delegate in context.rs.
-│                          Bug fixes found during 6/8 golden testing: object_loc angle=7
-│                          TOPOCTR ordering (was: 7→0 rewrite before TOPOCTR check, incorrectly
-│                          adding TOPOCTR; fixed: TOPOCTR check runs first, then 7→0 rewrite);
-│                          calc_rise_and_set SET+below-horizon day-anchoring (was: [tjd0-1,tjd0];
-│                          fixed: [tjd0,tjd0+1] matching C swehel.c:449-456).
-│                          Event search infrastructure (swisseph-rs/110, sub-task 7/8):
-│                          §1: get_synodic_period (static table, 10 bodies), TCON conjunction
-│                          table (18 doubles, Sun..Neptune × 2 reference epochs), find_conjunct_sun
-│                          (Newton iteration on ecliptic longitude difference, Pluto returns Err
-│                          instead of C's latent out-of-bounds read);
-│                          §2: get_asc_obl (oblique ascension/descension, circumpolar guard),
-│                          get_asc_obl_diff (Sun–body oblique-ascension difference with acronychal
-│                          flip), get_asc_obl_with_sun (coarse 10-day forward search + bisection to
-│                          1e-5° precision, 5000-iteration caps, dperiod timeout); dead _old variants
-│                          and get_asc_obl_acronychal not ported;
-│                          §3: get_heliacal_day (day-stepping search with per-body step/ndays/tfac
-│                          tuning, minute-level adaptive refinement within each day, daystep-shrink
-│                          on first appearance, sunrise-instant edge nudge), get_acronychal_day
-│                          (convergence loop with time_limit_invisible dark/nomoon comparison,
-│                          photopic-forced);
-│                          §4: time_optimum_visibility (two-direction coarse-to-fine hill-climb at
-│                          100s/10s/1s resolution, scotopic/photopic transition detection),
-│                          time_limit_invisible (greedy boundary walk, Moon gets d0×10 + 4 passes,
-│                          scotopic transition detection), get_heliacal_details (start/optimum/end
-│                          triple, evening-event dret[0]↔dret[2] swap)
+├── heliacal.rs         — **Arc complete** (Phase 13: Heliacal visibility, swisseph-rs/104–111).
+│                          Port of swehel.c: atmospheric extinction/optics model, visibility-limit
+│                          magnitude, heliacal phenomena, and event search (both vis_lim and arc_vis
+│                          strategies). Public API: Ephemeris::heliacal_ut (swe_heliacal_ut port),
+│                          Ephemeris::heliacal_pheno_ut, Ephemeris::vis_limit_mag, heliacal_angle.
+│                          **Types**: HeliacalEventType (MorningFirst..AcronymchalSetting),
+│                          HeliacalEvent (start_visible/optimum_visibility/end_visible),
+│                          HeliacalPheno (28 fields), VisLimitResult (dret[0..7] + vision flags),
+│                          HeliacalAngleResult (optimal_altitude/arcus_visionis/sun_altitude_diff).
+│                          **Layer 1 — atmosphere/optics** (1/8): default_heliacal_parameters,
+│                          extinction (kw/koz/kr/ka/kt/deltam), airmass, optics (cva/pupil_dia/
+│                          optic_factor), refraction (topo_alt_from_app_alt/app_alt_from_topo_alt).
+│                          **Layer 2 — object location** (3/8): object_loc (7 angle types),
+│                          azalt_cart, magnitude, calc_rise_and_set/my_rise_trans/rise_set.
+│                          **Layer 3 — vis_limit_mag** (4/8): vis_lim_magn + vis_limit_mag.
+│                          **Layer 4 — heliacal_pheno_ut** (6/8): Moon crescent geometry
+│                          (width_moon/length_moon/q_yallop/yallop_grade), deter_tav,
+│                          heliacal_pheno_ut (visibility-window search + DeterTAV sampling).
+│                          **Layer 5 — event search infrastructure** (7/8): get_synodic_period,
+│                          TCON table, find_conjunct_sun (Pluto → Err, not C's OOB read),
+│                          get_asc_obl/get_asc_obl_diff/get_asc_obl_with_sun (oblique-ascension
+│                          bracket+bisection), get_heliacal_day (adaptive day/minute stepping),
+│                          get_acronychal_day (photopic-forced convergence),
+│                          time_optimum_visibility/time_limit_invisible/get_heliacal_details.
+│                          **Layer 6 — event drivers** (8/8, swisseph-rs/111):
+│                          vis_lim path: heliacal_ut_vis_lim (conjunction/oblique-ascension seed →
+│                          get_heliacal_day/get_acronychal_day → get_heliacal_details),
+│                          moon_event_vis_lim (Moon-specific: find_conjunct_sun → get_heliacal_day
+│                          → optimum/boundary → sunset/sunrise clamp → TypeEvent==4 reorder);
+│                          arc_vis path: heliacal_ut_arc_vis (adaptive day-step halving search with
+│                          HeliacalAngle self-adjusting sunsangle feedback, AVKIND_VR per-minute
+│                          TAV-minimization via x2min parabola vertex, AVKIND_PTO symmetric-crossing
+│                          averaging, AVKIND_MIN7/MIN9 fixed-depth overrides; AltM=-1/AziM=0 always
+│                          — Moon interference never factored, matching C's dead #if 0 block;
+│                          topo_config threaded via calc_with_config/fixstar2_with_config since C
+│                          relies on global swe_set_topo), moon_event_arc_vis (new-moon anchor via
+│                          pheno_ut phase-angle walk, per-minute DeterTAV minimization, AVKIND_VR
+│                          only for Moon); top-level: heliacal_ut (§7 swe_heliacal_ut port:
+│                          Sun/Moon rejection, TypeEvent validation, acronychal 5/6→3/4 remapping
+│                          for arc_vis, synodic-period retry loop with MAX_COUNT_SYNPER=5 or
+│                          LONG_SEARCH=1M, SEARCH_1_PERIOD post-hoc rejection).
+│                          **Deviations from C**: find_conjunct_sun returns Err for Pluto (C has
+│                          latent TCON OOB read); arc_vis dret[1..2] explicitly zeroed (C leaves
+│                          uninitialized); arc_vis sanity bound uses tjd_start not stale loop var;
+│                          moon_event_arc_vis strips TOPOCTR from pheno_ut flags (geocentric
+│                          quantity, C uses global swe_set_topo).
+│                          **Quirks preserved**: all C algorithmic quirks ported literally for
+│                          golden-test parity (see docs/c-ref-heliacal-search.md §8)
 ├── phenomena.rs        — swe_pheno/swe_pheno_ut port (swisseph-rs/83): Phenomena output struct
 │                          (phase_angle, phase, elongation, apparent_diameter, apparent_magnitude,
 │                          horizontal_parallax = attr[0..5]); MAG_ELEM[21][4] table + EULER/
@@ -702,7 +670,12 @@ tests/
 │                          Sirius × TypeEvent=1 at Cairo (± HIGH_PRECISION), Mercury morning first,
 │                          Moon morning last, Mars/Jupiter evening first (early-exit guard path),
 │                          MOSEPH duplicates (Venus + Moon). Geometry slots eps 1e-7, time/duration
-│                          slots (TfirstVR/TbVR/TlastVR/TbYallop/RiseO/RiseS/Lag/TvisVR) eps 1e-5
+│                          slots (TfirstVR/TbVR/TlastVR/TbYallop/RiseO/RiseS/Lag/TvisVR) eps 1e-5.
+│                          Also: swe_heliacal_ut (swisseph-rs/111, sub-task 8/8):
+│                          12 event cases — Sirius/Venus/Moon at Cairo/Mecca/Athens observers,
+│                          TypeEvent 1–4, LONG_SEARCH, AVKIND_VR ×2 (arc_vis path), HIGH_PRECISION;
+│                          vis_lim cases eps 2e-5 day, arc_vis cases eps 1e-4 day (coarser search),
+│                          arc_vis dret[1]/dret[2] asserted == 0.0
 │   ├── obliquity_bias.rs — golden tests for obliquity + bias
 │   ├── precession.rs  — golden tests for precession (374 cases)
 │   ├── nutation.rs    — golden tests for nutation (80 cases + router tests)
@@ -873,7 +846,8 @@ tests/
 │   ├── riseset.json    — C-generated reference data for swe_rise_trans_true_hor + swe_rise_trans (full key: 36 cases, 3 geopos × 2 bodies × 2 epochs × 3 rsmi, retval recorded so circumpolar -2 cases assert Err; dip key: 6 cases, horhgt=-100 × atpress∈{0,1013.25} × 3 geopos; mtrans_flags key: 12 cases, NONUT|TRUEPOS × 3 geopos × 2 bodies × MTRANSIT/ITRANSIT; fast key: 24 cases via swe_rise_trans, 3 geopos all \|lat\|≤60 × 2 bodies × 2 epochs × RISE/SET, no FORCE_SLOW)
 │   ├── heliacal.json   — C-generated reference data for swe_vis_limit_mag (vis_limit key, 33 cases),
 │                          swe_topo_arcus_visionis (arcvis key), swe_heliacal_angle (helangle key),
-│                          swe_heliacal_pheno_ut (pheno key, 15 cases; swisseph-rs/109);
+│                          swe_heliacal_pheno_ut (pheno key, 15 cases; swisseph-rs/109),
+│                          swe_heliacal_ut (events key, 12 cases; swisseph-rs/111);
 │                          see tests/golden/heliacal.rs
 │   └── crossings.json  — C-generated reference data for swe_solcross/mooncross/mooncross_node/helio_cross (66 cases: 18 solcross + 18 mooncross + 6 mooncross_node + 24 helio_cross, all Moshier)
 └── c-gen/
@@ -943,7 +917,9 @@ tests/
     │                       SCOTOPIC flag variants, OPTICAL_PARAMS, MOSEPH duplicates = 33 cases;
     │                       swe_heliacal_pheno_ut (swisseph-rs/109): 15 cases — Moon crescent at
     │                       Mecca, Venus/Sirius/Mercury/Mars/Jupiter at Cairo, MOSEPH duplicates;
-    │                       links libswe.a normally, does NOT #include swehel.c)
+    │                       swe_heliacal_ut (swisseph-rs/111): 12 event cases — Sirius/Venus/Moon
+    │                       at Cairo/Mecca/Athens, TypeEvent 1–4, LONG_SEARCH, AVKIND_VR ×2,
+    │                       HIGH_PRECISION; links libswe.a normally, does NOT #include swehel.c)
     └── gen_cross.c      — C harness to regenerate crossings.json (66 cases: solcross 18,
                             mooncross 18, mooncross_node 6, helio_cross 24, all SEFLG_MOSEPH)
 ```
