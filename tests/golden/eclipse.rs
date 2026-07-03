@@ -1,5 +1,7 @@
+use std::path::PathBuf;
+
 use serde::Deserialize;
-use swisseph::{Body, CalcFlags, EclipseFlags, Ephemeris, EphemerisConfig};
+use swisseph::{Body, CalcFlags, EclipseFlags, Ephemeris, EphemerisConfig, EphemerisSource};
 
 #[derive(Deserialize)]
 struct SolWhereCase {
@@ -118,6 +120,7 @@ struct GoldenData {
     occ_when_glob: Vec<OccWhenGlobCase>,
     occ_when_loc: Vec<OccWhenLocCase>,
     occ_when_glob_ifltype: Vec<OccWhenGlobIfltypeCase>,
+    occ_where_asteroid: Vec<OccWhereCase>,
 }
 
 fn load() -> GoldenData {
@@ -1170,6 +1173,89 @@ fn occ_when_loc() {
             c.attr[7],
             result.attr.elongation,
             1e-5,
+        );
+    }
+}
+
+/// `swe_lun_occult_where` with numbered asteroid Eros (433) via SWIEPH, exercising
+/// `body_radius_au`'s asteroid-metadata branch.
+#[test]
+fn occ_where_asteroid() {
+    let data = load();
+    let ephe = Ephemeris::new(EphemerisConfig {
+        ephemeris_source: EphemerisSource::Swiss,
+        ephe_path: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ephe")),
+        asteroid_numbers: vec![433],
+        ..Default::default()
+    })
+    .unwrap();
+    for (i, c) in data.occ_where_asteroid.iter().enumerate() {
+        let label = format!("occ_where_asteroid[{i}][tjd_ut={},ipl={}]", c.tjd_ut, c.ipl);
+        let body = Body::try_from(c.ipl).unwrap();
+        let result = ephe
+            .lun_occult_where(c.tjd_ut, body, c.starname.as_deref(), CalcFlags::SWIEPH)
+            .unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+
+        assert_eq!(
+            c.retval,
+            result.flags.bits() as i32,
+            "{label}: retval mismatch (expected {:#x}, got {:#x})",
+            c.retval,
+            result.flags.bits()
+        );
+        super::assert_f64_eps(
+            &format!("{label}.central_longitude"),
+            c.geopos[0],
+            result.central_longitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.central_latitude"),
+            c.geopos[1],
+            result.central_latitude,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.core_diameter_km (dcore[0])"),
+            c.dcore[0],
+            result.core_diameter_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.penumbra_diameter_km"),
+            c.dcore[1],
+            result.penumbra_diameter_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.shadow_axis_distance_km"),
+            c.dcore[2],
+            result.shadow_axis_distance_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.umbra_diameter_fundamental_km"),
+            c.dcore[3],
+            result.umbra_diameter_fundamental_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.penumbra_diameter_fundamental_km"),
+            c.dcore[4],
+            result.penumbra_diameter_fundamental_km,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.cos_umbra_half_angle"),
+            c.dcore[5],
+            result.cos_umbra_half_angle,
+            1e-7,
+        );
+        super::assert_f64_eps(
+            &format!("{label}.cos_penumbra_half_angle"),
+            c.dcore[6],
+            result.cos_penumbra_half_angle,
+            1e-7,
         );
     }
 }

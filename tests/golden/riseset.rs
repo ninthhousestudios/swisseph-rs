@@ -1,5 +1,6 @@
 use serde::Deserialize;
-use swisseph::{Body, CalcFlags, Ephemeris, Error, RiseSetFlags};
+use std::path::PathBuf;
+use swisseph::{Body, CalcFlags, Ephemeris, EphemerisConfig, EphemerisSource, Error, RiseSetFlags};
 
 #[derive(Deserialize)]
 struct FullCase {
@@ -49,11 +50,25 @@ struct FastCase {
 }
 
 #[derive(Deserialize)]
+struct AsteroidCase {
+    geopos: [f64; 3],
+    #[allow(dead_code)]
+    geopos_name: String,
+    body: String,
+    tjd_ut: f64,
+    rsmi: String,
+    iflag: u32,
+    retval: i32,
+    tret0: f64,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     full: Vec<FullCase>,
     dip: Vec<DipCase>,
     mtrans_flags: Vec<MtransFlagsCase>,
     fast: Vec<FastCase>,
+    asteroid: Vec<AsteroidCase>,
 }
 
 fn load() -> GoldenData {
@@ -227,6 +242,41 @@ fn mtrans_flags() {
             1013.25,
             15.0,
             0.0,
+        );
+        if c.retval == -2 {
+            match actual {
+                Err(Error::CircumpolarBody) => {}
+                other => panic!("{label}: expected CircumpolarBody, got {other:?}"),
+            }
+        } else {
+            let result = actual.unwrap_or_else(|e| panic!("{label}: unexpected error {e}"));
+            super::assert_f64_eps(&format!("{label}.time"), c.tret0, result.time, 1e-6);
+        }
+    }
+}
+
+/// Rise/set/transit for numbered asteroid Eros (433) via SWIEPH, exercising `disc_diameter_m`'s
+/// asteroid-metadata branch.
+#[test]
+fn asteroid() {
+    let data = load();
+    let ephe = Ephemeris::new(EphemerisConfig {
+        ephemeris_source: EphemerisSource::Swiss,
+        ephe_path: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ephe")),
+        asteroid_numbers: vec![433],
+        ..EphemerisConfig::default()
+    })
+    .unwrap();
+    for (i, c) in data.asteroid.iter().enumerate() {
+        let body = Body::asteroid(433).unwrap();
+        let rsmi = rsmi_of(&c.rsmi) | RiseSetFlags::FORCE_SLOW;
+        let flags = CalcFlags::from_bits_truncate(c.iflag);
+        let label = format!(
+            "asteroid[{i}][body={},tjd_ut={},rsmi={}]",
+            c.body, c.tjd_ut, c.rsmi
+        );
+        let actual = ephe.rise_trans_true_hor(
+            c.tjd_ut, body, None, flags, rsmi, c.geopos, 1013.25, 15.0, 0.0,
         );
         if c.retval == -2 {
             match actual {

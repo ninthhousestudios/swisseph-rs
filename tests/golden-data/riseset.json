@@ -84,5 +84,10 @@
     {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Moon", "tjd_ut": 2451545, "rsmi": "SET", "retval": 0, "tret0": 2.45154569378405716270e+06},
     {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "RISE", "retval": 0, "tret0": 2.45900064438607823104e+06},
     {"geopos": [139.69999999999999, 35.700000000000003, 40], "geopos_name": "Tokyo", "body": "Moon", "tjd_ut": 2459000.5, "rsmi": "SET", "retval": 0, "tret0": 2.45900118534070858732e+06}
+  ],
+  "asteroid": [
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Eros_433", "tjd_ut": 2451545, "rsmi": "RISE", "iflag": 2, "retval": 0, "tret0": 2.45154568128466745839e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Eros_433", "tjd_ut": 2451545, "rsmi": "SET", "iflag": 2, "retval": 0, "tret0": 2.45154500196607923135e+06},
+    {"geopos": [8.5500000000000007, 47.369999999999997, 500], "geopos_name": "Zurich", "body": "Eros_433", "tjd_ut": 2451545, "rsmi": "MTRANSIT", "iflag": 2, "retval": 0, "tret0": 2.45154584102062508464e+06}
   ]
 }

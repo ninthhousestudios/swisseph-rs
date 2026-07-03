@@ -77,7 +77,7 @@ int main(void) {
     /* Explicit path (rather than NULL's compiled-in default) so the occ_where/occ_when_glob
      * Aldebaran cases can find sefstars.txt (swisseph-rs/78) -- everything else in this file only
      * uses SEFLG_MOSEPH, which needs no ephemeris files. */
-    swe_set_ephe_path("../swisseph/ephe");
+    swe_set_ephe_path("ephe");
 
     printf("{\n");
 
@@ -438,6 +438,42 @@ int main(void) {
                "\"retval\": %d, \"tret\": [",
                tjd_start, ipl, starname ? "\"Aldebaran\"" : "null", ifltype, retval);
         for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", tret[k]);
+        printf("]}");
+    }
+    printf("\n  ],\n");
+
+    /* === occ_where_asteroid === */
+    /* Eros (433) via SWIEPH, exercising body_radius_au's asteroid-metadata branch. A dummy
+     * swe_calc pre-populates C's swed.ast_diam global (which body_radius_au reads) — without it,
+     * the first eclipse_where call for this asteroid would see drad=0 (file not yet opened).
+     * The stateless Rust port reads from the already-loaded file and doesn't have this ordering
+     * dependency. */
+    printf("  \"occ_where_asteroid\": [\n");
+    first = 1;
+    {
+        double x[6];
+        char serr[256] = { 0 };
+        swe_calc(2458800.5, SE_AST_OFFSET + 433, SEFLG_SWIEPH, x, serr);
+
+        double tjd_ut = 2458800.5;
+        int32 ipl = SE_AST_OFFSET + 433;
+        int32 ifl = SEFLG_SWIEPH;
+        double geopos[10] = { 0 };
+        double attr[20] = { 0 };
+        swi_test_eclipse_where_dcore(tjd_ut, ipl, NULL, ifl & SEFLG_EPHMASK, geopos, attr, serr);
+
+        double geopos2[10] = { 0 };
+        double attr2[20] = { 0 };
+        int32 retval = swe_lun_occult_where(tjd_ut, ipl, NULL, ifl, geopos2, attr2, serr);
+
+        double dcore[10] = { 0 };
+        swi_test_eclipse_where_dcore(tjd_ut, ipl, NULL, ifl & SEFLG_EPHMASK, geopos, dcore, serr);
+
+        printf("    {\"tjd_ut\": %.17g, \"ipl\": %d, \"starname\": null, \"retval\": %d, \"geopos\": [",
+               tjd_ut, ipl, retval);
+        for (int k = 0; k < 10; k++) printf("%s%.20e", k ? ", " : "", geopos2[k]);
+        printf("], \"dcore\": [");
+        for (int k = 0; k < 7; k++) printf("%s%.20e", k ? ", " : "", dcore[k]);
         printf("]}");
     }
     printf("\n  ]\n");

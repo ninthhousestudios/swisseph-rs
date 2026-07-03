@@ -34,7 +34,7 @@ static const char *rsmi_names[] = { "RISE", "SET", "MTRANSIT" };
 
 int main(void) {
     int first;
-    swe_set_ephe_path(NULL);
+    swe_set_ephe_path("ephe");
 
     printf("{\n");
     printf("  \"full\": [\n");
@@ -168,6 +168,36 @@ int main(void) {
                     }
                 }
             }
+        }
+    }
+    printf("\n  ],\n");
+
+    /* "asteroid" -- rise/set/transit for numbered asteroid Eros (433) via SWIEPH, exercising
+     * disc_diameter_m's asteroid-metadata branch (reads ast_diam from the SE1 file). SWIEPH is
+     * required: MOSEPH asteroid calc depends on C's global sun_bary cache state. FORCE_SLOW
+     * routes through rise_trans_true_hor which calls disc_diameter_m directly. */
+    printf("  \"asteroid\": [\n");
+    first = 1;
+    {
+        static int32 ast_rsmis[] = { SE_CALC_RISE, SE_CALC_SET, SE_CALC_MTRANSIT };
+        static const char *ast_rsmi_names[] = { "RISE", "SET", "MTRANSIT" };
+        double geopos[3] = { 8.55, 47.37, 500.0 };
+        double tjd_ut = 2451545.0;
+        int32 ipl = SE_AST_OFFSET + 433;
+        for (size_t ir = 0; ir < 3; ir++) {
+            int32 rsmi = ast_rsmis[ir] | SE_BIT_FORCE_SLOW_METHOD;
+            double tret[10] = { 0 };
+            char serr[256] = { 0 };
+            int32 retval = swe_rise_trans_true_hor(
+                tjd_ut, ipl, NULL, SEFLG_SWIEPH, rsmi, geopos,
+                1013.25, 15.0, 0.0, tret, serr);
+            if (!first) printf(",\n");
+            first = 0;
+            printf("    {\"geopos\": [%.17g, %.17g, %.17g], \"geopos_name\": \"Zurich\", "
+                   "\"body\": \"Eros_433\", \"tjd_ut\": %.17g, \"rsmi\": \"%s\", "
+                   "\"iflag\": %d, \"retval\": %d, \"tret0\": %.20e}",
+                   geopos[0], geopos[1], geopos[2],
+                   tjd_ut, ast_rsmi_names[ir], SEFLG_SWIEPH, (int)retval, tret[0]);
         }
     }
     printf("\n  ]\n");
