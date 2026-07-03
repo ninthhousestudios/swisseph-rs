@@ -408,7 +408,27 @@ src/
 │                          TOPOCTR ordering (was: 7→0 rewrite before TOPOCTR check, incorrectly
 │                          adding TOPOCTR; fixed: TOPOCTR check runs first, then 7→0 rewrite);
 │                          calc_rise_and_set SET+below-horizon day-anchoring (was: [tjd0-1,tjd0];
-│                          fixed: [tjd0,tjd0+1] matching C swehel.c:449-456)
+│                          fixed: [tjd0,tjd0+1] matching C swehel.c:449-456).
+│                          Event search infrastructure (swisseph-rs/110, sub-task 7/8):
+│                          §1: get_synodic_period (static table, 10 bodies), TCON conjunction
+│                          table (18 doubles, Sun..Neptune × 2 reference epochs), find_conjunct_sun
+│                          (Newton iteration on ecliptic longitude difference, Pluto returns Err
+│                          instead of C's latent out-of-bounds read);
+│                          §2: get_asc_obl (oblique ascension/descension, circumpolar guard),
+│                          get_asc_obl_diff (Sun–body oblique-ascension difference with acronychal
+│                          flip), get_asc_obl_with_sun (coarse 10-day forward search + bisection to
+│                          1e-5° precision, 5000-iteration caps, dperiod timeout); dead _old variants
+│                          and get_asc_obl_acronychal not ported;
+│                          §3: get_heliacal_day (day-stepping search with per-body step/ndays/tfac
+│                          tuning, minute-level adaptive refinement within each day, daystep-shrink
+│                          on first appearance, sunrise-instant edge nudge), get_acronychal_day
+│                          (convergence loop with time_limit_invisible dark/nomoon comparison,
+│                          photopic-forced);
+│                          §4: time_optimum_visibility (two-direction coarse-to-fine hill-climb at
+│                          100s/10s/1s resolution, scotopic/photopic transition detection),
+│                          time_limit_invisible (greedy boundary walk, Moon gets d0×10 + 4 passes,
+│                          scotopic transition detection), get_heliacal_details (start/optimum/end
+│                          triple, evening-event dret[0]↔dret[2] swap)
 ├── phenomena.rs        — swe_pheno/swe_pheno_ut port (swisseph-rs/83): Phenomena output struct
 │                          (phase_angle, phase, elongation, apparent_diameter, apparent_magnitude,
 │                          horizontal_parallax = attr[0..5]); MAG_ELEM[21][4] table + EULER/
@@ -660,8 +680,13 @@ tests/
 │                          battery 36 cases (alt×TempE×PresE, asserts AppAltfromTopoAlt +
 │                          TopoAltfromAppAlt at 1e-12); optic battery 20 cases (B×4 dobs configs
 │                          {default,age60,binocular,optical_params}, asserts CVA + PupilDia +
-│                          OpticFactor{intensity,background} at 1e-12). C harness includes
-│                          swehel.c directly for access to static functions
+│                          OpticFactor{intensity,background} at 1e-12); search battery 13 cases
+│                          (swisseph-rs/110, sub-task 7/8): find_conjunct_sun 8 cases (Venus/Mars ×
+│                          TypeEvent {1,2} × tjd_start {2453000,2451545}), get_heliacal_day 1 case
+│                          (Venus morning first from conjunction seed), time_optimum_visibility 1
+│                          case, time_limit_invisible 2 cases (dir=±1), get_heliacal_details 1 case
+│                          (Venus te=1), all at Cairo observer, eps 2e-5 day.
+│                          C harness includes swehel.c directly for access to static functions
 │   ├── heliacal.rs       — golden tests for swe_vis_limit_mag (swisseph-rs/107, sub-task 4/8):
 │                          33 cases — 4 objects {venus,sirius,moon,mercury} × per-object UT
 │                          instants (daytime for planets, nighttime for stars/Moon) at Cairo
