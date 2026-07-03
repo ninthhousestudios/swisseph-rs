@@ -88,10 +88,9 @@ fn normalize_pheno_body(body: Body) -> Body {
 /// (swecl.c:3802-4123). Returns the [`Phenomena`] plus the flags actually used (C's `return
 /// iflag`, the masked/patched flag copy signalling any ephemeris fallback).
 ///
-/// `Body::Asteroid` (numbered asteroids other than 1566 Icarus) needs the SE1 orbital-element H/G
-/// globals (`swed.ast_H`/`ast_G`), which aren't threaded through a stateless config yet — the same
-/// gap `eclipse::body_radius_au` stubs — so it returns [`Error::EphemerisNotAvailable`]. Main
-/// planets plus Ceres/Pallas/Juno/Vesta (via `MAG_ELEM`) work normally.
+/// `Body::Asteroid` (numbered asteroids) reads the SE1 orbital-element H/G/diameter from the loaded
+/// asteroid file via [`Ephemeris::asteroid_meta`]. Main asteroids Chiron..Vesta use `MAG_ELEM`
+/// (hard-coded table). 1566 Icarus has a JPL-database H/G override.
 pub fn pheno(
     eph: &Ephemeris,
     tjd_et: f64,
@@ -161,9 +160,9 @@ pub fn pheno(
     // corrected).
     let dd = if raw < NMAG_ELEM {
         PLANETARY_DIAMETERS[raw as usize]
+    } else if let Some(meta) = eph.asteroid_meta(ipl) {
+        meta.diameter_km * 1000.0
     } else {
-        // ipl > SE_AST_OFFSET would read swed.ast_diam (named-asteroid data) — not available in
-        // the stateless port; same gap as eclipse::body_radius_au. See §5 for the magnitude side.
         0.0
     };
     if lbr[2] < dd / 2.0 / AUNIT {
@@ -283,13 +282,11 @@ pub fn pheno(
             } else if matches!(ipl, Body::Asteroid(id) if id.mpc_number() == 1566) {
                 [16.9, 0.15] // 1566 Icarus: JPL-database H/G override
             } else {
-                // Other numbered asteroids need swed.ast_H/ast_G from the SE1 orbital-element
-                // file — the same stateless gap as eclipse::body_radius_au's asteroid diameter.
-                // TODO(asteroid SE1 metadata): same gap as body_radius_au.
-                return Err(Error::EphemerisNotAvailable {
+                let meta = eph.asteroid_meta(ipl).ok_or(Error::EphemerisNotAvailable {
                     body,
                     source: eph.config().ephemeris_source,
-                });
+                })?;
+                [meta.h, meta.g]
             };
             attr[4] = 5.0 * (lbr2[2] * lbr[2]).log10() + me[0]
                 - 2.5 * ((1.0 - me[1]) * ph1 + me[1] * ph2).log10();

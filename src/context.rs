@@ -147,6 +147,22 @@ impl Ephemeris {
         &self.leap_seconds
     }
 
+    /// Look up the SE1 orbital-element metadata (H, G, diameter) for a numbered asteroid.
+    /// Returns `None` for non-`Asteroid` bodies (main asteroids Chiron..Vesta deliberately
+    /// return `None` — C never populates the globals from seas files for those; their
+    /// magnitude/diameter data live in `MAG_ELEM` / `PLANETARY_DIAMETERS`).
+    pub(crate) fn asteroid_meta(&self, body: Body) -> Option<&crate::sweph_file::AsteroidMeta> {
+        let n = match body {
+            Body::Asteroid(id) => id.mpc_number(),
+            _ => return None,
+        };
+        let target_id = crate::constants::AST_OFFSET + n;
+        self.asteroid_files
+            .iter()
+            .find(|f| f.planets().first().is_some_and(|p| p.body_id == target_id))
+            .and_then(|f| f.header().asteroid.as_ref())
+    }
+
     /// Compute planetary position.
     ///
     /// Unlike the C library, this implementation does not cache computed

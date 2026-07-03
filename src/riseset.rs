@@ -142,7 +142,7 @@ pub(crate) fn rise_trans_true_hor(
         None
     };
 
-    let dd_m = disc_diameter_m(body, is_fixstar, rsmi);
+    let dd_m = disc_diameter_m(eph, body, is_fixstar, rsmi);
 
     // Position at `t` (UT): reused fixed-star position, or a fresh topocentric `calc_ut`.
     let resolve_xc = |t: f64| -> Result<[f64; 3], Error> {
@@ -387,7 +387,7 @@ pub(crate) fn rise_set_fast(
             if geoctr_no_ecl_lat {
                 xx[1] = 0.0;
             }
-            let rdi = get_sun_rad_plus_refr(body, xx[2], rsmi, refr);
+            let rdi = get_sun_rad_plus_refr(eph, body, xx[2], rsmi, refr);
             let xaz = eph.azalt(
                 tr,
                 tohor_flag,
@@ -427,10 +427,16 @@ pub(crate) fn rise_set_fast(
 /// Target horizon-altitude offset (degrees): disc angular radius (signed by limb) plus
 /// refraction. Port of `get_sun_rad_plus_refr` (swecl.c:4176-4194, §3.4). `dist_au` is the
 /// body's distance (AU); `refr` is the once-computed horizon refraction (§3.3 step 2).
-fn get_sun_rad_plus_refr(body: Body, dist_au: f64, rsmi: RiseSetFlags, refr: f64) -> f64 {
+fn get_sun_rad_plus_refr(
+    eph: &Ephemeris,
+    body: Body,
+    dist_au: f64,
+    rsmi: RiseSetFlags,
+    refr: f64,
+) -> f64 {
     let mut rdi = 0.0;
     if !rsmi.contains(RiseSetFlags::DISC_CENTER) {
-        let dd_m = disc_diameter_m(body, false, rsmi);
+        let dd_m = disc_diameter_m(eph, body, false, rsmi);
         rdi = disc_radius_deg(rsmi, body, dd_m, dist_au);
     }
     if rsmi.contains(RiseSetFlags::DISC_BOTTOM) {
@@ -461,15 +467,17 @@ fn disc_radius_deg(rsmi: RiseSetFlags, body: Body, dd_m: f64, dist_au: f64) -> f
 }
 
 /// Disc diameter (meters), resolved once per search. `0` for fixed stars or `DISC_CENTER`;
-/// `PLANETARY_DIAMETERS[raw_id]` for `raw_id` in range; else `0` (asteroid `ast_diam` is not
-/// ported -- untested path, `gen_riseset.c` only covers SE_SUN/SE_MOON). Port of §5.2 step 5.
-fn disc_diameter_m(body: Body, is_fixstar: bool, rsmi: RiseSetFlags) -> f64 {
+/// `PLANETARY_DIAMETERS[raw_id]` for `raw_id` in range; numbered asteroids use the SE1
+/// orbital-element diameter; else `0`. Port of §5.2 step 5.
+fn disc_diameter_m(eph: &Ephemeris, body: Body, is_fixstar: bool, rsmi: RiseSetFlags) -> f64 {
     if is_fixstar || rsmi.contains(RiseSetFlags::DISC_CENTER) {
         return 0.0;
     }
     let raw = body.to_raw_id();
     if (0..crate::constants::PLANETARY_DIAMETERS.len() as i32).contains(&raw) {
         crate::constants::PLANETARY_DIAMETERS[raw as usize]
+    } else if let Some(meta) = eph.asteroid_meta(body) {
+        meta.diameter_km * 1000.0
     } else {
         0.0
     }

@@ -163,17 +163,16 @@ pub struct EclipseWhere {
 
 /// Physical radius of `ipl` (or a star, if `starname` is given) in AU. Shared `drad` resolution
 /// pattern used by `eclipse_where` (swecl.c:697-704) and `eclipse_how` (swecl.c:1004-1011).
-pub(crate) fn body_radius_au(ipl: Body, starname: Option<&str>) -> f64 {
+pub(crate) fn body_radius_au(eph: &Ephemeris, ipl: Body, starname: Option<&str>) -> f64 {
     if starname.is_some_and(|s| !s.is_empty()) {
         return 0.0;
     }
     let raw = ipl.to_raw_id();
     if (0..PLANETARY_DIAMETERS.len() as i32).contains(&raw) {
         PLANETARY_DIAMETERS[raw as usize] / 2.0 / AUNIT
+    } else if let Some(meta) = eph.asteroid_meta(ipl) {
+        meta.diameter_km / 2.0 * 1000.0 / AUNIT
     } else {
-        // Named-asteroid diameter (C: swed.ast_diam, populated by the SE1 orbital-element
-        // loader) isn't threaded through a stateless config yet -- out of scope until asteroid
-        // orbital-element support lands.
         0.0
     }
 }
@@ -239,7 +238,7 @@ pub(crate) fn eclipse_where(
         crate::sidereal_time::sidereal_time(tjd_ut, config) * 15.0 * DEGTORAD
     };
 
-    let drad = body_radius_au(ipl, starname);
+    let drad = body_radius_au(eph, ipl, starname);
     let rmoon = RMOON;
     let dmoon = 2.0 * rmoon;
     let de = REARTH;
@@ -486,7 +485,7 @@ pub(crate) fn eclipse_how(
         .calc_with_config(te, Body::Moon, iflag_cart, &topo_config)?
         .data;
 
-    let drad = body_radius_au(ipl, starname);
+    let drad = body_radius_au(eph, ipl, starname);
 
     let geopos = [geolon, geolat, geohgt];
     let xh = eph.azalt(
@@ -2484,7 +2483,7 @@ pub(crate) fn lun_occult_when_glob(
         }
 
         // §2 step 3: occulted-body angular radius (reuses the same helper as eclipse_where).
-        let body_radius = body_radius_au(ipl, starname);
+        let body_radius = body_radius_au(eph, ipl, starname);
 
         // §2 step 4: refine time of maximum occultation (parabola-vertex bracketing,
         // dtstart=1, dtdiv=3 -- fixed, unlike solar's conditional dtstart).
@@ -2818,7 +2817,7 @@ pub(crate) fn occult_when_loc(
         }
 
         // §3 step 3: occulted-body angular radius.
-        let body_radius = body_radius_au(ipl, starname);
+        let body_radius = body_radius_au(eph, ipl, starname);
 
         // §3 step 4: local-visibility bracket + refine time of maximum occultation.
         // `dtstart = 1` fixed (no ET-range conditional, unlike solar); `dtdiv` stays `2` for the
