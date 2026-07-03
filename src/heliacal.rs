@@ -2269,12 +2269,15 @@ fn get_asc_obl(
 ) -> Result<f64, Error> {
     let efl = (epheflag & calc::EPHMASK) | CalcFlags::EQUATORIAL;
 
-    let (ra, decl) = if let Some(star) = starname {
-        let (_, r) = eph.fixstar2(star, tjd, efl)?;
-        (r.data[0], r.data[1])
-    } else {
-        let r = eph.calc(tjd, ipl, efl)?;
-        (r.data[0], r.data[1])
+    let (ra, decl) = match starname.filter(|s| !s.is_empty()) {
+        Some(star) => {
+            let (_, r) = eph.fixstar2(star, tjd, efl)?;
+            (r.data[0], r.data[1])
+        }
+        None => {
+            let r = eph.calc(tjd, ipl, efl)?;
+            (r.data[0], r.data[1])
+        }
     };
 
     let adp = (dgeo[1] * DEGTORAD).tan() * (decl * DEGTORAD).tan();
@@ -2725,7 +2728,7 @@ pub fn time_optimum_visibility(
                 break;
             }
             let margin = vlm2.limiting_magnitude - vlm2.magnitude_object;
-            if margin <= vl1 {
+            if margin <= 0.0 || margin <= vl1 {
                 break;
             }
             t1 -= d;
@@ -2760,7 +2763,7 @@ pub fn time_optimum_visibility(
                 break;
             }
             let margin = vlm2.limiting_magnitude - vlm2.magnitude_object;
-            if margin <= vl2 {
+            if margin <= 0.0 || margin <= vl2 {
                 break;
             }
             t2 += d;
