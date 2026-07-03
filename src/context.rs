@@ -2158,7 +2158,8 @@ impl Ephemeris {
         jd_ut: f64,
         flags: CalcFlags,
     ) -> Result<(String, CalcResult), Error> {
-        let dt = crate::deltat::calc_deltat(jd_ut, &self.config);
+        let config = self.effective_config(flags, &self.config);
+        let dt = crate::deltat::calc_deltat(jd_ut, &config);
         self.fixstar2(star, jd_ut + dt, flags)
     }
 

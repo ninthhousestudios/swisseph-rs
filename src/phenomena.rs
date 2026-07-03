@@ -405,14 +405,14 @@ pub(crate) fn pheno_ut_with_config(
         epheflag = CalcFlags::SWIEPH;
         iflag |= CalcFlags::SWIEPH;
     }
-    let deltat = crate::deltat::calc_deltat(tjd_ut, config);
-    let (attr, retflag) = pheno_with_config(eph, tjd_ut + deltat, body, iflag, config)?;
+    // Re-resolve effective config after the SWIEPH default, matching C's
+    // swe_pheno_ut which computes deltaT from iflag AFTER inserting SWIEPH.
+    let eff = eph.effective_config(iflag, config);
+    let deltat = crate::deltat::calc_deltat(tjd_ut, &eff);
+    let (attr, retflag) = pheno_with_config(eph, tjd_ut + deltat, body, iflag, &eff)?;
     if (retflag & calc::EPHMASK) != epheflag {
-        // Ephemeris fallback: C recomputes deltaT with the actually-used flags. In this stateless
-        // port deltaT is derived from the config (not the flags), so the recomputed value is
-        // identical and the re-call is idempotent — kept for structural fidelity.
-        let deltat = crate::deltat::calc_deltat(tjd_ut, config);
-        return pheno_with_config(eph, tjd_ut + deltat, body, iflag, config);
+        let deltat = crate::deltat::calc_deltat(tjd_ut, &eff);
+        return pheno_with_config(eph, tjd_ut + deltat, body, iflag, &eff);
     }
     Ok((attr, retflag))
 }
