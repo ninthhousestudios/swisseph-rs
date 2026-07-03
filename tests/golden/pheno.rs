@@ -22,10 +22,7 @@ fn load() -> Vec<PhenoCase> {
 }
 
 fn ephe_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("swisseph")
-        .join("ephe")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ephe")
 }
 
 fn body_from_c_id(id: i32) -> Body {
@@ -40,29 +37,37 @@ fn body_from_c_id(id: i32) -> Body {
         7 => Body::Uranus,
         8 => Body::Neptune,
         9 => Body::Pluto,
+        15 => Body::Chiron,
+        16 => Body::Pholus,
+        17 => Body::Ceres,
+        18 => Body::Pallas,
+        19 => Body::Juno,
+        20 => Body::Vesta,
+        id if id >= 10000 => Body::asteroid(id - 10000).unwrap(),
         _ => panic!("unexpected body id {id}"),
     }
 }
 
 /// `swe_pheno` (`Ephemeris::pheno`): phase angle, illuminated fraction, elongation, apparent
-/// diameter, apparent magnitude, and Moon horizontal parallax over Sun..Pluto × 4 epochs × the
-/// {MOSEPH, MOSEPH|TRUEPOS, SWIEPH} flag battery (120 cases). Exercises magnitude branches 5a-5j;
-/// the Bowell §5k asteroid branch is unreachable via golden data (no backend computes asteroid
-/// positions yet -- see gen_pheno.c).
+/// diameter, apparent magnitude, and Moon horizontal parallax. 156 cases total:
+/// - Sun..Pluto (10) × 4 epochs × {MOSEPH, MOSEPH|TRUEPOS, SWIEPH} = 120 (branches 5a-5j)
+/// - Chiron/Pholus/Ceres/Pallas/Juno/Vesta × 4 epochs × SWIEPH = 24 (§5k via MAG_ELEM)
+/// - Eros(433)/Nessus(7066)/Eris(136199) × 4 epochs × SWIEPH = 12 (§5k via SE1 H/G metadata)
 #[test]
 fn golden_pheno() {
     let moshier = Ephemeris::new(EphemerisConfig::default()).unwrap();
     let sweph = Ephemeris::new(EphemerisConfig {
         ephemeris_source: EphemerisSource::Swiss,
         ephe_path: Some(ephe_path()),
+        asteroid_numbers: vec![433, 7066, 136199],
         ..EphemerisConfig::default()
     })
     .unwrap();
 
     let cases = load();
     assert!(
-        cases.len() >= 120,
-        "expected 120+ cases, got {}",
+        cases.len() >= 156,
+        "expected 156+ cases, got {}",
         cases.len()
     );
 
