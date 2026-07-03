@@ -12,7 +12,9 @@ use memmap2::Mmap;
 use crate::error::Error;
 use crate::types::Body;
 
-pub use types::{ByteOrder, FileHeader, FileType, PlanetFileData, SEI_FLG_HELIO, SEI_SUNBARY};
+pub use types::{
+    AsteroidMeta, ByteOrder, FileHeader, FileType, PlanetFileData, SEI_FLG_HELIO, SEI_SUNBARY,
+};
 
 pub struct SwissEphFile {
     mmap: Mmap,
@@ -65,7 +67,9 @@ fn detect_file_type(path: &Path) -> Result<FileType, Error> {
         Ok(FileType::MainAsteroid)
     } else if stem.starts_with("sepm") {
         Ok(FileType::PlanetaryMoon)
-    } else if stem.starts_with("se") && stem.len() > 2 && stem.as_bytes()[2].is_ascii_digit() {
+    } else if (stem.starts_with("se") && stem.len() > 2 && stem.as_bytes()[2].is_ascii_digit())
+        || (stem.starts_with('s') && stem.len() > 1 && stem.as_bytes()[1].is_ascii_digit())
+    {
         Ok(FileType::Asteroid)
     } else {
         Err(Error::FileFormat(format!(
@@ -92,6 +96,31 @@ pub fn body_file_id(body: Body) -> Option<i32> {
         Body::Pluto => Some(9),
         _ => None,
     }
+}
+
+fn asteroid_file_candidates(dir: &Path, mpc: i32) -> [std::path::PathBuf; 4] {
+    let base = if mpc > 99999 {
+        format!("s{mpc:06}")
+    } else {
+        format!("se{mpc:05}")
+    };
+    let subdir = format!("ast{}", mpc / 1000);
+    [
+        dir.join(&subdir).join(format!("{base}.se1")),
+        dir.join(&subdir).join(format!("{base}s.se1")),
+        dir.join(format!("{base}.se1")),
+        dir.join(format!("{base}s.se1")),
+    ]
+}
+
+pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error> {
+    let candidates = asteroid_file_candidates(dir, mpc);
+    for path in &candidates {
+        if let Ok(f) = SwissEphFile::open(path) {
+            return Ok(f);
+        }
+    }
+    Err(Error::FileNotFound(candidates[0].clone()))
 }
 
 pub fn open_ephemeris_files(dir: &Path, prefix: &str) -> Result<Vec<SwissEphFile>, Error> {
@@ -138,12 +167,106 @@ pub fn find_file_for_jd(files: &[SwissEphFile], body_id: i32, jd: f64) -> Option
 
 #[cfg(test)]
 mod tests {
-    use super::SwissEphFile;
+    use super::*;
+    use std::path::PathBuf;
 
     fn _assert_send_sync() {
         fn assert_send<T: Send>() {}
         fn assert_sync<T: Sync>() {}
         assert_send::<SwissEphFile>();
         assert_sync::<SwissEphFile>();
+    }
+
+    fn ephe_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ephe")
+    }
+
+    #[test]
+    fn asteroid_eros_se1() {
+        let path = ephe_dir().join("ast0/se00433s.se1");
+        if !path.exists() {
+            return;
+        }
+        let f = SwissEphFile::open(&path).unwrap();
+        assert_eq!(f.header().file_type, FileType::Asteroid);
+        assert_eq!(f.planets()[0].body_id, 10433);
+        assert_eq!(f.header().time_range, (2268922.5, 2488522.5));
+        let meta = f.header().asteroid.as_ref().unwrap();
+        assert_eq!(meta.h, 10.38);
+        assert_eq!(meta.g, 0.15);
+        assert_eq!(meta.name, "Eros");
+    }
+
+    #[test]
+    fn asteroid_eris_6digit_se1() {
+        let path = ephe_dir().join("ast136/s136199s.se1");
+        if !path.exists() {
+            return;
+        }
+        let f = SwissEphFile::open(&path).unwrap();
+        assert_eq!(f.header().file_type, FileType::Asteroid);
+        assert_eq!(f.planets()[0].body_id, 146199);
+        let meta = f.header().asteroid.as_ref().unwrap();
+        assert!(meta.name.contains("Eris"), "name was: {}", meta.name);
+    }
+
+    #[test]
+    fn open_asteroid_file_eros() {
+        let dir = ephe_dir();
+        if !dir.join("ast0/se00433s.se1").exists() {
+            return;
+        }
+        let f = open_asteroid_file(&dir, 433).unwrap();
+        assert_eq!(f.planets()[0].body_id, 10433);
+    }
+
+    #[test]
+    fn open_asteroid_file_missing() {
+        let dir = ephe_dir();
+        let result = open_asteroid_file(&dir, 99999);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn detect_file_type_6digit() {
+        let path = Path::new("/tmp/s136108s.se1");
+        assert_eq!(detect_file_type(path).unwrap(), FileType::Asteroid);
+    }
+
+    #[test]
+    fn ephemeris_new_with_asteroids() {
+        let dir = ephe_dir();
+        if !dir.join("ast0/se00433s.se1").exists() {
+            return;
+        }
+        let config = crate::config::EphemerisConfig {
+            ephe_path: Some(dir),
+            asteroid_numbers: vec![433],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config);
+        assert!(eph.is_ok());
+    }
+
+    #[test]
+    fn ephemeris_new_missing_asteroid_errors() {
+        let dir = ephe_dir();
+        let config = crate::config::EphemerisConfig {
+            ephe_path: Some(dir),
+            asteroid_numbers: vec![99999],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config);
+        assert!(eph.is_err());
+    }
+
+    #[test]
+    fn ephemeris_new_asteroid_numbers_without_path_errors() {
+        let config = crate::config::EphemerisConfig {
+            asteroid_numbers: vec![433],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config);
+        assert!(eph.is_err());
     }
 }

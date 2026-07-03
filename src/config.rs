@@ -30,6 +30,7 @@ pub struct EphemerisConfig {
     pub tidal_acceleration: Option<f64>,
     pub extra_leap_seconds: Vec<i32>,
     pub leap_seconds_file: Option<PathBuf>,
+    pub asteroid_numbers: Vec<i32>,
 }
 
 impl Default for EphemerisConfig {
@@ -48,6 +49,7 @@ impl Default for EphemerisConfig {
             tidal_acceleration: None,
             extra_leap_seconds: Vec::new(),
             leap_seconds_file: None,
+            asteroid_numbers: Vec::new(),
         }
     }
 }

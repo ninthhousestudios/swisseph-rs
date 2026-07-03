@@ -70,12 +70,21 @@ impl ByteOrder {
 }
 
 #[derive(Debug)]
+pub struct AsteroidMeta {
+    pub h: f64,
+    pub g: f64,
+    pub diameter_km: f64,
+    pub name: String,
+}
+
+#[derive(Debug)]
 pub struct FileHeader {
     pub version: i32,
     pub file_type: FileType,
     pub time_range: (f64, f64),
     pub denum: i32,
     pub byte_order: ByteOrder,
+    pub asteroid: Option<AsteroidMeta>,
 }
 
 #[derive(Debug)]

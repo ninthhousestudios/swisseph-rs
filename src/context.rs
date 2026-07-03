@@ -43,6 +43,8 @@ pub struct Ephemeris {
     leap_seconds: Vec<i32>,
     planet_files: Vec<crate::sweph_file::SwissEphFile>,
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
+    main_asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
+    asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
     jpl_file: Option<crate::jpl::JplFile>,
     stars: crate::stars::StarCatalog,
 }
@@ -77,6 +79,32 @@ impl Ephemeris {
             }
             EphemerisSource::Moshier => (Vec::new(), Vec::new()),
         };
+
+        // Asteroid files load when ephe_path is set, regardless of ephemeris source
+        // (C reads asteroids from .se1 even under MOSEPH/JPLEPH — c-ref-asteroid.md §1.4).
+        let (main_asteroid_files, asteroid_files) = if let Some(dir) = config.ephe_path.as_ref() {
+            let main_ast = crate::sweph_file::open_ephemeris_files(dir, "seas").unwrap_or_default();
+
+            if !config.asteroid_numbers.is_empty() {
+                let mut nums = config.asteroid_numbers.clone();
+                nums.sort_unstable();
+                nums.dedup();
+                let mut ast = Vec::with_capacity(nums.len());
+                for &n in &nums {
+                    ast.push(crate::sweph_file::open_asteroid_file(dir, n)?);
+                }
+                (main_ast, ast)
+            } else {
+                (main_ast, Vec::new())
+            }
+        } else if !config.asteroid_numbers.is_empty() {
+            return Err(Error::FileFormat(
+                "ephe_path required for asteroid files".to_string(),
+            ));
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         // Resolve the ephemeris-specific tidal acceleration from the open file's
         // DE number, mirroring C's `swi_get_tid_acc` (swephlib.c:3211–3221): JPL
         // uses the JPL file's denum, SWIEPH the moon (SEI_FILE_MOON) file's. This
@@ -100,6 +128,8 @@ impl Ephemeris {
             leap_seconds,
             planet_files,
             moon_files,
+            main_asteroid_files,
+            asteroid_files,
             jpl_file,
             stars,
         })

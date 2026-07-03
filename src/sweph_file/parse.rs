@@ -1,8 +1,8 @@
 use crate::error::Error;
 
 use super::types::{
-    ByteOrder, ENDIAN_TEST, FileHeader, FileType, PlanetFileData, SE_AST_OFFSET, SE_PLMOON_OFFSET,
-    SEI_FLG_ELLIPSE,
+    AsteroidMeta, ByteOrder, ENDIAN_TEST, FileHeader, FileType, PlanetFileData, SE_AST_OFFSET,
+    SE_PLMOON_OFFSET, SEI_FLG_ELLIPSE,
 };
 
 struct Reader<'a> {
@@ -83,6 +83,133 @@ fn parse_version(line: &[u8]) -> Result<i32, Error> {
         .map_err(|_| Error::FileFormat("invalid version number".into()))
 }
 
+fn atof_prefix(bytes: &[u8]) -> f64 {
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] == b' ' {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return 0.0;
+    }
+    let start = i;
+    if bytes[i] == b'+' || bytes[i] == b'-' {
+        i += 1;
+    }
+    let has_digits_before = i < bytes.len() && bytes[i].is_ascii_digit();
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+    if !has_digits_before && (i == start || i == start + 1) {
+        return 0.0;
+    }
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        let j = i + 1;
+        let mut k = j;
+        if k < bytes.len() && (bytes[k] == b'+' || bytes[k] == b'-') {
+            k += 1;
+        }
+        if k < bytes.len() && bytes[k].is_ascii_digit() {
+            i = k;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+        }
+    }
+    let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
+    s.parse::<f64>().unwrap_or(0.0)
+}
+
+pub(super) fn parse_mpc_elements(line: &[u8]) -> (f64, f64, f64) {
+    let mut sp = 0;
+    while sp < line.len() && line[sp] == b' ' {
+        sp += 1;
+    }
+    while sp < line.len() && line[sp].is_ascii_digit() {
+        sp += 1;
+    }
+    if sp < line.len() {
+        sp += 1;
+    }
+    let i = sp;
+
+    let h = if 35 + i < line.len() {
+        atof_prefix(&line[35 + i..])
+    } else {
+        0.0
+    };
+    let mut g = if 42 + i < line.len() {
+        atof_prefix(&line[42 + i..])
+    } else {
+        0.0
+    };
+    if g == 0.0 {
+        g = 0.15;
+    }
+
+    let diam_raw = if 51 + i + 7 <= line.len() {
+        atof_prefix(&line[51 + i..51 + i + 7])
+    } else if 51 + i < line.len() {
+        atof_prefix(&line[51 + i..])
+    } else {
+        0.0
+    };
+    let diameter_km = if diam_raw == 0.0 {
+        1329.0 / 0.15_f64.sqrt() * 10f64.powf(-0.2 * h)
+    } else {
+        diam_raw
+    };
+
+    (h, g, diameter_km)
+}
+
+fn extract_asteroid_name(line: &[u8], ipl0: i32) -> String {
+    let mut sp = 0;
+    while sp < line.len() && line[sp] == b' ' {
+        sp += 1;
+    }
+    while sp < line.len() && line[sp].is_ascii_digit() {
+        sp += 1;
+    }
+    if sp < line.len() {
+        sp += 1;
+    }
+    let i = sp;
+    let lastnam = 19;
+
+    let sastnam_len = (lastnam + i).min(line.len());
+    let sastnam = &line[..sastnam_len];
+
+    let mut j = 4usize;
+    while j < 10 && j < sastnam.len() && sastnam[j] != b' ' {
+        j += 1;
+    }
+
+    let sastno = &sastnam[..j.min(sastnam.len())];
+    let num_str = std::str::from_utf8(sastno).unwrap_or("").trim();
+    let parsed_num = num_str.parse::<i32>().unwrap_or(0);
+
+    let name_bytes = if parsed_num == ipl0 - SE_AST_OFFSET || parsed_num == ipl0 {
+        let start = (j + 1).min(sastnam.len());
+        let end = (start + lastnam).min(sastnam.len());
+        &sastnam[start..end]
+    } else {
+        &[]
+    };
+
+    let mut name = String::from_utf8_lossy(name_bytes).into_owned();
+    name = name.trim_end().to_string();
+    if let Some(pos) = name.find("  ") {
+        name.truncate(pos);
+    }
+    name
+}
+
 fn detect_byte_order(data: &[u8], offset: usize) -> Result<ByteOrder, Error> {
     if offset + 4 > data.len() {
         return Err(Error::FileFormat("file too short for endian test".into()));
@@ -113,8 +240,12 @@ pub(super) fn parse_file(
     let version = parse_version(&data[..first_crlf])?;
 
     let mut pos = 0;
-    for _ in 0..num_text_lines {
+    let mut mpc_line: Option<&[u8]> = None;
+    for line_idx in 0..num_text_lines {
         let crlf = find_crlf(data, pos)?;
+        if line_idx == 3 && file_type == FileType::Asteroid {
+            mpc_line = Some(&data[pos..crlf]);
+        }
         pos = crlf + 2;
     }
     let binary_start = pos;
@@ -155,9 +286,24 @@ pub(super) fn parse_file(
         ipl.push(id);
     }
 
-    if matches!(file_type, FileType::Asteroid | FileType::PlanetaryMoon) {
+    // Asteroid name + 30-byte field handling (c-ref-asteroid.md §3.3)
+    let asteroid = if let Some(line) = mpc_line {
+        let (h, g, diameter_km) = parse_mpc_elements(line);
+        let ipl0 = ipl.first().copied().unwrap_or(0);
+        let name = extract_asteroid_name(line, ipl0);
         r.skip(30)?;
-    }
+        Some(AsteroidMeta {
+            h,
+            g,
+            diameter_km,
+            name,
+        })
+    } else if file_type == FileType::PlanetaryMoon {
+        r.skip(30)?;
+        None
+    } else {
+        None
+    };
 
     // CRC32 field (skip — not validating)
     r.skip(4)?;
@@ -233,7 +379,34 @@ pub(super) fn parse_file(
         time_range: (tfstart, tfend),
         denum,
         byte_order: order,
+        asteroid,
     };
 
     Ok((header, planets))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_atof_prefix() {
+        assert_eq!(atof_prefix(b"10.38"), 10.38);
+        assert_eq!(atof_prefix(b"  0.15"), 0.15);
+        assert_eq!(atof_prefix(b""), 0.0);
+        assert_eq!(atof_prefix(b"   "), 0.0);
+        assert_eq!(atof_prefix(b"-3.5e2"), -350.0);
+        assert_eq!(atof_prefix(b"42xyz"), 42.0);
+    }
+
+    #[test]
+    fn test_parse_mpc_elements_eros() {
+        let line =
+            b"000433 Eros               L.H. Wasserman  10.38  0.15                    4   0 ";
+        let (h, g, diam) = parse_mpc_elements(line);
+        assert_eq!(h, 10.38);
+        assert_eq!(g, 0.15);
+        let expected_diam = 1329.0 / 0.15_f64.sqrt() * 10f64.powf(-0.2 * 10.38);
+        assert_eq!(diam, expected_diam);
+    }
 }
