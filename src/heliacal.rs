@@ -1890,6 +1890,14 @@ pub fn heliacal_pheno_ut(
     // Step 3: sun RA
     let sunra = sun_ra(tjd_ut);
 
+    let type_event = event as i32;
+    if !(1..=4).contains(&type_event) {
+        return Err(Error::CError(format!(
+            "heliacal_pheno_ut: TypeEvent {} not supported (must be 1-4)",
+            type_event,
+        )));
+    }
+
     // Step 4: name normalization
     let name = tolower_string_star(object_name);
 
@@ -1946,7 +1954,6 @@ pub fn heliacal_pheno_ut(
     }
 
     // Step 13: rise/set of Sun and object
-    let type_event = event as i32;
     let rs: RiseSetFlags = if type_event == 1 || type_event == 4 {
         RiseSetFlags::RISE | RiseSetFlags::DISC_CENTER
     } else {
