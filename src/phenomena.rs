@@ -6,6 +6,7 @@
 //! backend directly (enforced by the sutra constraint `app-uses-calc-not-backends:phenomena→*`).
 
 use crate::calc;
+use crate::config::EphemerisConfig;
 use crate::constants::{
     AST_OFFSET, AUNIT, CLIGHT, DEGTORAD, EARTH_RADIUS, J2000, PLANETARY_DIAMETERS, RADTODEG,
 };
@@ -97,6 +98,16 @@ pub fn pheno(
     body: Body,
     flags: CalcFlags,
 ) -> Result<(Phenomena, CalcFlags), Error> {
+    pheno_with_config(eph, tjd_et, body, flags, eph.config())
+}
+
+pub(crate) fn pheno_with_config(
+    eph: &Ephemeris,
+    tjd_et: f64,
+    body: Body,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+) -> Result<(Phenomena, CalcFlags), Error> {
     // §1 — input sanitization and the two independently-masked flag copies.
     let ipl = normalize_pheno_body(body);
     let raw = ipl.to_raw_id();
@@ -121,7 +132,7 @@ pub fn pheno(
     let mut attr = [0.0_f64; 6];
 
     // §2 — geocentric position: cartesian (for dot products) then polar (for distances/lon/lat).
-    let geo_xyz = eph.calc(tjd_et, ipl, iflag | CalcFlags::XYZ)?;
+    let geo_xyz = eph.calc_with_config(tjd_et, ipl, iflag | CalcFlags::XYZ, config)?;
     let epheflag2 = geo_xyz.flags_used & calc::EPHMASK;
     if epheflag != epheflag2 {
         // Ephemeris fallback: patch both flag copies to the ephemeris actually used.
@@ -130,7 +141,7 @@ pub fn pheno(
         epheflag = epheflag2;
     }
     let xx = geo_xyz.data; // geocentric-apparent cartesian at tjd
-    let lbr = eph.calc(tjd_et, ipl, iflag)?.data; // geocentric polar (lon, lat, dist AU) at tjd
+    let lbr = eph.calc_with_config(tjd_et, ipl, iflag, config)?.data;
 
     // §3 — light-time-corrected heliocentric position → phase angle + illuminated fraction.
     // Skipped for the Sun/Earth/nodes/apogees (attr[0], attr[1], dt stay 0).
@@ -150,8 +161,10 @@ pub fn pheno(
         if iflag.contains(CalcFlags::TRUEPOS) {
             dt = 0.0;
         }
-        let xx2 = eph.calc(tjd_et - dt, ipl, iflagp | CalcFlags::XYZ)?.data; // helio cartesian
-        lbr2 = eph.calc(tjd_et - dt, ipl, iflagp)?.data; // helio polar at tjd-dt
+        let xx2 = eph
+            .calc_with_config(tjd_et - dt, ipl, iflagp | CalcFlags::XYZ, config)?
+            .data;
+        lbr2 = eph.calc_with_config(tjd_et - dt, ipl, iflagp, config)?.data;
         attr[0] = dot_prod_unit([xx[0], xx[1], xx[2]], [xx2[0], xx2[1], xx2[2]]).acos() * RADTODEG;
         attr[1] = (1.0 + (attr[0] * DEGTORAD).cos()) / 2.0;
     }
@@ -299,7 +312,9 @@ pub fn pheno(
     // §6 — elongation (Sun-Earth-planet angle). Skipped for the Sun/Earth. Uses a fresh Sun
     // cartesian; the C buffer reuse of xx2/lbr2 here is a hazard we avoid with a named binding.
     if ipl != Body::Sun && ipl != Body::Earth {
-        let sun_xyz = eph.calc(tjd_et, Body::Sun, iflag | CalcFlags::XYZ)?.data;
+        let sun_xyz = eph
+            .calc_with_config(tjd_et, Body::Sun, iflag | CalcFlags::XYZ, config)?
+            .data;
         attr[2] = dot_prod_unit([xx[0], xx[1], xx[2]], [sun_xyz[0], sun_xyz[1], sun_xyz[2]]).acos()
             * RADTODEG;
     }
@@ -307,10 +322,11 @@ pub fn pheno(
     // §7 — horizontal parallax, Moon only. Uses just the ephemeris-source bits (epheflag).
     if ipl == Body::Moon {
         let xm = eph
-            .calc(
+            .calc_with_config(
                 tjd_et,
                 Body::Moon,
                 epheflag | CalcFlags::TRUEPOS | CalcFlags::EQUATORIAL | CalcFlags::RADIANS,
+                config,
             )?
             .data;
         let sinhp = EARTH_RADIUS / xm[2] / AUNIT; // xm[2]: true geocentric distance, AU
@@ -319,14 +335,15 @@ pub fn pheno(
             // Topocentric: actual angular displacement between geocentric and topocentric apparent
             // directions (uses the Ephemeris's configured topographic position, like C's global).
             let xm_topo = eph
-                .calc(
+                .calc_with_config(
                     tjd_et,
                     Body::Moon,
                     epheflag | CalcFlags::XYZ | CalcFlags::TOPOCTR,
+                    config,
                 )?
                 .data;
             let xm_geo = eph
-                .calc(tjd_et, Body::Moon, epheflag | CalcFlags::XYZ)?
+                .calc_with_config(tjd_et, Body::Moon, epheflag | CalcFlags::XYZ, config)?
                 .data;
             attr[5] = dot_prod_unit(
                 [xm_topo[0], xm_topo[1], xm_topo[2]],
@@ -374,6 +391,28 @@ pub fn pheno_ut(
         // value is identical and the re-call is idempotent — kept for structural fidelity.
         let deltat = crate::deltat::calc_deltat(tjd_ut, eph.config());
         return pheno(eph, tjd_ut + deltat, body, iflag);
+    }
+    Ok((attr, retflag))
+}
+
+pub(crate) fn pheno_ut_with_config(
+    eph: &Ephemeris,
+    tjd_ut: f64,
+    body: Body,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+) -> Result<(Phenomena, CalcFlags), Error> {
+    let mut epheflag = flags & calc::EPHMASK;
+    let mut iflag = flags;
+    if epheflag.is_empty() {
+        epheflag = CalcFlags::SWIEPH;
+        iflag |= CalcFlags::SWIEPH;
+    }
+    let deltat = crate::deltat::calc_deltat(tjd_ut, config);
+    let (attr, retflag) = pheno_with_config(eph, tjd_ut + deltat, body, iflag, config)?;
+    if (retflag & calc::EPHMASK) != epheflag {
+        let deltat = crate::deltat::calc_deltat(tjd_ut, config);
+        return pheno_with_config(eph, tjd_ut + deltat, body, iflag, config);
     }
     Ok((attr, retflag))
 }

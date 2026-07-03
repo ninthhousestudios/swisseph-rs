@@ -309,9 +309,100 @@ static void print_brightness(void) {
     printf("]");
 }
 
+/* ── ObjectLoc battery ───────────────────────────────────────────── */
+
+static void print_objectloc(void) {
+    const char *objects[] = {"venus", "sirius", "moon"};
+    int angles[] = {0, 1, 2, 3, 4, 5, 6};
+    double jd_ut_vals[] = {2451545.0, 2453371.0};
+    double dgeo[3] = {31.25, 30.1, 30.0};
+    double datm[4] = {1013.25, 15, 40, 40};
+    int helflag = SEFLG_SWIEPH;
+
+    int n_obj = sizeof(objects)/sizeof(objects[0]);
+    int n_angle = sizeof(angles)/sizeof(angles[0]);
+    int n_jd = sizeof(jd_ut_vals)/sizeof(jd_ut_vals[0]);
+
+    char serr[AS_MAXCH];
+    char object_name[AS_MAXCH];
+
+    printf("\"objectloc\":[");
+    first_item = 1;
+
+    for (int io = 0; io < n_obj; io++) {
+        for (int ia = 0; ia < n_angle; ia++) {
+            int Angle = angles[ia];
+            for (int ij = 0; ij < n_jd; ij++) {
+                double jd_ut = jd_ut_vals[ij];
+
+                strcpy(object_name, objects[io]);
+                double dret = 0;
+                int32 retval = ObjectLoc(jd_ut, dgeo, datm, object_name, Angle, helflag, &dret, serr);
+                if (retval == ERR)
+                    continue;
+
+                comma();
+                printf("{\"object\":\"%s\",\"Angle\":%d,\"jd_ut\":%.17g,"
+                       "\"dgeo\":[%.17g,%.17g,%.17g],"
+                       "\"datm\":[%.17g,%.17g,%.17g,%.17g],"
+                       "\"helflag\":%d,\"dret\":%.17g}\n",
+                       objects[io], Angle, jd_ut,
+                       dgeo[0], dgeo[1], dgeo[2],
+                       datm[0], datm[1], datm[2], datm[3],
+                       helflag, dret);
+            }
+        }
+    }
+    printf("]");
+}
+
+/* ── Magnitude battery ───────────────────────────────────────────── */
+
+static void print_magnitude(void) {
+    const char *objects[] = {"venus", "sirius", "moon"};
+    double jd_ut_vals[] = {2451545.0, 2453371.0};
+    double dgeo[3] = {31.25, 30.1, 30.0};
+    int helflag = SEFLG_SWIEPH;
+
+    int n_obj = sizeof(objects)/sizeof(objects[0]);
+    int n_jd = sizeof(jd_ut_vals)/sizeof(jd_ut_vals[0]);
+
+    char serr[AS_MAXCH];
+    char object_name[AS_MAXCH];
+
+    printf("\"magnitude\":[");
+    first_item = 1;
+
+    for (int io = 0; io < n_obj; io++) {
+        for (int ij = 0; ij < n_jd; ij++) {
+            double jd_ut = jd_ut_vals[ij];
+
+            strcpy(object_name, objects[io]);
+            double dmag = 0;
+            int32 retval = Magnitude(jd_ut, dgeo, object_name, helflag, &dmag, serr);
+            if (retval == ERR)
+                continue;
+
+            comma();
+            printf("{\"object\":\"%s\",\"jd_ut\":%.17g,"
+                   "\"dgeo\":[%.17g,%.17g,%.17g],"
+                   "\"helflag\":%d,\"dmag\":%.17g}\n",
+                   objects[io], jd_ut,
+                   dgeo[0], dgeo[1], dgeo[2],
+                   helflag, dmag);
+        }
+    }
+    printf("]");
+}
+
 /* ── Main ────────────────────────────────────────────────────────── */
 
 int main(void) {
+    swe_set_ephe_path("../../../swisseph/ephe");
+
+    double dgeo_topo[3] = {31.25, 30.1, 30.0};
+    swe_set_topo(dgeo_topo[0], dgeo_topo[1], dgeo_topo[2]);
+
     printf("{");
     print_extinction();
     printf(",");
@@ -322,6 +413,10 @@ int main(void) {
     print_optic();
     printf(",");
     print_brightness();
+    printf(",");
+    print_objectloc();
+    printf(",");
+    print_magnitude();
     printf("}\n");
     return 0;
 }

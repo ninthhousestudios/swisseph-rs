@@ -1,6 +1,7 @@
 use serde::Deserialize;
-use swisseph::flags::HeliacalFlags;
+use swisseph::flags::{CalcFlags, HeliacalFlags};
 use swisseph::heliacal;
+use swisseph::{Ephemeris, EphemerisConfig};
 
 #[derive(Deserialize)]
 struct ExtinctionCase {
@@ -113,12 +114,35 @@ struct BrightnessCase {
 }
 
 #[derive(Deserialize)]
+struct ObjectLocCase {
+    object: String,
+    #[serde(rename = "Angle")]
+    angle: i32,
+    jd_ut: f64,
+    dgeo: [f64; 3],
+    datm: [f64; 4],
+    helflag: u32,
+    dret: f64,
+}
+
+#[derive(Deserialize)]
+struct MagnitudeCase {
+    object: String,
+    jd_ut: f64,
+    dgeo: [f64; 3],
+    helflag: u32,
+    dmag: f64,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     extinction: Vec<ExtinctionCase>,
     airmass: Vec<AirmassCase>,
     app_alt: Vec<AppAltCase>,
     optic: Vec<OpticCase>,
     brightness: Vec<BrightnessCase>,
+    objectloc: Vec<ObjectLocCase>,
+    magnitude: Vec<MagnitudeCase>,
 }
 
 fn load() -> GoldenData {
@@ -411,5 +435,62 @@ fn golden_brightness() {
             helflag,
         );
         assert_rel_or_abs(&format!("{label_base}/Bsky"), c.bsky, actual_bsky, 1e-12);
+    }
+}
+
+fn make_eph() -> Ephemeris {
+    let config = EphemerisConfig {
+        ephemeris_source: swisseph::EphemerisSource::Swiss,
+        ephe_path: Some("../swisseph/ephe".into()),
+        topographic: Some(swisseph::config::TopoPosition {
+            longitude: 31.25,
+            latitude: 30.1,
+            altitude: 30.0,
+        }),
+        ..Default::default()
+    };
+    Ephemeris::new(config).unwrap()
+}
+
+#[test]
+fn golden_objectloc() {
+    let data = load();
+    let eph = make_eph();
+    for (i, c) in data.objectloc.iter().enumerate() {
+        let helflag = HeliacalFlags::from_bits_truncate(c.helflag);
+        let epheflag = CalcFlags::from_bits_truncate(c.helflag);
+        let label_base = format!(
+            "objectloc[{i}][obj={},Angle={},jd={}]",
+            c.object, c.angle, c.jd_ut
+        );
+
+        let actual = heliacal::object_loc(
+            &eph, c.jd_ut, &c.dgeo, &c.datm, &c.object, c.angle, epheflag, helflag,
+        );
+        match actual {
+            Ok(val) => {
+                super::assert_f64_eps(&label_base, c.dret, val, 1e-7);
+            }
+            Err(e) => panic!("{label_base}: unexpected error: {e}"),
+        }
+    }
+}
+
+#[test]
+fn golden_magnitude() {
+    let data = load();
+    let eph = make_eph();
+    for (i, c) in data.magnitude.iter().enumerate() {
+        let helflag = HeliacalFlags::from_bits_truncate(c.helflag);
+        let epheflag = CalcFlags::from_bits_truncate(c.helflag);
+        let label_base = format!("magnitude[{i}][obj={},jd={}]", c.object, c.jd_ut);
+
+        let actual = heliacal::magnitude(&eph, c.jd_ut, &c.dgeo, &c.object, epheflag, helflag);
+        match actual {
+            Ok(val) => {
+                super::assert_f64_eps(&label_base, c.dmag, val, 1e-8);
+            }
+            Err(e) => panic!("{label_base}: unexpected error: {e}"),
+        }
     }
 }

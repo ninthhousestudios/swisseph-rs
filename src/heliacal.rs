@@ -1,8 +1,14 @@
 #![allow(clippy::too_many_arguments)]
 
+use crate::azalt::AzAltDir;
+use crate::calc;
+use crate::config::TopoPosition;
 use crate::constants::{AST_OFFSET, DEGTORAD};
+use crate::context::Ephemeris;
 use crate::date::revjul;
-use crate::flags::HeliacalFlags;
+use crate::error::Error;
+use crate::flags::{CalcFlags, HeliacalFlags, RiseSetFlags};
+use crate::math::{normalize_degrees, polar_to_cartesian};
 use crate::types::{Body, CalendarType};
 
 // ── Heliacal event types ───────────────────────────────────────────
@@ -755,6 +761,442 @@ pub fn bsky(
     }
 
     bsky_val
+}
+
+// ── Object location & magnitude (c-ref-heliacal-vision.md §7) ─────
+
+const LAPSE_RATE_DEFAULT: f64 = 0.0065;
+
+fn topo_config(eph: &Ephemeris, dgeo: &[f64; 3]) -> crate::config::EphemerisConfig {
+    let mut config = eph.config().clone();
+    config.topographic = Some(TopoPosition {
+        longitude: dgeo[0],
+        latitude: dgeo[1],
+        altitude: dgeo[2],
+    });
+    config
+}
+
+pub fn sun_ra(jdn_days_ut: f64) -> f64 {
+    let (_, imon, iday, _) = revjul(jdn_days_ut, CalendarType::Gregorian);
+    normalize_degrees((imon as f64 + (iday as f64 - 1.0) / 30.4 - 3.69) * 30.0)
+}
+
+#[allow(clippy::collapsible_else_if)]
+pub fn object_loc(
+    eph: &Ephemeris,
+    jd_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &[f64; 4],
+    object_name: &str,
+    angle: i32,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<f64, Error> {
+    let angle = if angle == 7 { 0 } else { angle };
+
+    let mut iflag = CalcFlags::EQUATORIAL | (epheflag & calc::EPHMASK);
+    if !helflag.contains(HeliacalFlags::HIGH_PRECISION) {
+        iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
+    }
+    if angle < 5 {
+        iflag |= CalcFlags::TOPOCTR;
+    }
+
+    let tjd_tt = jd_ut + crate::deltat::calc_deltat(jd_ut, eph.config());
+    let planet = object_to_body(object_name);
+
+    let x = if let Some(body) = planet {
+        if iflag.contains(CalcFlags::TOPOCTR) {
+            let config = topo_config(eph, dgeo);
+            eph.calc_with_config(tjd_tt, body, iflag, &config)?
+        } else {
+            eph.calc(tjd_tt, body, iflag)?
+        }
+    } else {
+        if iflag.contains(CalcFlags::TOPOCTR) {
+            let config = topo_config(eph, dgeo);
+            eph.fixstar2_with_config(object_name, tjd_tt, iflag, &config)?
+                .1
+        } else {
+            eph.fixstar2(object_name, tjd_tt, iflag)?.1
+        }
+    };
+
+    if angle == 2 || angle == 5 {
+        Ok(x.data[1])
+    } else if angle == 3 || angle == 6 {
+        Ok(x.data[0])
+    } else {
+        let xin = [x.data[0], x.data[1]];
+        let xaz = eph.azalt(
+            jd_ut,
+            AzAltDir::EquToHor,
+            [dgeo[0], dgeo[1], dgeo[2]],
+            datm[0],
+            datm[1],
+            LAPSE_RATE_DEFAULT,
+            xin,
+        );
+        if angle == 0 {
+            Ok(xaz[1])
+        } else if angle == 4 {
+            // C's argument-order quirk: datm[0] (pressure) in TempE slot, datm[1] (temp) in PresE slot
+            Ok(app_alt_from_topo_alt(xaz[1], datm[0], datm[1], helflag))
+        } else {
+            // angle == 1: azimuth, flipped 180° from swe_azalt's south-origin convention
+            let mut azi = xaz[0] + 180.0;
+            if azi >= 360.0 {
+                azi -= 360.0;
+            }
+            Ok(azi)
+        }
+    }
+}
+
+pub fn azalt_cart(
+    eph: &Ephemeris,
+    jd_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &[f64; 4],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<[f64; 6], Error> {
+    let mut iflag = CalcFlags::EQUATORIAL | CalcFlags::TOPOCTR | (epheflag & calc::EPHMASK);
+    if !helflag.contains(HeliacalFlags::HIGH_PRECISION) {
+        iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
+    }
+
+    let tjd_tt = jd_ut + crate::deltat::calc_deltat(jd_ut, eph.config());
+    let planet = object_to_body(object_name);
+    let config = topo_config(eph, dgeo);
+
+    let x = if let Some(body) = planet {
+        eph.calc_with_config(tjd_tt, body, iflag, &config)?
+    } else {
+        eph.fixstar2_with_config(object_name, tjd_tt, iflag, &config)?
+            .1
+    };
+
+    let xin = [x.data[0], x.data[1]];
+    let xaz = eph.azalt(
+        jd_ut,
+        AzAltDir::EquToHor,
+        [dgeo[0], dgeo[1], dgeo[2]],
+        datm[0],
+        datm[1],
+        LAPSE_RATE_DEFAULT,
+        xin,
+    );
+
+    // C: xaz[1]=xaz[2] (swap app alt in), xaz[2]=1 (unit), then polcart in-place
+    let cart = polar_to_cartesian([xaz[0] * DEGTORAD, xaz[2] * DEGTORAD, 1.0]);
+
+    Ok([xaz[0], xaz[1], xaz[2], cart[0], cart[1], cart[2]])
+}
+
+pub fn magnitude(
+    eph: &Ephemeris,
+    jd_ut: f64,
+    dgeo: &[f64; 3],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<f64, Error> {
+    let planet = object_to_body(object_name);
+
+    if let Some(body) = planet {
+        let mut iflag = CalcFlags::TOPOCTR | CalcFlags::EQUATORIAL | (epheflag & calc::EPHMASK);
+        if !helflag.contains(HeliacalFlags::HIGH_PRECISION) {
+            iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
+        }
+        let config = topo_config(eph, dgeo);
+        let (pheno, _) = crate::phenomena::pheno_ut_with_config(eph, jd_ut, body, iflag, &config)?;
+        Ok(pheno.apparent_magnitude)
+    } else {
+        let (_, mag) = eph.fixstar2_mag(object_name)?;
+        Ok(mag)
+    }
+}
+
+// ── Rise/set wrappers (c-ref-heliacal-vision.md §2/§7) ───────────
+
+const HELIACAL_AU: f64 = 1.49597870691e+11;
+const SUN_RADIUS_M: f64 = 696000000.0;
+const MOON_RADIUS_M: f64 = 1737000.0;
+const LAT_THRESHOLD_FAST: f64 = 63.0;
+
+pub fn calc_rise_and_set(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ipl: Body,
+    dgeo: &[f64; 3],
+    datm: &[f64; 4],
+    eventflag: RiseSetFlags,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<f64, Error> {
+    let mut iflag = epheflag & calc::EPHMASK;
+    if !helflag.contains(HeliacalFlags::HIGH_PRECISION) {
+        iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
+    }
+
+    let tjd0 = tjd_start;
+    let geopos = [dgeo[0], dgeo[1], dgeo[2]];
+
+    // Step 2: local-noon estimate
+    let mut tjdnoon = (tjd0 as i64) as f64 - dgeo[0] / 15.0 / 24.0;
+
+    // Step 3: compute Sun and object RA at tjd0
+    let sun_iflag = iflag | CalcFlags::EQUATORIAL;
+    let xs = eph.calc_ut(tjd0, Body::Sun, sun_iflag)?.data;
+    let xx_init = eph.calc_ut(tjd0, ipl, sun_iflag)?.data;
+    tjdnoon -= normalize_degrees(xs[0] - xx_init[0]) / 360.0;
+
+    // Step 4: is the object currently above/below horizon?
+    let xin = [xx_init[0], xx_init[1]];
+    let xaz = eph.azalt(
+        tjd0,
+        AzAltDir::EquToHor,
+        geopos,
+        datm[0],
+        datm[1],
+        LAPSE_RATE_DEFAULT,
+        xin,
+    );
+    let above = xaz[2] > 0.0;
+
+    // Step 5: day-anchoring
+    let is_rise = eventflag.contains(RiseSetFlags::RISE);
+    if is_rise {
+        if above {
+            while tjdnoon <= tjd0 + 0.5 {
+                tjdnoon += 1.0;
+            }
+            while tjdnoon > tjd0 + 1.5 {
+                tjdnoon -= 1.0;
+            }
+        } else {
+            while tjdnoon < tjd0 {
+                tjdnoon += 1.0;
+            }
+            while tjdnoon > tjd0 + 1.0 {
+                tjdnoon -= 1.0;
+            }
+        }
+    } else {
+        if above {
+            while tjdnoon <= tjd0 - 0.5 {
+                tjdnoon += 1.0;
+            }
+            while tjdnoon > tjd0 + 0.5 {
+                tjdnoon -= 1.0;
+            }
+        } else {
+            while tjdnoon < tjd0 - 1.0 {
+                tjdnoon += 1.0;
+            }
+            while tjdnoon > tjd0 {
+                tjdnoon -= 1.0;
+            }
+        }
+    }
+
+    // Step 6: recompute position at tjdnoon for declination
+    let xx_noon = eph.calc_ut(tjdnoon, ipl, sun_iflag)?.data;
+
+    // Step 7: disc radius
+    let rdi = if eventflag.contains(RiseSetFlags::DISC_CENTER) {
+        0.0
+    } else if ipl == Body::Sun {
+        (SUN_RADIUS_M / HELIACAL_AU / xx_noon[2]).asin() / DEGTORAD
+    } else if ipl == Body::Moon {
+        (MOON_RADIUS_M / HELIACAL_AU / xx_noon[2]).asin() / DEGTORAD
+    } else {
+        0.0
+    };
+
+    // Step 8: target altitude
+    let rh = -(34.5 / 60.0 + rdi);
+
+    // Step 9: semi-diurnal arc
+    let sda = (-dgeo[1].to_radians().tan() * xx_noon[1].to_radians().tan())
+        .acos()
+        .to_degrees();
+
+    // Step 10: initial estimate
+    let mut tjdrise = if is_rise {
+        tjdnoon - sda / 360.0
+    } else {
+        tjdnoon + sda / 360.0
+    };
+
+    // Step 11: refinement loop (2 iterations)
+    let config = topo_config(eph, dgeo);
+    let mut refine_iflag = (epheflag & calc::EPHMASK) | CalcFlags::SPEED | CalcFlags::EQUATORIAL;
+    if ipl == Body::Moon {
+        refine_iflag |= CalcFlags::TOPOCTR;
+    }
+    if !helflag.contains(HeliacalFlags::HIGH_PRECISION) {
+        refine_iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
+    }
+
+    let dfac: f64 = 1.0 / 365.25;
+
+    for _ in 0..2 {
+        let xx = if refine_iflag.contains(CalcFlags::TOPOCTR) {
+            eph.calc_ut_with_config(tjdrise, ipl, refine_iflag, &config)?
+                .data
+        } else {
+            eph.calc_ut(tjdrise, ipl, refine_iflag)?.data
+        };
+
+        let xin1 = [xx[0], xx[1]];
+        let xaz1 = eph.azalt(
+            tjdrise,
+            AzAltDir::EquToHor,
+            geopos,
+            datm[0],
+            datm[1],
+            LAPSE_RATE_DEFAULT,
+            xin1,
+        );
+
+        // Back-propagate RA/decl by dfac using speed
+        let xin2 = [xx[0] - xx[3] * dfac, xx[1] - xx[4] * dfac];
+        let xaz2 = eph.azalt(
+            tjdrise - dfac,
+            AzAltDir::EquToHor,
+            geopos,
+            datm[0],
+            datm[1],
+            LAPSE_RATE_DEFAULT,
+            xin2,
+        );
+
+        // Secant-style update
+        let dalt = xaz1[1] - xaz2[1];
+        if dalt != 0.0 {
+            tjdrise -= (xaz1[1] - rh) / dalt * dfac;
+        }
+    }
+
+    Ok(tjdrise)
+}
+
+pub fn my_rise_trans(
+    eph: &Ephemeris,
+    tjd: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    eventtype: RiseSetFlags,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+    dgeo: &[f64; 3],
+    datm: &[f64; 4],
+) -> Result<f64, Error> {
+    // If starname is provided, resolve to body first
+    let resolved_ipl = if let Some(name) = starname {
+        if !name.is_empty() {
+            if let Some(body) = object_to_body(name) {
+                body
+            } else {
+                // Fixed star: always use full rise_trans
+                let rsmi = eventtype;
+                let atpress = datm[0];
+                let attemp = datm[1];
+                let result = eph.rise_trans(
+                    tjd,
+                    Body::Sun, // unused for stars
+                    Some(name),
+                    epheflag & calc::EPHMASK,
+                    rsmi,
+                    [dgeo[0], dgeo[1], dgeo[2]],
+                    atpress,
+                    attemp,
+                )?;
+                return Ok(result.time);
+            }
+        } else {
+            ipl
+        }
+    } else {
+        ipl
+    };
+
+    // Fast path: recognized planet AND |lat| < 63°
+    if dgeo[1].abs() < LAT_THRESHOLD_FAST {
+        calc_rise_and_set(
+            eph,
+            tjd,
+            resolved_ipl,
+            dgeo,
+            datm,
+            eventtype,
+            epheflag,
+            helflag,
+        )
+    } else {
+        let rsmi = eventtype;
+        let atpress = datm[0];
+        let attemp = datm[1];
+        let result = eph.rise_trans(
+            tjd,
+            resolved_ipl,
+            None,
+            epheflag & calc::EPHMASK,
+            rsmi,
+            [dgeo[0], dgeo[1], dgeo[2]],
+            atpress,
+            attemp,
+        )?;
+        Ok(result.time)
+    }
+}
+
+pub fn rise_set(
+    eph: &Ephemeris,
+    jdn_days_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &[f64; 4],
+    object_name: &str,
+    rs_event: RiseSetFlags,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+    rim: i32,
+) -> Result<f64, Error> {
+    let mut eventflags = rs_event;
+    if rim == 0 {
+        eventflags |= RiseSetFlags::DISC_CENTER;
+    }
+
+    let planet = object_to_body(object_name);
+    if let Some(body) = planet {
+        my_rise_trans(
+            eph,
+            jdn_days_ut,
+            body,
+            Some(""),
+            eventflags,
+            epheflag,
+            helflag,
+            dgeo,
+            datm,
+        )
+    } else {
+        my_rise_trans(
+            eph,
+            jdn_days_ut,
+            Body::Sun, // placeholder, unused for stars
+            Some(object_name),
+            eventflags,
+            epheflag,
+            helflag,
+            dgeo,
+            datm,
+        )
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
