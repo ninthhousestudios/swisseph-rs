@@ -3608,6 +3608,11 @@ fn heliacal_ut_arc_vis(
             }
         }
 
+        if tb_vr == 0.0 {
+            return Err(Error::CError(
+                "heliacal_ut_arc_vis: AVKIND_VR refinement did not converge".into(),
+            ));
+        }
         jdn_arc_vis_ut = tb_vr;
     }
 
@@ -3739,6 +3744,22 @@ pub fn heliacal_ut(
     let object_lower = tolower_string_star(object_name);
     default_heliacal_parameters(datm, dgeo, dobs, helflag);
 
+    // C retries on retval==-2 ("not found this period") but propagates ERR (-1)
+    // immediately. Our CError conflates both. Classify: "not found" / "does not
+    // happen" / "no date found" messages are retryable; everything else
+    // (convergence failure, unsupported body, etc.) is fatal.
+    let is_retryable = |e: &Error| -> bool {
+        match e {
+            Error::CircumpolarBody => true,
+            Error::CError(msg) => {
+                msg.contains("not found")
+                    || msg.contains("does not happen")
+                    || msg.contains("no date found")
+            }
+            _ => false,
+        }
+    };
+
     let planet = object_to_body(&object_lower);
     let mut type_event = event as i32;
 
@@ -3768,7 +3789,7 @@ pub fn heliacal_ut(
             tjd += 15.0;
             match moon_event_jd_ut(eph, tjd, dgeo, datm, dobs, epheflag, helflag, type_event) {
                 Ok(d) => dret = d,
-                Err(Error::CircumpolarBody) | Err(Error::CError(_)) => {
+                Err(ref e) if is_retryable(e) => {
                     retval_ok = false;
                 }
                 Err(e) => return Err(e),
@@ -3841,9 +3862,12 @@ pub fn heliacal_ut(
             type_event,
         ) {
             Ok(mut dret) => {
-                // Inner retry-forward loop
+                // Inner retry-forward loop until result >= tjd0
                 while dret[0] < tjd0 {
                     tjd += tadd;
+                    if tjd >= tjdmax {
+                        break;
+                    }
                     match heliacal_ut_dispatch(
                         eph,
                         tjd,
@@ -3856,9 +3880,7 @@ pub fn heliacal_ut(
                         type_event,
                     ) {
                         Ok(d) => dret = d,
-                        Err(Error::CircumpolarBody) | Err(Error::CError(_)) => {
-                            break;
-                        }
+                        Err(ref e) if is_retryable(e) => break,
                         Err(e) => return Err(e),
                     }
                 }
@@ -3867,7 +3889,7 @@ pub fn heliacal_ut(
                     found = true;
                 }
             }
-            Err(Error::CircumpolarBody) | Err(Error::CError(_)) => {}
+            Err(ref e) if is_retryable(e) => {}
             Err(e) => return Err(e),
         }
         tjd += tadd;
