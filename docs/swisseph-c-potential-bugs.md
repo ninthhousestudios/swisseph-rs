@@ -350,3 +350,41 @@ deflection sees the Sun at the origin of that frame (swisseph-rs/95 decision; di
 swisseph-rs/101). Golden verification uses a dedicated MOSEPH-only generator process so the C
 side is guaranteed fresh (`tests/c-gen/gen_asteroid_moseph.c`, swisseph-rs/102). See
 `docs/c-ref-asteroid.md` §1.5.
+
+## 10. Fictitious-planet Kepler starting guess: `pow(x, 1/3)` uses C integer division — the cube root is never computed
+
+**Location:** `swemplan.c:638` (`swi_osc_el_plan`, high-eccentricity initial-guess block for
+the Kepler solve; the block spans swemplan.c:630–642)
+
+**What:** For fictitious bodies with `ecce > 0.975` near perihelion (after folding the mean
+anomaly into a canonical range, `|M2| < 30°`), C refines the Kepler-equation starting value
+with a cube-root-based analytic formula before handing off to `swi_kepler`:
+
+```c
+alpha = (1 - ecce) / (4 * ecce + 0.5);
+beta  = M2 / (8 * ecce + 1);
+zeta  = pow(beta + sqrt(beta*beta + alpha*alpha), 1/3);   /* <-- 1/3 is integer division */
+sigma = zeta - alpha / 2;
+```
+
+`1` and `3` are both `int`, so `1/3` evaluates to `0` at compile time and the call is
+`pow(x, 0) = 1.0` for every `x > 0`. `zeta` is unconditionally `1.0`; the intended cube root
+is never taken and the entire refinement collapses to a fixed (and mathematically meaningless)
+starting value `sigma = 1 - alpha/2 - 0.078·(…)`. Among the 19 named fictitious bodies, only
+Nibiru (ecce = 0.981092) can reach this branch at all.
+
+**Impact:** Practically none on output values: the guess only seeds `swi_kepler`
+(swephlib.c:4065–4096), whose Newton branch (`ecce >= 0.4`) iterates uncapped to a 1e-12 rad
+tolerance and converges to the same root from the degenerate guess — a correct cube-root
+guess would merely converge in fewer iterations. But because Newton stops on a step-size
+threshold, the *iteration path* determines the final ULPs of `E`, so a "fixed" cube root can
+produce bit-level differences in Nibiru positions versus C.
+
+**Cause:** Classic C integer-division literal bug (`1/3` instead of `1.0/3.0`). The
+surrounding formula is a standard high-eccentricity starting-value construction, so the cube
+root is clearly intended; no comment suggests otherwise. Harmless enough (thanks to the
+uncapped solver) that it has evidently never been noticed upstream.
+
+**Our Rust code:** Not yet landed — the fictitious-planets port is tasks swisseph-rs/122–123.
+The port must reproduce the bug (use literal `1.0`, not `x.cbrt()`) for bit parity; mandated in
+`docs/c-ref-fictitious.md` §4 + Porting Notes and in the swisseph-rs/122 task description.
