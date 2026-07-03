@@ -793,8 +793,8 @@ pub fn object_loc(
     epheflag: CalcFlags,
     helflag: HeliacalFlags,
 ) -> Result<f64, Error> {
-    let angle = if angle == 7 { 0 } else { angle };
-
+    // C checks Angle<5 for TOPOCTR BEFORE rewriting Angle==7→0,
+    // so angle=7 (geocentric altitude) does NOT get TOPOCTR.
     let mut iflag = CalcFlags::EQUATORIAL | (epheflag & calc::EPHMASK);
     if !helflag.contains(HeliacalFlags::HIGH_PRECISION) {
         iflag |= CalcFlags::NONUT | CalcFlags::TRUEPOS;
@@ -802,6 +802,7 @@ pub fn object_loc(
     if angle < 5 {
         iflag |= CalcFlags::TOPOCTR;
     }
+    let angle = if angle == 7 { 0 } else { angle };
 
     let tjd_tt = jd_ut + crate::deltat::calc_deltat(jd_ut, eph.config());
     let planet = object_to_body(object_name);
@@ -988,17 +989,17 @@ pub fn calc_rise_and_set(
         }
     } else {
         if above {
-            while tjdnoon <= tjd0 - 0.5 {
+            while tjdnoon < tjd0 - 0.5 {
                 tjdnoon += 1.0;
             }
             while tjdnoon > tjd0 + 0.5 {
                 tjdnoon -= 1.0;
             }
         } else {
-            while tjdnoon < tjd0 - 1.0 {
+            while tjdnoon < tjd0 {
                 tjdnoon += 1.0;
             }
-            while tjdnoon > tjd0 {
+            while tjdnoon > tjd0 + 1.0 {
                 tjdnoon -= 1.0;
             }
         }
@@ -1657,6 +1658,514 @@ pub fn heliacal_angle(
     Ok(heliacal_angle_core(
         mag, dobs, azi_obj, alt_moon, azi_moon, tjd_ut, azi_sun, dgeo, datm, helflag,
     ))
+}
+
+// ── Moon crescent geometry (swehel.c:1715-1745) ───────────────────
+
+const AVG_RADIUS_MOON: f64 = 15.541 / 60.0;
+
+fn width_moon(alt_o: f64, azi_o: f64, alt_s: f64, azi_s: f64, parallax: f64) -> f64 {
+    let geo_alt_o = alt_o + parallax;
+    0.27245
+        * parallax
+        * (1.0 + (geo_alt_o * DEGTORAD).sin() * (parallax * DEGTORAD).sin())
+        * (1.0 - ((alt_s - geo_alt_o) * DEGTORAD).cos() * ((azi_s - azi_o) * DEGTORAD).cos())
+}
+
+fn length_moon(w: f64, mut diamoon: f64) -> f64 {
+    if diamoon == 0.0 {
+        diamoon = AVG_RADIUS_MOON * 2.0;
+    }
+    let wi = w * 60.0;
+    let d = diamoon * 60.0;
+    (d - 0.3 * (d + wi) / 2.0 / wi) / 60.0
+}
+
+fn q_yallop(w: f64, geo_arcv_act: f64) -> f64 {
+    let wi = w * 60.0;
+    (geo_arcv_act - (11.8371 - 6.3226 * wi + 0.7319 * wi * wi - 0.1018 * wi * wi * wi)) / 10.0
+}
+
+fn yallop_grade(q: f64) -> i32 {
+    if q > 0.216 {
+        return 1;
+    }
+    if q < 0.216 && q > -0.014 {
+        return 2;
+    }
+    if q < -0.014 && q > -0.16 {
+        return 3;
+    }
+    if q < -0.16 && q > -0.232 {
+        return 4;
+    }
+    if q < -0.232 && q > -0.293 {
+        return 5;
+    }
+    if q < -0.293 {
+        return 6;
+    }
+    0
+}
+
+// ── Interpolation helpers (swehel.c:1753-1810) ────────────────────
+
+fn crossing(a: f64, b: f64, c: f64, d: f64) -> f64 {
+    (c - a) / ((b - a) - (d - c))
+}
+
+fn x2min(a: f64, b: f64, c: f64) -> f64 {
+    let term = a + c - 2.0 * b;
+    if term == 0.0 {
+        return 0.0;
+    }
+    -(a - c) / 2.0 / term
+}
+
+fn funct2(a: f64, b: f64, c: f64, x: f64) -> f64 {
+    (a + c - 2.0 * b) / 2.0 * x * x + (a - c) / 2.0 * x + b
+}
+
+// ── DeterTAV (swehel.c:1759-1783) ─────────────────────────────────
+
+fn deter_tav(
+    eph: &Ephemeris,
+    dobs: &[f64; 6],
+    jdn_days_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &[f64; 4],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<f64, Error> {
+    let sunra = sun_ra(jdn_days_ut);
+    let magn = magnitude(eph, jdn_days_ut, dgeo, object_name, epheflag, helflag)?;
+    let alt_o = object_loc(
+        eph,
+        jdn_days_ut,
+        dgeo,
+        datm,
+        object_name,
+        0,
+        epheflag,
+        helflag,
+    )?;
+    let azi_o = object_loc(
+        eph,
+        jdn_days_ut,
+        dgeo,
+        datm,
+        object_name,
+        1,
+        epheflag,
+        helflag,
+    )?;
+
+    let (alt_m, azi_m) = if object_name.starts_with("moon") {
+        (-90.0, 0.0)
+    } else {
+        let a = object_loc(eph, jdn_days_ut, dgeo, datm, "moon", 0, epheflag, helflag)?;
+        let z = object_loc(eph, jdn_days_ut, dgeo, datm, "moon", 1, epheflag, helflag)?;
+        (a, z)
+    };
+
+    let azi_s = object_loc(eph, jdn_days_ut, dgeo, datm, "sun", 1, epheflag, helflag)?;
+
+    let result = topo_arc_visionis(
+        magn,
+        dobs,
+        alt_o,
+        azi_o,
+        alt_m,
+        azi_m,
+        jdn_days_ut,
+        azi_s,
+        sunra,
+        dgeo[1],
+        dgeo[2],
+        datm,
+        helflag,
+    );
+    Ok(result)
+}
+
+// ── HeliacalPheno output struct ───────────────────────────────────
+
+const TJD_INVALID: f64 = 99999999.0;
+const MAX_TRY_HOURS: f64 = 4.0;
+const TIME_STEP_DEFAULT: f64 = 1.0;
+const LOCAL_MIN_STEP: f64 = 8.0;
+
+#[derive(Debug, Clone, Copy)]
+pub struct HeliacalPheno {
+    pub tc_altitude: f64,
+    pub tc_apparent_altitude: f64,
+    pub gc_altitude: f64,
+    pub azimuth_object: f64,
+    pub tc_sun_altitude: f64,
+    pub sun_azimuth: f64,
+    pub tav_act: f64,
+    pub arcv_act: f64,
+    pub daz_act: f64,
+    pub arcl_act: f64,
+    pub kact: f64,
+    pub min_tav: f64,
+    pub t_first_vr: f64,
+    pub t_best_vr: f64,
+    pub t_last_vr: f64,
+    pub t_best_yallop: f64,
+    pub w_moon: f64,
+    pub q_yallop: f64,
+    pub q_crit: f64,
+    pub par_o: f64,
+    pub magn_o: f64,
+    pub rise_o: f64,
+    pub rise_s: f64,
+    pub lag: f64,
+    pub t_vis_vr: f64,
+    pub l_moon: f64,
+    pub elongation: f64,
+    pub illumination: f64,
+}
+
+impl HeliacalPheno {
+    pub fn as_array(&self) -> [f64; 28] {
+        [
+            self.tc_altitude,
+            self.tc_apparent_altitude,
+            self.gc_altitude,
+            self.azimuth_object,
+            self.tc_sun_altitude,
+            self.sun_azimuth,
+            self.tav_act,
+            self.arcv_act,
+            self.daz_act,
+            self.arcl_act,
+            self.kact,
+            self.min_tav,
+            self.t_first_vr,
+            self.t_best_vr,
+            self.t_last_vr,
+            self.t_best_yallop,
+            self.w_moon,
+            self.q_yallop,
+            self.q_crit,
+            self.par_o,
+            self.magn_o,
+            self.rise_o,
+            self.rise_s,
+            self.lag,
+            self.t_vis_vr,
+            self.l_moon,
+            self.elongation,
+            self.illumination,
+        ]
+    }
+}
+
+// ── swe_heliacal_pheno_ut (swehel.c:1862-2074) ───────────────────
+
+pub fn heliacal_pheno_ut(
+    eph: &Ephemeris,
+    tjd_ut: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    object_name: &str,
+    event: HeliacalEventType,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<HeliacalPheno, Error> {
+    // Step 1: altitude bound check
+    if !(crate::constants::RISE_SET_GEOALT_MIN..=crate::constants::RISE_SET_GEOALT_MAX)
+        .contains(&dgeo[2])
+    {
+        return Err(Error::CError(format!(
+            "location for heliacal events must be between {} and {} m above sea",
+            crate::constants::RISE_SET_GEOALT_MIN,
+            crate::constants::RISE_SET_GEOALT_MAX,
+        )));
+    }
+
+    // Step 3: sun RA
+    let sunra = sun_ra(tjd_ut);
+
+    // Step 4: name normalization
+    let name = tolower_string_star(object_name);
+
+    // Step 5: default parameters
+    default_heliacal_parameters(datm, dgeo, dobs, helflag);
+
+    let iflag = epheflag & calc::EPHMASK;
+
+    // Step 7: Sun and object geometry
+    let azi_s = object_loc(eph, tjd_ut, dgeo, datm, "sun", 1, iflag, helflag)?;
+    let alt_s = object_loc(eph, tjd_ut, dgeo, datm, "sun", 0, iflag, helflag)?;
+    let azi_o = object_loc(eph, tjd_ut, dgeo, datm, &name, 1, iflag, helflag)?;
+    let alt_o = object_loc(eph, tjd_ut, dgeo, datm, &name, 0, iflag, helflag)?;
+    let geo_alt_o = object_loc(eph, tjd_ut, dgeo, datm, &name, 7, iflag, helflag)?;
+
+    // Step 8: derived quantities
+    let app_alt_o = app_alt_from_topo_alt(alt_o, datm[1], datm[0], helflag);
+    let daz_act = azi_s - azi_o;
+    let tav_act = alt_o - alt_s;
+    let par_o = geo_alt_o - alt_o;
+    let magn_o = magnitude(eph, tjd_ut, dgeo, &name, iflag, helflag)?;
+    let arcv_act = tav_act + par_o;
+    let arcl_act = (arcv_act * DEGTORAD).cos() * (daz_act * DEGTORAD).cos();
+    let arcl_act = arcl_act.acos() / DEGTORAD;
+
+    // Step 9: elongation & illumination
+    let planet = object_to_body(&name);
+    let (elong, illum) = if let Some(body) = planet {
+        let pheno_iflag = iflag | CalcFlags::TOPOCTR | CalcFlags::EQUATORIAL;
+        let config = topo_config(eph, dgeo);
+        let (pheno, _) =
+            crate::phenomena::pheno_ut_with_config(eph, tjd_ut, body, pheno_iflag, &config)?;
+        (pheno.elongation, pheno.phase * 100.0)
+    } else {
+        (arcl_act, 100.0)
+    };
+
+    // Step 10: extinction coefficient
+    let kact = kt(alt_s, sunra, dgeo[1], dgeo[2], datm[1], datm[2], datm[3], 4);
+
+    // Step 12: Moon-only Yallop crescent block
+    let mut w_moon_val = 0.0_f64;
+    let mut q_yal = 0.0_f64;
+    let mut q_crit_val = 0.0_f64;
+    let mut l_moon_val = 0.0_f64;
+
+    let is_moon = planet == Some(Body::Moon);
+
+    if is_moon {
+        w_moon_val = width_moon(alt_o, azi_o, alt_s, azi_s, par_o);
+        l_moon_val = length_moon(w_moon_val, 0.0);
+        q_yal = q_yallop(w_moon_val, arcv_act);
+        q_crit_val = yallop_grade(q_yal) as f64;
+    }
+
+    // Step 13: rise/set of Sun and object
+    let type_event = event as i32;
+    let rs: RiseSetFlags = if type_event == 1 || type_event == 4 {
+        RiseSetFlags::RISE | RiseSetFlags::DISC_CENTER
+    } else {
+        RiseSetFlags::SET | RiseSetFlags::DISC_CENTER
+    };
+
+    let rise_set_s = rise_set(
+        eph,
+        tjd_ut - 4.0 / 24.0,
+        dgeo,
+        datm,
+        "sun",
+        rs,
+        iflag,
+        helflag,
+        0,
+    )?;
+
+    let mut tb_yallop = TJD_INVALID;
+    let lag;
+    let mut norise_o = false;
+    let mut rise_set_o = 0.0;
+
+    match rise_set(
+        eph,
+        tjd_ut - 4.0 / 24.0,
+        dgeo,
+        datm,
+        &name,
+        rs,
+        iflag,
+        helflag,
+        0,
+    ) {
+        Ok(t) => {
+            rise_set_o = t;
+            lag = rise_set_o - rise_set_s;
+            if is_moon {
+                tb_yallop = (rise_set_o * 4.0 + rise_set_s * 5.0) / 9.0;
+            }
+        }
+        Err(Error::CircumpolarBody) => {
+            lag = 0.0;
+            norise_o = true;
+        }
+        Err(e) => return Err(e),
+    }
+
+    // Step 14: early-exit guard for TypeEvent 3/4 and non-inner planets
+    let is_star = planet.is_none();
+    let is_mars_or_beyond = match planet {
+        Some(b) => b.to_raw_id() >= Body::Mars.to_raw_id(),
+        None => false,
+    };
+
+    let mut t_first_vr;
+    let mut t_best_vr;
+    let mut t_last_vr;
+    let t_vis_vr;
+    let mut min_tav;
+
+    if (type_event == 3 || type_event == 4) && (is_star || is_mars_or_beyond) {
+        t_first_vr = TJD_INVALID;
+        t_best_vr = TJD_INVALID;
+        t_last_vr = TJD_INVALID;
+        t_vis_vr = 0.0;
+        min_tav = 0.0;
+    } else {
+        // Step 15: visibility-window search loop
+        let mut min_tav_act = 199.0_f64;
+        let mut delta_alt = 0.0_f64;
+        #[allow(unused_assignments)]
+        let mut oldest_min_tav = 0.0_f64;
+        let mut ta = 0.0_f64;
+        let mut tc = 0.0_f64;
+        t_best_vr = 0.0;
+        min_tav = 0.0;
+
+        let mut time_step = -TIME_STEP_DEFAULT / 24.0 / 60.0;
+        let is_setting = type_event == 2 || type_event == 3;
+        if is_setting {
+            time_step = -time_step;
+        }
+        let mut time_pointer = rise_set_s - time_step;
+
+        #[allow(unused_assignments)]
+        let mut min_tav_oud = 0.0_f64;
+        #[allow(unused_assignments)]
+        let mut delta_alt_oud = 0.0_f64;
+
+        loop {
+            time_pointer += time_step;
+            oldest_min_tav = min_tav_oud;
+            min_tav_oud = min_tav_act;
+            delta_alt_oud = delta_alt;
+
+            let alt_s2 = object_loc(eph, time_pointer, dgeo, datm, "sun", 0, iflag, helflag)?;
+            let alt_o2 = object_loc(eph, time_pointer, dgeo, datm, &name, 0, iflag, helflag)?;
+            delta_alt = alt_o2 - alt_s2;
+            min_tav_act = deter_tav(eph, dobs, time_pointer, dgeo, datm, &name, iflag, helflag)?;
+
+            // Local-minimum detection
+            if min_tav_oud < min_tav_act && t_best_vr == 0.0 {
+                let mut time_check = time_pointer + sgn(time_step) * LOCAL_MIN_STEP / 24.0 / 60.0;
+                if !norise_o {
+                    if time_step > 0.0 {
+                        time_check = mymin(time_check, rise_set_o);
+                    } else {
+                        time_check = mymax(time_check, rise_set_o);
+                    }
+                }
+                let local_min_check =
+                    deter_tav(eph, dobs, time_check, dgeo, datm, &name, iflag, helflag)?;
+                if local_min_check > min_tav_act {
+                    let extrax = x2min(min_tav_act, min_tav_oud, oldest_min_tav);
+                    t_best_vr = time_pointer - (1.0 - extrax) * time_step;
+                    min_tav = funct2(min_tav_act, min_tav_oud, oldest_min_tav, extrax);
+                }
+            }
+
+            // Visibility-start crossing
+            if delta_alt > min_tav_act && tc == 0.0 && t_best_vr == 0.0 {
+                let crosspoint = crossing(delta_alt_oud, delta_alt, min_tav_oud, min_tav_act);
+                tc = time_pointer - time_step * (1.0 - crosspoint);
+            }
+
+            // Visibility-end crossing
+            if delta_alt < min_tav_act && ta == 0.0 && tc != 0.0 {
+                let crosspoint = crossing(delta_alt_oud, delta_alt, min_tav_oud, min_tav_act);
+                ta = time_pointer - time_step * (1.0 - crosspoint);
+            }
+
+            // Loop termination
+            let within_range = (time_pointer - rise_set_s).abs() <= MAX_TRY_HOURS / 24.0;
+            let found_end = ta != 0.0;
+            let early_exit_34 = t_best_vr != 0.0
+                && (type_event == 3 || type_event == 4)
+                && !name.starts_with("moon")
+                && !name.starts_with("venus")
+                && !name.starts_with("mercury");
+
+            if !within_range || found_end || early_exit_34 {
+                break;
+            }
+        }
+
+        // Step 16: post-loop assembly
+        if is_setting {
+            t_first_vr = tc;
+            t_last_vr = ta;
+        } else {
+            t_first_vr = ta;
+            t_last_vr = tc;
+        }
+
+        if t_first_vr == 0.0 && t_last_vr == 0.0 {
+            if !is_setting {
+                t_first_vr = t_best_vr - 0.000001;
+            } else {
+                t_last_vr = t_best_vr + 0.000001;
+            }
+        }
+
+        if !norise_o {
+            if !is_setting {
+                t_first_vr = mymax(t_first_vr, rise_set_o);
+            } else {
+                t_last_vr = mymin(t_last_vr, rise_set_o);
+            }
+        }
+
+        t_vis_vr = if t_last_vr != 0.0 && t_first_vr != 0.0 {
+            t_last_vr - t_first_vr
+        } else {
+            TJD_INVALID
+        };
+
+        if t_last_vr == 0.0 {
+            t_last_vr = TJD_INVALID;
+        }
+        if t_best_vr == 0.0 {
+            t_best_vr = TJD_INVALID;
+        }
+        if t_first_vr == 0.0 {
+            t_first_vr = TJD_INVALID;
+        }
+    }
+
+    // Step 18: output
+    Ok(HeliacalPheno {
+        tc_altitude: alt_o,
+        tc_apparent_altitude: app_alt_o,
+        gc_altitude: geo_alt_o,
+        azimuth_object: azi_o,
+        tc_sun_altitude: alt_s,
+        sun_azimuth: azi_s,
+        tav_act,
+        arcv_act,
+        daz_act,
+        arcl_act,
+        kact,
+        min_tav,
+        t_first_vr,
+        t_best_vr,
+        t_last_vr,
+        t_best_yallop: tb_yallop,
+        w_moon: w_moon_val,
+        q_yallop: q_yal,
+        q_crit: q_crit_val,
+        par_o,
+        magn_o,
+        rise_o: rise_set_o,
+        rise_s: rise_set_s,
+        lag,
+        t_vis_vr,
+        l_moon: l_moon_val,
+        elongation: elong,
+        illumination: illum,
+    })
 }
 
 // ── Tests ──────────────────────────────────────────────────────────

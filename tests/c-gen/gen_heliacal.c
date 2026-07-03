@@ -399,6 +399,100 @@ int main(void) {
                            dret[0], dret[1], dret[2]);
                 }
     }
+    printf("\n],\n");
+
+    /* ── pheno: swe_heliacal_pheno_ut ────────────────────────────────
+     * Moon × TypeEvent=3 (evening first) at young-crescent evenings,
+     * Venus × TypeEvent=1/2, Sirius × TypeEvent=1.
+     * Observer: Mecca for Moon, Cairo for planets/stars.
+     */
+    printf("\"pheno\": [\n");
+    first = 1;
+    {
+        double dgeo_mecca[3] = {39.83, 21.42, 300.0};
+        double dgeo_cairo[3] = {31.25, 30.1, 30.0};
+
+        struct pheno_case {
+            const char *obj;
+            int type_event;
+            double tjd;
+            double *geo;
+            int helflag;
+            const char *desc;
+        };
+
+        struct pheno_case cases[] = {
+            /* Moon evening first at young-crescent evenings, Mecca */
+            {"moon", 3, 2453469.229,  dgeo_mecca, SEFLG_SWIEPH, "moon_ef_mecca1"},
+            {"moon", 3, 2453498.240,  dgeo_mecca, SEFLG_SWIEPH, "moon_ef_mecca2"},
+            /* Moon with HIGH_PRECISION */
+            {"moon", 3, 2453469.229,  dgeo_mecca, SEFLG_SWIEPH | SE_HELFLAG_AVKIND_VR, "moon_ef_mecca1_hp"},
+            /* Venus morning first, Cairo */
+            {"venus", 1, 2453720.0,   dgeo_cairo, SEFLG_SWIEPH, "venus_mf_cairo1"},
+            {"venus", 2, 2453000.0,   dgeo_cairo, SEFLG_SWIEPH, "venus_el_cairo1"},
+            {"venus", 1, 2453720.0,   dgeo_cairo, SEFLG_SWIEPH | SE_HELFLAG_AVKIND_VR, "venus_mf_cairo1_hp"},
+            /* Sirius morning first, Cairo */
+            {"sirius", 1, 2453586.0,  dgeo_cairo, SEFLG_SWIEPH, "sirius_mf_cairo"},
+            {"sirius", 1, 2453586.0,  dgeo_cairo, SEFLG_SWIEPH | SE_HELFLAG_AVKIND_VR, "sirius_mf_cairo_hp"},
+            /* Mercury morning first, Cairo */
+            {"mercury", 1, 2453720.0, dgeo_cairo, SEFLG_SWIEPH, "mercury_mf_cairo"},
+            /* Venus evening last, Mecca */
+            {"venus", 2, 2453500.0,   dgeo_mecca, SEFLG_SWIEPH, "venus_el_mecca"},
+            /* Moon morning last, Cairo */
+            {"moon", 4, 2453469.0,    dgeo_cairo, SEFLG_SWIEPH, "moon_ml_cairo"},
+            /* Mars evening first (early-exit guard path) */
+            {"mars", 3, 2453500.0,    dgeo_cairo, SEFLG_SWIEPH, "mars_ef_cairo"},
+            /* Jupiter evening first (early-exit guard path) */
+            {"jupiter", 3, 2453500.0, dgeo_cairo, SEFLG_SWIEPH, "jupiter_ef_cairo"},
+            /* MOSEPH duplicates */
+            {"venus", 1, 2453720.0,   dgeo_cairo, SEFLG_MOSEPH, "venus_mf_cairo_moseph"},
+            {"moon", 3, 2453469.229,  dgeo_mecca, SEFLG_MOSEPH, "moon_ef_mecca_moseph"},
+        };
+        int ncases = sizeof(cases) / sizeof(cases[0]);
+
+        for (int i = 0; i < ncases; i++) {
+            double datm[4], dobs[6], darr[50];
+            char objname[256], serr[256];
+            memcpy(datm, datm_default, sizeof(datm));
+            memcpy(dobs, dobs_default, sizeof(dobs));
+            memset(darr, 0, sizeof(darr));
+            strncpy(objname, cases[i].obj, sizeof(objname)-1);
+            objname[sizeof(objname)-1] = '\0';
+            serr[0] = '\0';
+
+            int retval = swe_heliacal_pheno_ut(
+                cases[i].tjd,
+                cases[i].geo,
+                datm, dobs,
+                objname,
+                cases[i].type_event,
+                cases[i].helflag,
+                darr, serr);
+
+            if (retval == ERR) {
+                fprintf(stderr, "pheno ERR: %s obj=%s jd=%.4f desc=%s\n",
+                        serr, cases[i].obj, cases[i].tjd, cases[i].desc);
+                continue;
+            }
+            if (!first) printf(",\n");
+            first = 0;
+            printf("  {\"tjd_ut\": %.20e, \"object\": \"%s\", "
+                   "\"type_event\": %d, "
+                   "\"geo\": [%.20e, %.20e, %.20e], "
+                   "\"helflag\": %d, \"desc\": \"%s\", "
+                   "\"retval\": %d, \"darr\": [",
+                   cases[i].tjd, cases[i].obj,
+                   cases[i].type_event,
+                   cases[i].geo[0], cases[i].geo[1], cases[i].geo[2],
+                   cases[i].helflag, cases[i].desc,
+                   retval);
+            for (int j = 0; j < 28; j++) {
+                if (j > 0) printf(", ");
+                printf("%.20e", darr[j]);
+            }
+            printf("]}");
+        }
+    }
     printf("\n]}\n");
 
     return 0;

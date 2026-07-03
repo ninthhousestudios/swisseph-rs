@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use swisseph::flags::{CalcFlags, HeliacalFlags, VisLimFlags};
+use swisseph::heliacal::HeliacalEventType;
 use swisseph::{Ephemeris, EphemerisConfig};
 
 #[derive(Deserialize)]
@@ -43,10 +44,24 @@ struct HelAngleCase {
 }
 
 #[derive(Deserialize)]
+struct PhenoCase {
+    tjd_ut: f64,
+    object: String,
+    type_event: i32,
+    geo: [f64; 3],
+    helflag: u32,
+    desc: String,
+    #[allow(dead_code)]
+    retval: i32,
+    darr: [f64; 28],
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     vis_limit: Vec<VisLimitCase>,
     arcvis: Vec<ArcVisCase>,
     helangle: Vec<HelAngleCase>,
+    pheno: Vec<PhenoCase>,
 }
 
 fn load() -> GoldenData {
@@ -311,6 +326,79 @@ fn golden_heliacal_angle() {
                 ),
                 *expected,
                 *actual,
+                eps,
+            );
+        }
+    }
+}
+
+#[test]
+fn golden_heliacal_pheno_ut() {
+    let data = load();
+    let eph_swi = make_eph();
+    let eph_mos = make_eph_moseph();
+
+    let slot_names = [
+        "AltO", "AppAltO", "GeoAltO", "AziO", "AltS", "AziS", "TAVact", "ARCVact", "DAZact",
+        "ARCLact", "kact", "MinTAV", "TfirstVR", "TbVR", "TlastVR", "TbYallop", "WMoon", "qYal",
+        "qCrit", "ParO", "MagnO", "RiseO", "RiseS", "Lag", "TvisVR", "LMoon", "elong", "illum",
+    ];
+
+    for (i, case) in data.pheno.iter().enumerate() {
+        let helflag = HeliacalFlags::from_bits_truncate(case.helflag);
+        let epheflag = CalcFlags::from_bits_truncate(case.helflag & 0x7);
+        let eph = if epheflag.contains(CalcFlags::SWIEPH) {
+            &eph_swi
+        } else {
+            &eph_mos
+        };
+
+        let event = HeliacalEventType::try_from(case.type_event).unwrap_or_else(|e| {
+            panic!(
+                "pheno case {i} ({}): bad type_event {}: {e}",
+                case.desc, case.type_event
+            )
+        });
+
+        let mut datm = [1013.25, 15.0, 40.0, 40.0];
+        let mut dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+
+        let result = eph
+            .heliacal_pheno_ut(
+                case.tjd_ut,
+                &case.geo,
+                &mut datm,
+                &mut dobs,
+                &case.object,
+                event,
+                epheflag,
+                helflag,
+            )
+            .unwrap_or_else(|e| {
+                panic!(
+                    "pheno case {i} ({}): obj={} jd={:.4}: {e}",
+                    case.desc, case.object, case.tjd_ut
+                )
+            });
+
+        let actual = result.as_array();
+        for (slot, (expected, got)) in case.darr.iter().zip(actual.iter()).enumerate() {
+            let eps =
+                if slot >= 12 && slot <= 15 || slot == 21 || slot == 22 || slot == 23 || slot == 24
+                {
+                    // Time/duration slots (from rise/set searches or crossing/parabola fits)
+                    1e-5
+                } else {
+                    // Instantaneous geometry slots
+                    1e-7
+                };
+            super::assert_f64_eps(
+                &format!(
+                    "pheno case {i} ({}) slot {slot} ({}): obj={} jd={:.4}",
+                    case.desc, slot_names[slot], case.object, case.tjd_ut
+                ),
+                *expected,
+                *got,
                 eps,
             );
         }

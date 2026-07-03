@@ -646,6 +646,33 @@ impl Ephemeris {
         )
     }
 
+    /// Heliacal phenomena at `tjd_ut` (UT). Port of `swe_heliacal_pheno_ut`
+    /// (swehel.c:1862-2074).
+    #[allow(clippy::too_many_arguments)]
+    pub fn heliacal_pheno_ut(
+        &self,
+        tjd_ut: f64,
+        dgeo: &[f64; 3],
+        datm: &mut [f64; 4],
+        dobs: &mut [f64; 6],
+        object_name: &str,
+        event: crate::heliacal::HeliacalEventType,
+        epheflag: crate::flags::CalcFlags,
+        helflag: crate::flags::HeliacalFlags,
+    ) -> Result<crate::heliacal::HeliacalPheno, Error> {
+        crate::heliacal::heliacal_pheno_ut(
+            self,
+            tjd_ut,
+            dgeo,
+            datm,
+            dobs,
+            object_name,
+            event,
+            epheflag,
+            helflag,
+        )
+    }
+
     /// Nodes & apsides of `body` at `tjd_et` (TT). Port of `swe_nod_aps`
     /// (swecl.c:5075-5654). `method` selects mean vs osculating elements
     /// ([`NodApsMethod`](crate::NodApsMethod)); the mean branch (Sun..Neptune,
