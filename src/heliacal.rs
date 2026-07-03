@@ -1,6 +1,9 @@
+#![allow(clippy::too_many_arguments)]
+
 use crate::constants::{AST_OFFSET, DEGTORAD};
+use crate::date::revjul;
 use crate::flags::HeliacalFlags;
-use crate::types::Body;
+use crate::types::{Body, CalendarType};
 
 // ── Heliacal event types ───────────────────────────────────────────
 
@@ -31,16 +34,13 @@ impl TryFrom<i32> for HeliacalEventType {
 }
 
 // ── Constants (live only — swehel.c:76–200) ────────────────────────
-// Staged for sub-task 2/8 (sky brightness model: Bn, Bm, Bday, Btwi, VisLimMagn)
+// Staged for sub-task 3/8 (VisLimMagn)
 #[allow(dead_code)]
 const BNIGHT: f64 = 1479.0; // [nL]
 #[allow(dead_code)]
 const BNIGHT_FACTOR: f64 = 1.0;
-#[allow(dead_code)]
 const NL2ERG: f64 = 1.02e-15;
-#[allow(dead_code)]
 const ERG2NL: f64 = 1.0 / NL2ERG;
-#[allow(dead_code)]
 const MOON_DISTANCE: f64 = 384410.4978; // [km]
 
 const SCALE_H_WATER: f64 = 3000.0; // [m]
@@ -511,6 +511,250 @@ pub fn optic_factor(
     } else {
         fb * ft * fp * fa * fm * fsc * fcb
     }
+}
+
+// ── Sky brightness model (swehel.c §6) ────────────────────────────
+
+#[allow(clippy::approx_constant)]
+const LN10: f64 = 2.302585092994;
+
+pub fn moons_brightness(dist: f64, phasemoon: f64) -> f64 {
+    -21.62
+        + 5.0 * (dist / (RA / 1000.0)).ln() / LN10
+        + 0.026 * phasemoon.abs()
+        + 0.000000004 * phasemoon.powi(4)
+}
+
+pub fn moon_phase(alt_m: f64, azi_m: f64, alt_s: f64, azi_s: f64) -> f64 {
+    let moon_avg_par = 0.95;
+    let alt_mi = (alt_m + moon_avg_par) * DEGTORAD;
+    let alt_si = alt_s * DEGTORAD;
+    let azi_mi = azi_m * DEGTORAD;
+    let azi_si = azi_s * DEGTORAD;
+    180.0
+        - ((azi_si - azi_mi - moon_avg_par * DEGTORAD).cos() * alt_mi.cos() * alt_si.cos()
+            + alt_si.sin() * alt_mi.sin())
+        .acos()
+            / DEGTORAD
+}
+
+#[allow(clippy::approx_constant)]
+pub fn bn(
+    alt_o: f64,
+    jdn_days_ut: f64,
+    alt_s: f64,
+    sunra: f64,
+    lat: f64,
+    height_eye: f64,
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> f64 {
+    let pres_e = pres_e_from_pres_s(datm[1], datm[0], height_eye);
+    let temp_e = temp_e_from_temp_s(datm[1], height_eye, LAPSE_SA);
+    let mut app_alt_o = app_alt_from_topo_alt(alt_o, temp_e, pres_e, helflag);
+    if app_alt_o < 10.0 {
+        app_alt_o = 10.0;
+    }
+    let zend = (90.0 - app_alt_o) * DEGTORAD;
+
+    let (iyar, imon, iday, _dut) = revjul(jdn_days_ut, CalendarType::Gregorian);
+    let year_b = iyar as f64;
+    let month_b = imon as f64;
+    let day_b = iday as f64;
+
+    let b0: f64 = 0.0000000000001;
+    let bna = b0
+        * (1.0
+            + 0.3
+                * (6.283 * (year_b + ((day_b - 1.0) / 30.4 + month_b - 1.0) / 12.0 - 1990.33)
+                    / 11.1)
+                    .cos());
+
+    let k_x = deltam(alt_o, alt_s, sunra, lat, height_eye, datm, helflag);
+    let bnb =
+        bna * (0.4 + 0.6 / (1.0 - 0.96 * zend.sin().powi(2)).sqrt()) * 10.0_f64.powf(-0.4 * k_x);
+
+    mymax(bnb, 0.0) * ERG2NL
+}
+
+pub fn bm(
+    alt_o: f64,
+    azi_o: f64,
+    alt_m: f64,
+    azi_m: f64,
+    alt_s: f64,
+    azi_s: f64,
+    sunra: f64,
+    lat: f64,
+    height_eye: f64,
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> f64 {
+    let m0 = -11.05;
+    let lunar_radius = 0.25 * DEGTORAD;
+    let object_is_moon = alt_o == alt_m && azi_o == azi_m;
+    let mut bm_val = 0.0;
+
+    if alt_m > -0.26 && !object_is_moon {
+        let mut rm = distance_angle(
+            alt_o * DEGTORAD,
+            azi_o * DEGTORAD,
+            alt_m * DEGTORAD,
+            azi_m * DEGTORAD,
+        ) / DEGTORAD;
+        if rm <= lunar_radius {
+            rm = lunar_radius;
+        }
+
+        let k_xm = deltam(alt_m, alt_s, sunra, lat, height_eye, datm, helflag);
+        let k_x = deltam(alt_o, alt_s, sunra, lat, height_eye, datm, helflag);
+        let c3 = 10.0_f64.powf(-0.4 * k_xm);
+        let fm = 62000000.0 / rm / rm
+            + 10.0_f64.powf(6.15 - rm / 40.0)
+            + 10.0_f64.powf(5.36) * (1.06 + (rm * DEGTORAD).cos().powi(2));
+        bm_val = fm * c3 + 440000.0 * (1.0 - c3);
+
+        let phasemoon = moon_phase(alt_m, azi_m, alt_s, azi_s);
+        let mm = moons_brightness(MOON_DISTANCE, phasemoon);
+        bm_val *= 10.0_f64.powf(-0.4 * (mm - m0 + 43.27));
+        bm_val *= 1.0 - 10.0_f64.powf(-0.4 * k_x);
+    }
+
+    mymax(bm_val, 0.0) * ERG2NL
+}
+
+pub fn btwi(
+    alt_o: f64,
+    azi_o: f64,
+    alt_s: f64,
+    azi_s: f64,
+    sunra: f64,
+    lat: f64,
+    height_eye: f64,
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> f64 {
+    let m0 = -11.05;
+    let ms = -26.74;
+
+    let pres_e = pres_e_from_pres_s(datm[1], datm[0], height_eye);
+    let temp_e = temp_e_from_temp_s(datm[1], height_eye, LAPSE_SA);
+    let app_alt_o = app_alt_from_topo_alt(alt_o, temp_e, pres_e, helflag);
+    let zend_o = 90.0 - app_alt_o;
+
+    let rs = distance_angle(
+        alt_o * DEGTORAD,
+        azi_o * DEGTORAD,
+        alt_s * DEGTORAD,
+        azi_s * DEGTORAD,
+    ) / DEGTORAD;
+
+    let k_x = deltam(alt_o, alt_s, sunra, lat, height_eye, datm, helflag);
+    let k = kt(alt_s, sunra, lat, height_eye, datm[1], datm[2], datm[3], 4);
+
+    let mut btwi_val = 10.0_f64.powf(-0.4 * (ms - m0 + 32.5 - alt_s - (zend_o / (360.0 * k))));
+    btwi_val = btwi_val * (100.0 / rs) * (1.0 - 10.0_f64.powf(-0.4 * k_x));
+
+    mymax(btwi_val, 0.0) * ERG2NL
+}
+
+pub fn bday(
+    alt_o: f64,
+    azi_o: f64,
+    alt_s: f64,
+    azi_s: f64,
+    sunra: f64,
+    lat: f64,
+    height_eye: f64,
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> f64 {
+    let m0 = -11.05;
+    let ms = -26.74;
+
+    let rs = distance_angle(
+        alt_o * DEGTORAD,
+        azi_o * DEGTORAD,
+        alt_s * DEGTORAD,
+        azi_s * DEGTORAD,
+    ) / DEGTORAD;
+
+    let k_xs = deltam(alt_s, alt_s, sunra, lat, height_eye, datm, helflag);
+    let k_x = deltam(alt_o, alt_s, sunra, lat, height_eye, datm, helflag);
+    let c4 = 10.0_f64.powf(-0.4 * k_xs);
+    let fs = 62000000.0 / rs / rs
+        + 10.0_f64.powf(6.15 - rs / 40.0)
+        + 10.0_f64.powf(5.36) * (1.06 + (rs * DEGTORAD).cos().powi(2));
+    let mut bday_val = fs * c4 + 440000.0 * (1.0 - c4);
+    bday_val *= 10.0_f64.powf(-0.4 * (ms - m0 + 43.27));
+    bday_val *= 1.0 - 10.0_f64.powf(-0.4 * k_x);
+
+    mymax(bday_val, 0.0) * ERG2NL
+}
+
+pub fn bcity(value: f64) -> f64 {
+    mymax(value, 0.0)
+}
+
+pub fn bsky(
+    alt_o: f64,
+    azi_o: f64,
+    alt_m: f64,
+    azi_m: f64,
+    jdn_days_ut: f64,
+    alt_s: f64,
+    azi_s: f64,
+    sunra: f64,
+    lat: f64,
+    height_eye: f64,
+    datm: &[f64; 4],
+    helflag: HeliacalFlags,
+) -> f64 {
+    let mut bsky_val = 0.0;
+
+    if alt_s < -3.0 {
+        bsky_val += btwi(
+            alt_o, azi_o, alt_s, azi_s, sunra, lat, height_eye, datm, helflag,
+        );
+    } else if alt_s > 4.0 {
+        bsky_val += bday(
+            alt_o, azi_o, alt_s, azi_s, sunra, lat, height_eye, datm, helflag,
+        );
+    } else {
+        bsky_val += mymin(
+            bday(
+                alt_o, azi_o, alt_s, azi_s, sunra, lat, height_eye, datm, helflag,
+            ),
+            btwi(
+                alt_o, azi_o, alt_s, azi_s, sunra, lat, height_eye, datm, helflag,
+            ),
+        );
+    }
+
+    if bsky_val < 200000000.0 {
+        bsky_val += bm(
+            alt_o, azi_o, alt_m, azi_m, alt_s, azi_s, sunra, lat, height_eye, datm, helflag,
+        );
+    }
+
+    if alt_s <= 0.0 {
+        bsky_val += bcity(0.0);
+    }
+
+    if bsky_val < 5000.0 {
+        bsky_val += bn(
+            alt_o,
+            jdn_days_ut,
+            alt_s,
+            sunra,
+            lat,
+            height_eye,
+            datm,
+            helflag,
+        );
+    }
+
+    bsky_val
 }
 
 // ── Tests ──────────────────────────────────────────────────────────

@@ -222,6 +222,93 @@ static void print_optic(void) {
     printf("]");
 }
 
+/* ── Brightness battery ──────────────────────────────────────────── */
+
+static void print_brightness(void) {
+    /* Rotated grid: ~50 cases covering the parameter space */
+    double alt_o_vals[] = {0, 5, 20, 60};
+    double azi_o = 180;
+    double alt_s_vals[] = {-30, -12, -5, -1, 2, 10, 30};
+    double azi_s_vals[] = {90, 270};
+    double alt_m_vals[] = {-10, 0, 30};
+    double azi_m = 120;
+    double sunra_vals[] = {50, 200};
+    double lat = 30.1;
+    double height_vals[] = {0, 1500};
+    double datm_configs[][4] = {
+        {1013.25, 15, 40, 40},
+        {900, 25, 70, 20}
+    };
+    double jdn_vals[] = {2451545.0, 2455197.5};
+
+    int n_alto = sizeof(alt_o_vals)/sizeof(alt_o_vals[0]);
+    int n_alts = sizeof(alt_s_vals)/sizeof(alt_s_vals[0]);
+    int n_azis = sizeof(azi_s_vals)/sizeof(azi_s_vals[0]);
+    int n_altm = sizeof(alt_m_vals)/sizeof(alt_m_vals[0]);
+    int n_sunra = sizeof(sunra_vals)/sizeof(sunra_vals[0]);
+    int n_height = sizeof(height_vals)/sizeof(height_vals[0]);
+    int n_datm = sizeof(datm_configs)/sizeof(datm_configs[0]);
+    int n_jdn = sizeof(jdn_vals)/sizeof(jdn_vals[0]);
+
+    char serr[AS_MAXCH];
+    int helflag = 0;
+
+    printf("\"brightness\":[");
+    first_item = 1;
+
+    int idx = 0;
+    for (int ia = 0; ia < n_alto; ia++) {
+        double AltO = alt_o_vals[ia];
+        for (int is = 0; is < n_alts; is++) {
+            double AltS = alt_s_vals[is];
+            /* Rotate through other dimensions */
+            int izs = idx % n_azis;
+            int im = idx % n_altm;
+            int ir = idx % n_sunra;
+            int ih = idx % n_height;
+            int id = idx % n_datm;
+            int ij = idx % n_jdn;
+
+            double AziS = azi_s_vals[izs];
+            double AltM = alt_m_vals[im];
+            double sunra = sunra_vals[ir];
+            double HeightEye = height_vals[ih];
+            double datm[4];
+            memcpy(datm, datm_configs[id], sizeof(datm));
+            double JDNDaysUT = jdn_vals[ij];
+
+            double bn_val = Bn(AltO, JDNDaysUT, AltS, sunra, lat, HeightEye, datm, helflag, serr);
+            double bm_val = Bm(AltO, azi_o, AltM, azi_m, AltS, AziS, sunra, lat, HeightEye, datm, helflag, serr);
+            double btwi_val = Btwi(AltO, azi_o, AltS, AziS, sunra, lat, HeightEye, datm, helflag, serr);
+            double bday_val = Bday(AltO, azi_o, AltS, AziS, sunra, lat, HeightEye, datm, helflag, serr);
+            double bcity_val = Bcity(0, datm[0]);
+            double bsky_val = Bsky(AltO, azi_o, AltM, azi_m, JDNDaysUT, AltS, AziS, sunra, lat, HeightEye, datm, helflag, serr);
+
+            comma();
+            printf("{\"AltO\":%.17g,\"AziO\":%.17g,"
+                   "\"AltM\":%.17g,\"AziM\":%.17g,"
+                   "\"AltS\":%.17g,\"AziS\":%.17g,"
+                   "\"sunra\":%.17g,\"Lat\":%.17g,"
+                   "\"HeightEye\":%.17g,"
+                   "\"datm\":[%.17g,%.17g,%.17g,%.17g],"
+                   "\"JDNDaysUT\":%.17g,"
+                   "\"Bn\":%.17g,\"Bm\":%.17g,\"Btwi\":%.17g,"
+                   "\"Bday\":%.17g,\"Bcity\":%.17g,\"Bsky\":%.17g}\n",
+                   AltO, azi_o,
+                   AltM, azi_m,
+                   AltS, AziS,
+                   sunra, lat,
+                   HeightEye,
+                   datm[0], datm[1], datm[2], datm[3],
+                   JDNDaysUT,
+                   bn_val, bm_val, btwi_val,
+                   bday_val, bcity_val, bsky_val);
+            idx++;
+        }
+    }
+    printf("]");
+}
+
 /* ── Main ────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -233,6 +320,8 @@ int main(void) {
     print_app_alt();
     printf(",");
     print_optic();
+    printf(",");
+    print_brightness();
     printf("}\n");
     return 0;
 }

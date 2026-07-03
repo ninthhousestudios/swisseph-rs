@@ -77,11 +77,48 @@ struct OpticCase {
 }
 
 #[derive(Deserialize)]
+struct BrightnessCase {
+    #[serde(rename = "AltO")]
+    alt_o: f64,
+    #[serde(rename = "AziO")]
+    azi_o: f64,
+    #[serde(rename = "AltM")]
+    alt_m: f64,
+    #[serde(rename = "AziM")]
+    azi_m: f64,
+    #[serde(rename = "AltS")]
+    alt_s: f64,
+    #[serde(rename = "AziS")]
+    azi_s: f64,
+    sunra: f64,
+    #[serde(rename = "Lat")]
+    lat: f64,
+    #[serde(rename = "HeightEye")]
+    height_eye: f64,
+    datm: [f64; 4],
+    #[serde(rename = "JDNDaysUT")]
+    jdn_days_ut: f64,
+    #[serde(rename = "Bn")]
+    bn: f64,
+    #[serde(rename = "Bm")]
+    bm: f64,
+    #[serde(rename = "Btwi")]
+    btwi: f64,
+    #[serde(rename = "Bday")]
+    bday: f64,
+    #[serde(rename = "Bcity")]
+    bcity: f64,
+    #[serde(rename = "Bsky")]
+    bsky: f64,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     extinction: Vec<ExtinctionCase>,
     airmass: Vec<AirmassCase>,
     app_alt: Vec<AppAltCase>,
     optic: Vec<OpticCase>,
+    brightness: Vec<BrightnessCase>,
 }
 
 fn load() -> GoldenData {
@@ -271,5 +308,108 @@ fn golden_optic() {
             actual_ofb,
             1e-12,
         );
+    }
+}
+
+fn assert_rel_or_abs(label: &str, expected: f64, actual: f64, eps: f64) {
+    if actual.to_bits() == expected.to_bits() {
+        return;
+    }
+    let diff = (actual - expected).abs();
+    if expected.abs() > 1.0 {
+        let rel = diff / expected.abs();
+        assert!(
+            rel < eps,
+            "{label}: expected {expected:.17e}, got {actual:.17e} (rel err {rel:.3e} > {eps:.1e})"
+        );
+    } else {
+        assert!(
+            diff < eps,
+            "{label}: expected {expected:.17e}, got {actual:.17e} (abs err {diff:.3e} > {eps:.1e})"
+        );
+    }
+}
+
+#[test]
+fn golden_brightness() {
+    let data = load();
+    let helflag = HeliacalFlags::empty();
+    for (i, c) in data.brightness.iter().enumerate() {
+        let label_base = format!(
+            "brightness[{i}][AltO={},AltS={},AltM={},sunra={}]",
+            c.alt_o, c.alt_s, c.alt_m, c.sunra
+        );
+
+        let actual_bn = heliacal::bn(
+            c.alt_o,
+            c.jdn_days_ut,
+            c.alt_s,
+            c.sunra,
+            c.lat,
+            c.height_eye,
+            &c.datm,
+            helflag,
+        );
+        assert_rel_or_abs(&format!("{label_base}/Bn"), c.bn, actual_bn, 1e-12);
+
+        let actual_bm = heliacal::bm(
+            c.alt_o,
+            c.azi_o,
+            c.alt_m,
+            c.azi_m,
+            c.alt_s,
+            c.azi_s,
+            c.sunra,
+            c.lat,
+            c.height_eye,
+            &c.datm,
+            helflag,
+        );
+        assert_rel_or_abs(&format!("{label_base}/Bm"), c.bm, actual_bm, 1e-12);
+
+        let actual_btwi = heliacal::btwi(
+            c.alt_o,
+            c.azi_o,
+            c.alt_s,
+            c.azi_s,
+            c.sunra,
+            c.lat,
+            c.height_eye,
+            &c.datm,
+            helflag,
+        );
+        assert_rel_or_abs(&format!("{label_base}/Btwi"), c.btwi, actual_btwi, 1e-12);
+
+        let actual_bday = heliacal::bday(
+            c.alt_o,
+            c.azi_o,
+            c.alt_s,
+            c.azi_s,
+            c.sunra,
+            c.lat,
+            c.height_eye,
+            &c.datm,
+            helflag,
+        );
+        assert_rel_or_abs(&format!("{label_base}/Bday"), c.bday, actual_bday, 1e-12);
+
+        let actual_bcity = heliacal::bcity(0.0);
+        assert_rel_or_abs(&format!("{label_base}/Bcity"), c.bcity, actual_bcity, 1e-12);
+
+        let actual_bsky = heliacal::bsky(
+            c.alt_o,
+            c.azi_o,
+            c.alt_m,
+            c.azi_m,
+            c.jdn_days_ut,
+            c.alt_s,
+            c.azi_s,
+            c.sunra,
+            c.lat,
+            c.height_eye,
+            &c.datm,
+            helflag,
+        );
+        assert_rel_or_abs(&format!("{label_base}/Bsky"), c.bsky, actual_bsky, 1e-12);
     }
 }
