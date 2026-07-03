@@ -198,4 +198,17 @@
 ,{"object":"sirius","jd_ut":2453371,"dgeo":[31.25,30.100000000000001,30],"datm":[1013.25,15,40,40],"helflag":2,"dret":[250.92921547556793,-59.396920626161759,-59.396920626161759,-0.88238726873063489,0.3711932522549542,-0.2891509596430214]}
 ,{"object":"moon","jd_ut":2451545,"dgeo":[31.25,30.100000000000001,30],"datm":[1013.25,15,40,40],"helflag":2,"dret":[80.175560358992129,-5.7073610950458926,-5.7073610950458926,0.054436183893418109,-0.83697540827387462,0.54452627836303991]}
 ,{"object":"moon","jd_ut":2453371,"dgeo":[31.25,30.100000000000001,30],"datm":[1013.25,15,40,40],"helflag":2,"dret":[147.64337100991378,-40.172422066218807,-40.172422066218807,0.7848353426782837,-0.0090132167475459948,-0.61963880350323675]}
+],"search":[{"test":"find_conjunct_sun","ipl":3,"TypeEvent":1,"tjd_start":2453000,"retval":0,"tjd_out":2453164.7966563706}
+,{"test":"find_conjunct_sun","ipl":3,"TypeEvent":1,"tjd_start":2451545,"retval":0,"tjd_out":2451998.5210585478}
+,{"test":"find_conjunct_sun","ipl":3,"TypeEvent":2,"tjd_start":2453000,"retval":0,"tjd_out":2453164.7966563706}
+,{"test":"find_conjunct_sun","ipl":3,"TypeEvent":2,"tjd_start":2451545,"retval":0,"tjd_out":2451998.5210585478}
+,{"test":"find_conjunct_sun","ipl":4,"TypeEvent":1,"tjd_start":2453000,"retval":0,"tjd_out":2453264.2023002636}
+,{"test":"find_conjunct_sun","ipl":4,"TypeEvent":1,"tjd_start":2451545,"retval":0,"tjd_out":2451727.1604735288}
+,{"test":"find_conjunct_sun","ipl":4,"TypeEvent":2,"tjd_start":2453000,"retval":0,"tjd_out":2453264.2023002636}
+,{"test":"find_conjunct_sun","ipl":4,"TypeEvent":2,"tjd_start":2451545,"retval":0,"tjd_out":2451727.1604735288}
+,{"test":"get_heliacal_day","object":"venus","TypeEvent":1,"tjd_seed":2453749.3912599757,"retval":0,"thel":2453755.6901533231}
+,{"test":"time_optimum_visibility","object":"venus","tjd":2453755.6901533231,"retval":0,"tret":2453755.6820514728}
+,{"test":"time_limit_invisible","object":"venus","tjd":2453755.6820514728,"direct":-1,"retval":0,"tret":2453755.6763223088}
+,{"test":"time_limit_invisible","object":"venus","tjd":2453755.6820514728,"direct":1,"retval":0,"tret":2453755.6904889704}
+,{"test":"get_heliacal_details","object":"venus","TypeEvent":1,"tjd":2453755.6901533231,"retval":0,"dret0":2453755.6763223088,"dret1":2453755.6820514728,"dret2":2453755.6904889704}
 ]}

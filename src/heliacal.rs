@@ -2175,6 +2175,762 @@ pub fn heliacal_pheno_ut(
     })
 }
 
+// --- event search infrastructure (c-ref-heliacal-search.md §1–§4) ---
+
+// §1: Synodic periods & conjunction table
+
+fn get_synodic_period(body: Body) -> f64 {
+    match body {
+        Body::Moon => 29.530588853,
+        Body::Mercury => 115.8775,
+        Body::Venus => 583.9214,
+        Body::Mars => 779.9361,
+        Body::Jupiter => 398.8840,
+        Body::Saturn => 378.0919,
+        Body::Uranus => 369.6560,
+        Body::Neptune => 367.4867,
+        Body::Pluto => 366.7207,
+        _ => 366.0,
+    }
+}
+
+const TCON: [f64; 18] = [
+    0.0, 0.0, // Sun (placeholder)
+    2451550.0, 2451550.0, // Moon
+    2451604.0, 2451670.0, // Mercury
+    2451980.0, 2452280.0, // Venus
+    2451727.0, 2452074.0, // Mars
+    2451673.0, 2451877.0, // Jupiter
+    2451675.0, 2451868.0, // Saturn
+    2451581.0, 2451768.0, // Uranus
+    2451568.0, 2451753.0, // Neptune
+];
+
+pub fn find_conjunct_sun(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ipl: Body,
+    epheflag: CalcFlags,
+    type_event: i32,
+) -> Result<f64, Error> {
+    let ipl_idx = ipl.to_raw_id() as usize;
+
+    // Pluto (index 9) has no TCON row — latent C out-of-bounds bug.
+    if ipl_idx > 8 {
+        return Err(Error::CError(format!(
+            "find_conjunct_sun: body {} not supported (no TCON entry beyond Neptune)",
+            ipl_idx,
+        )));
+    }
+
+    let daspect = if ipl_idx >= 4 && type_event >= 3 {
+        180.0
+    } else {
+        0.0
+    };
+
+    let i = (type_event - 1) / 2 + (ipl_idx as i32) * 2;
+    let tjd0 = TCON[i as usize];
+    let dsynperiod = get_synodic_period(ipl);
+
+    let mut tjdcon = tjd0 + (((tjd_start - tjd0) / dsynperiod).floor() + 1.0) * dsynperiod;
+
+    let efl = epheflag & calc::EPHMASK | CalcFlags::SPEED;
+    let mut ds = 100.0_f64;
+    let mut niter = 0;
+    while ds > 0.5 {
+        let x = eph.calc(tjdcon, ipl, efl)?;
+        let xs = eph.calc(tjdcon, Body::Sun, efl)?;
+        ds = normalize_degrees(x.data[0] - xs.data[0] - daspect);
+        if ds > 180.0 {
+            ds -= 360.0;
+        }
+        tjdcon -= ds / (x.data[3] - xs.data[3]);
+        niter += 1;
+        if niter > 10_000 {
+            return Err(Error::CError(
+                "find_conjunct_sun: convergence failure".into(),
+            ));
+        }
+    }
+    Ok(tjdcon)
+}
+
+// §2: Oblique-ascension machinery
+
+fn get_asc_obl(
+    eph: &Ephemeris,
+    tjd: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    epheflag: CalcFlags,
+    dgeo: &[f64; 3],
+    desc_obl: bool,
+) -> Result<f64, Error> {
+    let efl = (epheflag & calc::EPHMASK) | CalcFlags::EQUATORIAL;
+
+    let (ra, decl) = if let Some(star) = starname {
+        let (_, r) = eph.fixstar2(star, tjd, efl)?;
+        (r.data[0], r.data[1])
+    } else {
+        let r = eph.calc(tjd, ipl, efl)?;
+        (r.data[0], r.data[1])
+    };
+
+    let adp = (dgeo[1] * DEGTORAD).tan() * (decl * DEGTORAD).tan();
+    if adp.abs() > 1.0 {
+        return Err(Error::CircumpolarBody);
+    }
+    let adp_deg = adp.asin() / DEGTORAD;
+
+    let daop = if desc_obl { ra + adp_deg } else { ra - adp_deg };
+    Ok(normalize_degrees(daop))
+}
+
+fn get_asc_obl_diff(
+    eph: &Ephemeris,
+    tjd: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    epheflag: CalcFlags,
+    dgeo: &[f64; 3],
+    desc_obl: bool,
+    is_acronychal: bool,
+) -> Result<f64, Error> {
+    let aosun = get_asc_obl(eph, tjd, Body::Sun, None, epheflag, dgeo, desc_obl)?;
+
+    let body_desc = if is_acronychal { !desc_obl } else { desc_obl };
+    let aopl = get_asc_obl(eph, tjd, ipl, starname, epheflag, dgeo, body_desc)?;
+
+    let mut dsunpl = normalize_degrees(aosun - aopl);
+    if is_acronychal {
+        dsunpl = normalize_degrees(dsunpl - 180.0);
+    }
+    if dsunpl > 180.0 {
+        dsunpl -= 360.0;
+    }
+    Ok(dsunpl)
+}
+
+pub fn get_asc_obl_with_sun(
+    eph: &Ephemeris,
+    tjd_start: f64,
+    ipl: Body,
+    starname: Option<&str>,
+    epheflag: CalcFlags,
+    evtyp: i32,
+    dperiod: f64,
+    dgeo: &[f64; 3],
+) -> Result<f64, Error> {
+    let desc_obl = evtyp == 2 || evtyp == 3 || evtyp == 5;
+    let is_acronychal = evtyp == 5 || evtyp == 6;
+
+    let mut retro = evtyp == 1 || evtyp == 2;
+    if is_acronychal && ipl != Body::Moon {
+        retro = true;
+    }
+
+    let efl = epheflag & calc::EPHMASK;
+    let mut tjd = tjd_start;
+    let mut dsunpl = get_asc_obl_diff(eph, tjd, ipl, starname, efl, dgeo, desc_obl, is_acronychal)?;
+    let mut dsunpl_save = -999999999.0_f64;
+
+    // Coarse forward search with 10-day steps
+    let mut i = 0;
+    while dsunpl_save == -999999999.0
+        || (dsunpl.abs() + dsunpl_save.abs() > 180.0)
+        || (retro && !(dsunpl_save < 0.0 && dsunpl >= 0.0))
+        || (!retro && !(dsunpl_save >= 0.0 && dsunpl < 0.0))
+    {
+        dsunpl_save = dsunpl;
+        tjd += 10.0;
+        if dperiod > 0.0 && tjd - tjd_start > dperiod {
+            return Err(Error::CircumpolarBody);
+        }
+        dsunpl = get_asc_obl_diff(eph, tjd, ipl, starname, efl, dgeo, desc_obl, is_acronychal)?;
+        i += 1;
+        if i > 5000 {
+            return Err(Error::CError("loop in get_asc_obl_with_sun() (1)".into()));
+        }
+    }
+
+    // Bisection with 20-day initial bracket
+    let mut daystep = 20.0_f64;
+    let mut tjd_lo = tjd - daystep;
+    daystep /= 2.0;
+    tjd = tjd_lo + daystep;
+    let mut dsunpl_test =
+        get_asc_obl_diff(eph, tjd, ipl, starname, efl, dgeo, desc_obl, is_acronychal)?;
+
+    i = 0;
+    while dsunpl.abs() > 0.00001 {
+        if dsunpl_save * dsunpl_test >= 0.0 {
+            dsunpl_save = dsunpl_test;
+            tjd_lo = tjd;
+        } else {
+            dsunpl = dsunpl_test;
+        }
+        daystep /= 2.0;
+        tjd = tjd_lo + daystep;
+        dsunpl_test =
+            get_asc_obl_diff(eph, tjd, ipl, starname, efl, dgeo, desc_obl, is_acronychal)?;
+        i += 1;
+        if i > 5000 {
+            return Err(Error::CError("loop in get_asc_obl_with_sun() (2)".into()));
+        }
+    }
+
+    Ok(tjd)
+}
+
+// §3: Day-level search
+
+pub fn get_heliacal_day(
+    eph: &Ephemeris,
+    tjd: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+    type_event: i32,
+) -> Result<f64, Error> {
+    let (is_rise_or_set, direct_day, direct_time) = match type_event {
+        1 => (RiseSetFlags::RISE, 1.0_f64, -1.0_f64),
+        2 => (RiseSetFlags::SET, -1.0, 1.0),
+        3 => (RiseSetFlags::SET, 1.0, 1.0),
+        4 => (RiseSetFlags::RISE, -1.0, -1.0),
+        _ => {
+            return Err(Error::CError(format!(
+                "get_heliacal_day: invalid TypeEvent {}",
+                type_event,
+            )));
+        }
+    };
+
+    let ipl = object_to_body(object_name);
+    let ipl_id = ipl.map(|b| b.to_raw_id()).unwrap_or(-1);
+
+    let (ndays, tjd_adj, mut daystep, tfac): (i32, f64, f64, f64) = match ipl {
+        Some(Body::Moon) => (16, tjd, 1.0, 1.0),
+        Some(Body::Mercury) => (60, tjd, 5.0, 5.0),
+        Some(Body::Venus) => {
+            let ds = if type_event >= 3 { 15.0 } else { 5.0 };
+            let tf = if type_event >= 3 { 3.0 } else { 1.0 };
+            (300, tjd - 30.0 * direct_day, ds, tf)
+        }
+        Some(Body::Mars) => (400, tjd, 15.0, 5.0),
+        Some(Body::Saturn) => (300, tjd, 20.0, 5.0),
+        None => {
+            // Fixed star: get magnitude to adjust tfac
+            let mag = magnitude(eph, tjd, dgeo, object_name, epheflag, helflag)?;
+            let tf = if mag < 0.0 { 3.0 } else { 10.0 };
+            (300, tjd, 15.0, tf)
+        }
+        _ => (300, tjd, 15.0, 3.0), // Jupiter, Uranus, Neptune, Pluto, etc.
+    };
+
+    let tend = tjd_adj + (ndays as f64) * direct_day;
+    let mut retval_old: i32 = -2; // sentinel
+    let div = 1440.0_f64; // minutes per day
+
+    let mut tday = tjd_adj;
+    let mut iter_count = 0;
+    loop {
+        if (direct_day > 0.0 && tday >= tend) || (direct_day < 0.0 && tday <= tend) {
+            break;
+        }
+
+        if iter_count > 0 {
+            tday -= 0.3 * direct_day;
+        }
+
+        // Sun rise/set for this day
+        let sun_result = my_rise_trans(
+            eph,
+            tday,
+            Body::Sun,
+            Some(""),
+            is_rise_or_set,
+            epheflag,
+            helflag,
+            dgeo,
+            datm,
+        );
+        match sun_result {
+            Err(Error::CircumpolarBody) => {
+                retval_old = -2;
+                tday += daystep * direct_day;
+                iter_count += 1;
+                continue;
+            }
+            Err(e) => return Err(e),
+            Ok(_) => {}
+        }
+        let mut tret = sun_result.unwrap();
+
+        let vlm = vis_limit_mag(eph, tret, dgeo, datm, dobs, object_name, epheflag, helflag)?;
+
+        let retval: i32 = if vlm.below_horizon { -2 } else { 0 };
+
+        // Daystep-shrink-on-first-appearance
+        if retval_old == -2 && retval >= 0 && daystep > 1.0 {
+            retval_old = retval;
+            tday -= daystep * direct_day;
+            daystep = if ipl_id >= 4 || ipl_id == -1 {
+                5.0
+            } else {
+                1.0
+            };
+            tday += daystep * direct_day;
+            iter_count += 1;
+            continue;
+        }
+        retval_old = retval;
+
+        if retval == -2 {
+            tday += daystep * direct_day;
+            iter_count += 1;
+            continue;
+        }
+
+        // Minute-level refinement within the day
+        let mut visible_at_sunsetrise = true;
+        let mut vd = vlm.limiting_magnitude - vlm.magnitude_object;
+        let mut minute_iters = 0;
+        while !vlm.below_horizon && vd < 0.0 {
+            visible_at_sunsetrise = false;
+            let step = if vd < -1.0 {
+                5.0 / div * direct_time * tfac
+            } else if vd < -0.5 {
+                2.0 / div * direct_time * tfac
+            } else if vd < -0.1 {
+                1.0 / div * direct_time * tfac
+            } else {
+                1.0 / div * direct_time // no tfac for finest bracket
+            };
+            tret += step;
+            let vlm2 = vis_limit_mag(eph, tret, dgeo, datm, dobs, object_name, epheflag, helflag)?;
+            if vlm2.below_horizon {
+                break;
+            }
+            vd = vlm2.limiting_magnitude - vlm2.magnitude_object;
+            minute_iters += 1;
+            if minute_iters > 10_000 {
+                break;
+            }
+        }
+
+        // Sunset/sunrise-instant edge nudge
+        if visible_at_sunsetrise {
+            for _ in 0..10 {
+                let vlm2 = vis_limit_mag(
+                    eph,
+                    tret + 1.0 / div * direct_time,
+                    dgeo,
+                    datm,
+                    dobs,
+                    object_name,
+                    epheflag,
+                    helflag,
+                )?;
+                if !vlm2.below_horizon {
+                    let vd_new = vlm2.limiting_magnitude - vlm2.magnitude_object;
+                    if vd_new > vd {
+                        vd = vd_new;
+                        tret += 1.0 / div * direct_time;
+                    }
+                }
+            }
+        }
+
+        // Acceptance
+        if vd > 0.0 {
+            if (ipl_id >= 4 || ipl_id == -1) && daystep > 1.0 {
+                tday -= daystep * direct_day;
+                daystep = 1.0;
+                tday += daystep * direct_day;
+                iter_count += 1;
+                continue;
+            }
+            return Ok(tret);
+        }
+
+        tday += daystep * direct_day;
+        iter_count += 1;
+    }
+
+    Err(Error::CError("heliacal event does not happen".into()))
+}
+
+pub fn get_acronychal_day(
+    eph: &Ephemeris,
+    tjd: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+    type_event: i32,
+) -> Result<f64, Error> {
+    let helflag2 = helflag | HeliacalFlags::VISLIM_PHOTOPIC;
+
+    let (is_rise_or_set, direct) = if type_event == 3 || type_event == 5 {
+        (RiseSetFlags::RISE, -1.0_f64)
+    } else {
+        (RiseSetFlags::SET, 1.0_f64)
+    };
+
+    let ipl = object_to_body(object_name);
+    let body = ipl.unwrap_or(Body::Sun);
+    let star = if ipl.is_none() {
+        Some(object_name)
+    } else {
+        Some("")
+    };
+
+    let mut tjd_work = tjd;
+    let mut dtret = 999.0_f64;
+    let mut tret;
+    let mut niter = 0;
+    while dtret.abs() > 0.5 / 1440.0 {
+        tjd_work += 0.7 * direct;
+        if direct < 0.0 {
+            tjd_work -= 1.0;
+        }
+
+        tjd_work = my_rise_trans(
+            eph,
+            tjd_work,
+            body,
+            star,
+            is_rise_or_set,
+            epheflag,
+            helflag2,
+            dgeo,
+            datm,
+        )?;
+
+        // Walk until visible
+        let mut vlm = vis_limit_mag(
+            eph,
+            tjd_work,
+            dgeo,
+            datm,
+            dobs,
+            object_name,
+            epheflag,
+            helflag2,
+        )?;
+        let mut walk_iters = 0;
+        while !vlm.below_horizon && vlm.limiting_magnitude < vlm.magnitude_object {
+            tjd_work += 10.0 / 1440.0 * (-direct);
+            vlm = vis_limit_mag(
+                eph,
+                tjd_work,
+                dgeo,
+                datm,
+                dobs,
+                object_name,
+                epheflag,
+                helflag2,
+            )?;
+            walk_iters += 1;
+            if walk_iters > 10_000 {
+                break;
+            }
+        }
+
+        let mut tret_dark = tjd_work;
+        time_limit_invisible(
+            eph,
+            tjd_work,
+            dgeo,
+            datm,
+            dobs,
+            object_name,
+            epheflag,
+            helflag2 | HeliacalFlags::VISLIM_DARK,
+            direct,
+            &mut tret_dark,
+        )?;
+
+        tret = tjd_work;
+        time_limit_invisible(
+            eph,
+            tjd_work,
+            dgeo,
+            datm,
+            dobs,
+            object_name,
+            epheflag,
+            helflag2 | HeliacalFlags::VISLIM_NOMOON,
+            direct,
+            &mut tret,
+        )?;
+
+        dtret = (tret - tret_dark).abs();
+        tjd_work = tret;
+        niter += 1;
+        if niter > 10_000 {
+            return Err(Error::CError(
+                "get_acronychal_day: convergence failure".into(),
+            ));
+        }
+    }
+
+    Ok(tjd_work)
+}
+
+// §4: Visibility timing
+
+pub fn time_optimum_visibility(
+    eph: &Ephemeris,
+    tjd: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+) -> Result<(f64, bool), Error> {
+    let vlm = vis_limit_mag(eph, tjd, dgeo, datm, dobs, object_name, epheflag, helflag)?;
+    let mut retval_sv = vlm.vision;
+    let mut phot_scot_sv = vlm.vision.contains(VisLimFlags::SCOTOPIC);
+
+    let mut t1 = tjd;
+    let mut t2 = tjd;
+    let mut vl1 = -1.0_f64;
+    let mut vl2 = -1.0_f64;
+
+    // Forward hill-climb
+    let mut d = 100.0 / 86400.0;
+    for _ in 0..3 {
+        t1 += d;
+        let mut t_has_changed = false;
+        loop {
+            let vlm2 = vis_limit_mag(
+                eph,
+                t1 - d,
+                dgeo,
+                datm,
+                dobs,
+                object_name,
+                epheflag,
+                helflag,
+            )?;
+            if vlm2.below_horizon {
+                break;
+            }
+            let margin = vlm2.limiting_magnitude - vlm2.magnitude_object;
+            if margin <= vl1 {
+                break;
+            }
+            t1 -= d;
+            vl1 = margin;
+            retval_sv = vlm2.vision;
+            phot_scot_sv = vlm2.vision.contains(VisLimFlags::SCOTOPIC);
+            t_has_changed = true;
+        }
+        if !t_has_changed {
+            t1 -= d;
+        }
+        d /= 10.0;
+    }
+
+    // Backward hill-climb
+    d = 100.0 / 86400.0;
+    for _ in 0..3 {
+        t2 -= d;
+        let mut t_has_changed = false;
+        loop {
+            let vlm2 = vis_limit_mag(
+                eph,
+                t2 + d,
+                dgeo,
+                datm,
+                dobs,
+                object_name,
+                epheflag,
+                helflag,
+            )?;
+            if vlm2.below_horizon {
+                break;
+            }
+            let margin = vlm2.limiting_magnitude - vlm2.magnitude_object;
+            if margin <= vl2 {
+                break;
+            }
+            t2 += d;
+            vl2 = margin;
+            retval_sv = vlm2.vision;
+            phot_scot_sv = vlm2.vision.contains(VisLimFlags::SCOTOPIC);
+            t_has_changed = true;
+        }
+        if !t_has_changed {
+            t2 += d;
+        }
+        d /= 10.0;
+    }
+
+    let result_tjd = if vl2 > vl1 { t2 } else { t1 };
+
+    // Scotopic/photopic transition check
+    let vlm_final = vis_limit_mag(
+        eph,
+        result_tjd,
+        dgeo,
+        datm,
+        dobs,
+        object_name,
+        epheflag,
+        helflag,
+    )?;
+    if !vlm_final.below_horizon {
+        let phot_scot_final = vlm_final.vision.contains(VisLimFlags::SCOTOPIC);
+        if phot_scot_final != phot_scot_sv {
+            return Ok((result_tjd, true)); // uncertain due to vision mode change
+        }
+        if retval_sv.contains(VisLimFlags::MIXED) {
+            return Ok((result_tjd, true));
+        }
+    }
+
+    Ok((result_tjd, false))
+}
+
+pub fn time_limit_invisible(
+    eph: &Ephemeris,
+    tjd: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+    direct: f64,
+    tret: &mut f64,
+) -> Result<bool, Error> {
+    let is_moon = object_name == "moon";
+    let d0 = if is_moon {
+        100.0 / 86400.0 * 10.0
+    } else {
+        100.0 / 86400.0
+    };
+    let ncnt = if is_moon { 4 } else { 3 };
+
+    let vlm = vis_limit_mag(eph, tjd, dgeo, datm, dobs, object_name, epheflag, helflag)?;
+    let mut retval_sv = vlm.vision;
+    let phot_scot_sv = vlm.vision.contains(VisLimFlags::SCOTOPIC);
+
+    let mut tjd_work = tjd;
+    let mut d = d0;
+    for _ in 0..ncnt {
+        loop {
+            let vlm2 = vis_limit_mag(
+                eph,
+                tjd_work + d * direct,
+                dgeo,
+                datm,
+                dobs,
+                object_name,
+                epheflag,
+                helflag,
+            )?;
+            if vlm2.below_horizon {
+                break;
+            }
+            if vlm2.limiting_magnitude <= vlm2.magnitude_object {
+                break;
+            }
+            tjd_work += d * direct;
+            retval_sv = vlm2.vision;
+        }
+        d /= 10.0;
+    }
+
+    *tret = tjd_work;
+
+    // Scotopic/photopic transition check
+    let phot_scot_final = retval_sv.contains(VisLimFlags::SCOTOPIC);
+    if phot_scot_final != phot_scot_sv {
+        return Ok(true); // uncertain
+    }
+    if retval_sv.contains(VisLimFlags::MIXED) {
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+pub fn get_heliacal_details(
+    eph: &Ephemeris,
+    tday: f64,
+    dgeo: &[f64; 3],
+    datm: &mut [f64; 4],
+    dobs: &mut [f64; 6],
+    object_name: &str,
+    epheflag: CalcFlags,
+    helflag: HeliacalFlags,
+    type_event: i32,
+) -> Result<[f64; 3], Error> {
+    let mut dret = [0.0_f64; 3];
+
+    // dret[1] = optimum
+    let (optimum, _optimum_uncertain) =
+        time_optimum_visibility(eph, tday, dgeo, datm, dobs, object_name, epheflag, helflag)?;
+    dret[1] = optimum;
+
+    // dret[0] = first boundary
+    let mut direct: f64 = if type_event == 1 || type_event == 4 {
+        -1.0
+    } else {
+        1.0
+    };
+    let mut _limit_1_uncertain = false;
+    let mut t0 = tday;
+    _limit_1_uncertain = time_limit_invisible(
+        eph,
+        tday,
+        dgeo,
+        datm,
+        dobs,
+        object_name,
+        epheflag,
+        helflag,
+        direct,
+        &mut t0,
+    )?;
+    dret[0] = t0;
+
+    // dret[2] = second boundary (seeded from optimum)
+    direct *= -1.0;
+    let mut t2 = dret[1];
+    let mut _limit_2_uncertain = false;
+    _limit_2_uncertain = time_limit_invisible(
+        eph,
+        dret[1],
+        dgeo,
+        datm,
+        dobs,
+        object_name,
+        epheflag,
+        helflag,
+        direct,
+        &mut t2,
+    )?;
+    dret[2] = t2;
+
+    // Reorder for evening events
+    if type_event == 2 || type_event == 3 {
+        dret.swap(0, 2);
+    }
+
+    Ok(dret)
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]

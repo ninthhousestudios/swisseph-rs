@@ -145,6 +145,38 @@ struct AzaltCartCase {
 }
 
 #[derive(Deserialize)]
+struct SearchCase {
+    test: String,
+    #[serde(default)]
+    ipl: Option<i32>,
+    #[serde(default, rename = "TypeEvent")]
+    type_event: Option<i32>,
+    #[serde(default)]
+    tjd_start: Option<f64>,
+    #[serde(default)]
+    tjd_seed: Option<f64>,
+    #[serde(default)]
+    tjd: Option<f64>,
+    #[serde(default)]
+    object: Option<String>,
+    #[serde(default)]
+    direct: Option<i32>,
+    retval: i32,
+    #[serde(default)]
+    tjd_out: Option<f64>,
+    #[serde(default)]
+    thel: Option<f64>,
+    #[serde(default)]
+    tret: Option<f64>,
+    #[serde(default)]
+    dret0: Option<f64>,
+    #[serde(default)]
+    dret1: Option<f64>,
+    #[serde(default)]
+    dret2: Option<f64>,
+}
+
+#[derive(Deserialize)]
 struct GoldenData {
     extinction: Vec<ExtinctionCase>,
     airmass: Vec<AirmassCase>,
@@ -154,6 +186,7 @@ struct GoldenData {
     objectloc: Vec<ObjectLocCase>,
     magnitude: Vec<MagnitudeCase>,
     azaltcart: Vec<AzaltCartCase>,
+    search: Vec<SearchCase>,
 }
 
 fn load() -> GoldenData {
@@ -526,6 +559,172 @@ fn golden_azaltcart() {
                 }
             }
             Err(e) => panic!("{label_base}: unexpected error: {e}"),
+        }
+    }
+}
+
+fn body_from_raw(id: i32) -> swisseph::Body {
+    match id {
+        0 => swisseph::Body::Sun,
+        1 => swisseph::Body::Moon,
+        2 => swisseph::Body::Mercury,
+        3 => swisseph::Body::Venus,
+        4 => swisseph::Body::Mars,
+        5 => swisseph::Body::Jupiter,
+        6 => swisseph::Body::Saturn,
+        7 => swisseph::Body::Uranus,
+        8 => swisseph::Body::Neptune,
+        9 => swisseph::Body::Pluto,
+        _ => panic!("unexpected raw body id: {id}"),
+    }
+}
+
+#[test]
+fn golden_search() {
+    let data = load();
+    let eph = make_eph();
+    let epheflag = CalcFlags::SWIEPH;
+
+    for (i, c) in data.search.iter().enumerate() {
+        match c.test.as_str() {
+            "find_conjunct_sun" => {
+                let ipl = body_from_raw(c.ipl.unwrap());
+                let te = c.type_event.unwrap();
+                let tjd_start = c.tjd_start.unwrap();
+                let expected = c.tjd_out.unwrap();
+
+                let actual = heliacal::find_conjunct_sun(&eph, tjd_start, ipl, epheflag, te);
+                match actual {
+                    Ok(tjd) => {
+                        super::assert_f64_eps(
+                            &format!(
+                                "search[{i}]/find_conjunct_sun(ipl={},te={te},start={tjd_start})",
+                                c.ipl.unwrap(),
+                            ),
+                            expected,
+                            tjd,
+                            2e-5,
+                        );
+                    }
+                    Err(e) => {
+                        panic!("search[{i}]/find_conjunct_sun: unexpected error: {e}")
+                    }
+                }
+            }
+            "get_heliacal_day" => {
+                let te = c.type_event.unwrap();
+                let tjd_seed = c.tjd_seed.unwrap();
+                let expected = c.thel.unwrap();
+                let obj = c.object.as_deref().unwrap();
+
+                let mut datm = [1013.25, 15.0, 40.0, 40.0];
+                let mut dobs = [0.0; 6];
+                let dgeo = [31.25, 30.1, 30.0];
+                let helflag = HeliacalFlags::from_bits_truncate(epheflag.bits());
+
+                let actual = heliacal::get_heliacal_day(
+                    &eph, tjd_seed, &dgeo, &mut datm, &mut dobs, obj, epheflag, helflag, te,
+                );
+                match actual {
+                    Ok(thel) => {
+                        super::assert_f64_eps(
+                            &format!("search[{i}]/get_heliacal_day({obj},te={te})"),
+                            expected,
+                            thel,
+                            2e-5,
+                        );
+                    }
+                    Err(e) => {
+                        panic!("search[{i}]/get_heliacal_day: unexpected error: {e}")
+                    }
+                }
+            }
+            "time_optimum_visibility" => {
+                let tjd = c.tjd.unwrap();
+                let expected = c.tret.unwrap();
+                let obj = c.object.as_deref().unwrap();
+
+                let mut datm = [1013.25, 15.0, 40.0, 40.0];
+                let mut dobs = [0.0; 6];
+                let dgeo = [31.25, 30.1, 30.0];
+                let helflag = HeliacalFlags::from_bits_truncate(epheflag.bits());
+
+                let actual = heliacal::time_optimum_visibility(
+                    &eph, tjd, &dgeo, &mut datm, &mut dobs, obj, epheflag, helflag,
+                );
+                match actual {
+                    Ok((tret, _uncertain)) => {
+                        super::assert_f64_eps(
+                            &format!("search[{i}]/time_optimum_visibility({obj})"),
+                            expected,
+                            tret,
+                            2e-5,
+                        );
+                    }
+                    Err(e) => {
+                        panic!("search[{i}]/time_optimum_visibility: unexpected error: {e}")
+                    }
+                }
+            }
+            "time_limit_invisible" => {
+                let tjd = c.tjd.unwrap();
+                let dir = c.direct.unwrap();
+                let expected = c.tret.unwrap();
+                let obj = c.object.as_deref().unwrap();
+
+                let mut datm = [1013.25, 15.0, 40.0, 40.0];
+                let mut dobs = [0.0; 6];
+                let dgeo = [31.25, 30.1, 30.0];
+                let helflag = HeliacalFlags::from_bits_truncate(epheflag.bits());
+
+                let mut tret = tjd;
+                let result = heliacal::time_limit_invisible(
+                    &eph, tjd, &dgeo, &mut datm, &mut dobs, obj, epheflag, helflag, dir as f64,
+                    &mut tret,
+                );
+                match result {
+                    Ok(_) => {
+                        super::assert_f64_eps(
+                            &format!("search[{i}]/time_limit_invisible({obj},dir={dir})"),
+                            expected,
+                            tret,
+                            2e-5,
+                        );
+                    }
+                    Err(e) => {
+                        panic!("search[{i}]/time_limit_invisible: unexpected error: {e}")
+                    }
+                }
+            }
+            "get_heliacal_details" => {
+                let tjd = c.tjd.unwrap();
+                let te = c.type_event.unwrap();
+                let obj = c.object.as_deref().unwrap();
+                let exp0 = c.dret0.unwrap();
+                let exp1 = c.dret1.unwrap();
+                let exp2 = c.dret2.unwrap();
+
+                let mut datm = [1013.25, 15.0, 40.0, 40.0];
+                let mut dobs = [0.0; 6];
+                let dgeo = [31.25, 30.1, 30.0];
+                let helflag = HeliacalFlags::from_bits_truncate(epheflag.bits());
+
+                let actual = heliacal::get_heliacal_details(
+                    &eph, tjd, &dgeo, &mut datm, &mut dobs, obj, epheflag, helflag, te,
+                );
+                match actual {
+                    Ok(dret) => {
+                        let label = format!("search[{i}]/get_heliacal_details({obj},te={te})");
+                        super::assert_f64_eps(&format!("{label}/dret0"), exp0, dret[0], 2e-5);
+                        super::assert_f64_eps(&format!("{label}/dret1"), exp1, dret[1], 2e-5);
+                        super::assert_f64_eps(&format!("{label}/dret2"), exp2, dret[2], 2e-5);
+                    }
+                    Err(e) => {
+                        panic!("search[{i}]/get_heliacal_details: unexpected error: {e}")
+                    }
+                }
+            }
+            other => panic!("search[{i}]: unknown test type: {other}"),
         }
     }
 }

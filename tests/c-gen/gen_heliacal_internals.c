@@ -439,6 +439,111 @@ static void print_azaltcart(void) {
     printf("]");
 }
 
+/* ── Search battery ─────────────────────────────────────────────── */
+
+static void print_search(void) {
+    char serr[AS_MAXCH];
+    char objname[AS_MAXCH];
+    int32 retval;
+    double tjd_out;
+
+    /* Cairo observer */
+    double dgeo[3] = {31.25, 30.1, 30.0};
+    double datm[4] = {1013.25, 15, 40, 40};
+    double dobs[6] = {0, 0, 0, 0, 0, 0};
+    int helflag = SEFLG_SWIEPH;
+
+    printf("\"search\":[");
+    first_item = 1;
+
+    /* ── find_conjunct_sun: Venus/Mars × TypeEvent {1,2} × tjd_start ── */
+    {
+        int ipls[] = {SE_VENUS, SE_MARS};
+        int type_events[] = {1, 2};
+        double tjd_starts[] = {2453000.0, 2451545.0};
+        int n_ipl = 2, n_te = 2, n_tjd = 2;
+        for (int ii = 0; ii < n_ipl; ii++) {
+            for (int it = 0; it < n_te; it++) {
+                for (int ij = 0; ij < n_tjd; ij++) {
+                    tjd_out = 0;
+                    retval = find_conjunct_sun(tjd_starts[ij], ipls[ii],
+                        helflag, type_events[it], &tjd_out, serr);
+                    comma();
+                    printf("{\"test\":\"find_conjunct_sun\","
+                           "\"ipl\":%d,\"TypeEvent\":%d,"
+                           "\"tjd_start\":%.17g,\"retval\":%d,"
+                           "\"tjd_out\":%.17g}\n",
+                           ipls[ii], type_events[it],
+                           tjd_starts[ij], retval, tjd_out);
+                }
+            }
+        }
+    }
+
+    /* ── get_heliacal_day: Venus morning first (seed from conjunction) ── */
+    double thel_venus_mf = 0;
+    {
+        /* Find Venus inferior conjunction near 2453391 (Jan 2005) */
+        double tjd_conj = 0;
+        find_conjunct_sun(2453350.0, SE_VENUS, helflag, 1, &tjd_conj, serr);
+        /* Day-search from conjunction */
+        strcpy(objname, "venus");
+        retval = get_heliacal_day(tjd_conj, dgeo, datm, dobs, objname,
+            helflag, 1, &thel_venus_mf, serr);
+        comma();
+        printf("{\"test\":\"get_heliacal_day\","
+               "\"object\":\"venus\",\"TypeEvent\":1,"
+               "\"tjd_seed\":%.17g,\"retval\":%d,"
+               "\"thel\":%.17g}\n",
+               tjd_conj, retval, thel_venus_mf);
+    }
+
+    /* ── time_optimum_visibility: seeded from get_heliacal_day output ── */
+    double topt_venus = 0;
+    {
+        strcpy(objname, "venus");
+        retval = time_optimum_visibility(thel_venus_mf, dgeo, datm, dobs,
+            objname, helflag, &topt_venus, serr);
+        comma();
+        printf("{\"test\":\"time_optimum_visibility\","
+               "\"object\":\"venus\",\"tjd\":%.17g,"
+               "\"retval\":%d,\"tret\":%.17g}\n",
+               thel_venus_mf, retval, topt_venus);
+    }
+
+    /* ── time_limit_invisible: both directions from optimum ── */
+    {
+        strcpy(objname, "venus");
+        for (int dir = -1; dir <= 1; dir += 2) {
+            double tlim = 0;
+            retval = time_limit_invisible(topt_venus, dgeo, datm, dobs,
+                objname, helflag, dir, &tlim, serr);
+            comma();
+            printf("{\"test\":\"time_limit_invisible\","
+                   "\"object\":\"venus\",\"tjd\":%.17g,"
+                   "\"direct\":%d,\"retval\":%d,"
+                   "\"tret\":%.17g}\n",
+                   topt_venus, dir, retval, tlim);
+        }
+    }
+
+    /* ── get_heliacal_details: Venus morning first, TypeEvent 1 ── */
+    {
+        double dret[10] = {0};
+        strcpy(objname, "venus");
+        retval = get_heliacal_details(thel_venus_mf, dgeo, datm, dobs,
+            objname, 1, helflag, dret, serr);
+        comma();
+        printf("{\"test\":\"get_heliacal_details\","
+               "\"object\":\"venus\",\"TypeEvent\":1,"
+               "\"tjd\":%.17g,\"retval\":%d,"
+               "\"dret0\":%.17g,\"dret1\":%.17g,\"dret2\":%.17g}\n",
+               thel_venus_mf, retval, dret[0], dret[1], dret[2]);
+    }
+
+    printf("]");
+}
+
 /* ── Main ────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -463,6 +568,8 @@ int main(void) {
     print_magnitude();
     printf(",");
     print_azaltcart();
+    printf(",");
+    print_search();
     printf("}\n");
     return 0;
 }
