@@ -58,7 +58,8 @@ fn golden_asteroid() {
         ephe_path: Some(ephe_path()),
         topographic: Some(topo),
         ..EphemerisConfig::default()
-    });
+    })
+    .expect("JPL ephemeris required for asteroid golden tests (de441.eph in ephe/)");
 
     let cases = load();
     assert!(
@@ -73,14 +74,7 @@ fn golden_asteroid() {
         let flags = CalcFlags::from_bits_truncate(c.flags);
         let is_jpl = flags.contains(CalcFlags::JPLEPH);
 
-        let eph: &Ephemeris = if is_jpl {
-            match &eph_jpl {
-                Ok(e) => e,
-                Err(_) => continue,
-            }
-        } else {
-            &eph_sweph
-        };
+        let eph: &Ephemeris = if is_jpl { &eph_jpl } else { &eph_sweph };
 
         let result = match eph.calc(c.jd, body, flags) {
             Ok(r) => r,

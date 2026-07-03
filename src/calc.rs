@@ -2151,13 +2151,24 @@ pub(crate) struct AsteroidProvider<'a, P: PositionProvider> {
     inner: &'a P,
     ast_file: &'a SwissEphFile,
     ast_id: i32,
+    body: Body,
+    source: EphemerisSource,
 }
 
 impl<'a, P: PositionProvider> PositionProvider for AsteroidProvider<'a, P> {
     fn positions(&self, _body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
         let pos = self.inner.positions(Body::Sun, jd, need_speed)?;
         let n = if need_speed { 6 } else { 3 };
-        let (mut ast, _) = evaluate_body(self.ast_file, self.ast_id, jd, need_speed)?;
+        let (mut ast, _) =
+            evaluate_body(self.ast_file, self.ast_id, jd, need_speed).map_err(|e| match e {
+                Error::BeyondEphemerisLimits { .. } | Error::InvalidBody(_) => {
+                    Error::EphemerisNotAvailable {
+                        body: self.body,
+                        source: self.source,
+                    }
+                }
+                other => other,
+            })?;
         // C's sweph() adds sun_bary unconditionally for ipl >= SEI_ANYBODY (slot-index
         // check, sweph.c:2332-2343) — the file's SEI_FLG_HELIO flag is NOT checked for
         // asteroids (seas files don't set it, even though their data is heliocentric).
@@ -2220,6 +2231,8 @@ pub(crate) fn calc_asteroid_sweph(
         inner: &inner,
         ast_file,
         ast_id,
+        body,
+        source: EphemerisSource::Swiss,
     };
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
@@ -2241,6 +2254,8 @@ pub(crate) fn calc_asteroid_jpl(
         inner: &inner,
         ast_file,
         ast_id,
+        body,
+        source: EphemerisSource::Jpl,
     };
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
@@ -2261,6 +2276,8 @@ pub(crate) fn calc_asteroid_moshier(
         inner: &inner,
         ast_file,
         ast_id,
+        body,
+        source: EphemerisSource::Moshier,
     };
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }

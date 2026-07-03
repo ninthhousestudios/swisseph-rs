@@ -83,7 +83,11 @@ impl Ephemeris {
         // Asteroid files load when ephe_path is set, regardless of ephemeris source
         // (C reads asteroids from .se1 even under MOSEPH/JPLEPH — c-ref-asteroid.md §1.4).
         let (main_asteroid_files, asteroid_files) = if let Some(dir) = config.ephe_path.as_ref() {
-            let main_ast = crate::sweph_file::open_ephemeris_files(dir, "seas").unwrap_or_default();
+            let main_ast = match crate::sweph_file::open_ephemeris_files(dir, "seas") {
+                Ok(files) => files,
+                Err(Error::FileNotFound(_)) => Vec::new(),
+                Err(e) => return Err(e),
+            };
 
             if !config.asteroid_numbers.is_empty() {
                 let mut nums = config.asteroid_numbers.clone();
