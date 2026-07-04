@@ -39,6 +39,7 @@ mod sidereal_time;
 mod source_consistency;
 mod sweph_eval;
 mod truenode;
+mod utilities;
 
 use std::path::PathBuf;
 

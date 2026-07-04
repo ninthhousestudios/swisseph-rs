@@ -2808,9 +2808,9 @@ impl Ephemeris {
         let t = tjd_ut + 0.5;
         let dt_day = t - t.floor();
         let sidt_deg = (sidt - dt_day * 24.0) * 15.0;
-        let result = self.calc_ut(tjd_ut, Body::Sun, CalcFlags::SPEED)?;
-        let sun_lon = result.data[0];
-        let mut dt = crate::math::normalize_degrees(sidt_deg - sun_lon - 180.0);
+        let result = self.calc_ut(tjd_ut, Body::Sun, CalcFlags::EQUATORIAL)?;
+        let sun_ra = result.data[0];
+        let mut dt = crate::math::normalize_degrees(sidt_deg - sun_ra - 180.0);
         if dt > 180.0 {
             dt -= 360.0;
         }
