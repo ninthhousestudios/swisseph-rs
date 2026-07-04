@@ -45,7 +45,10 @@ fn body_from_c_id(id: i32) -> Body {
 
 fn tolerance(k: usize, is_jpl: bool) -> f64 {
     if is_jpl {
-        if k >= 3 { 1e-5 } else { 2e-6 }
+        // Parent-planet position diverges more between JPL and SWIEPH for outer
+        // planets at far-past epochs (the moon offset is from a .se1 file either
+        // way — only the parent planet source differs).
+        if k >= 3 { 1e-3 } else { 2e-4 }
     } else if k >= 3 {
         1e-7
     } else {
