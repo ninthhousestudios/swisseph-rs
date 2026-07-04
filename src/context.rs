@@ -55,6 +55,10 @@ fn nodaps_osc_frame(pos: &SwephPositions, ipli: Body, want_bary: bool) -> [f64; 
     }
 }
 
+/// The main entry point for all Swiss Ephemeris calculations.
+///
+/// Holds read-only configuration and any opened ephemeris data files. All methods take
+/// `&self` — there is no mutable state or internal caching. Thread-safe by construction.
 pub struct Ephemeris {
     config: EphemerisConfig,
     /// The caller's original `tidal_acceleration` before `Ephemeris::new`
@@ -250,6 +254,7 @@ impl Ephemeris {
         })
     }
 
+    /// Returns a reference to the configuration this `Ephemeris` was created with.
     pub fn config(&self) -> &EphemerisConfig {
         &self.config
     }
@@ -310,6 +315,7 @@ impl Ephemeris {
         }
     }
 
+    /// Returns the effective leap-second table (built-in + any extras from config).
     pub fn leap_seconds(&self) -> &[i32] {
         &self.leap_seconds
     }
@@ -336,11 +342,15 @@ impl Ephemeris {
         None
     }
 
-    /// Compute planetary position.
+    /// Compute planetary position at `jd_tt` (Julian Day, TT time scale).
     ///
-    /// Unlike the C library, this implementation does not cache computed
-    /// positions. Moshier evaluations are sub-microsecond; callers needing
-    /// deduplication for repeated same-JD queries should cache externally.
+    /// Returns [`CalcResult`] with `data[0..3]` = position (lon/lat/dist or RA/dec/dist or
+    /// x/y/z depending on flags), `data[3..6]` = speed (degrees/day or AU/day) when `SPEED`
+    /// is set. `flags_used` indicates which flags were actually applied (may differ from
+    /// requested if the backend forced a fallback).
+    ///
+    /// Unlike the C library, this implementation does not cache computed positions.
+    #[doc(alias = "swe_calc")]
     pub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         self.calc_with_config(jd_tt, body, flags, &self.config)
     }
@@ -385,6 +395,10 @@ impl Ephemeris {
         })
     }
 
+    /// Compute planetary position at `jd_ut` (Julian Day, UT1 time scale).
+    ///
+    /// Converts UT → TT via Delta T, then delegates to [`calc`](Self::calc).
+    #[doc(alias = "swe_calc_ut")]
     pub fn calc_ut(&self, jd_ut: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {
         let config = self.effective_config(flags, &self.config);
         let dt = crate::deltat::calc_deltat(jd_ut, &config);
@@ -405,7 +419,9 @@ impl Ephemeris {
         self.calc_with_config(jd_ut + dt, body, flags, &config)
     }
 
-    /// Ayanamsa at `jd_tt` (TT), with nutation added unless `NONUT` is set.
+    /// Ayanamsa (precession-corrected sidereal offset) at `jd_tt` (TT), degrees.
+    /// Nutation is added unless `NONUT` is set in `flags`.
+    #[doc(alias = "swe_get_ayanamsa_ex")]
     pub fn get_ayanamsa_ex(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error> {
         let idx = crate::ayanamsa::sidereal_index(&self.config);
         if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
@@ -419,14 +435,16 @@ impl Ephemeris {
         crate::ayanamsa::get_ayanamsa_ex_nut(&self.config, jd_tt, flags, &self.config.astro_models)
     }
 
-    /// Ayanamsa at `jd_ut` (UT), with nutation added unless `NONUT` is set.
+    /// Ayanamsa at `jd_ut` (UT1), degrees. Nutation added unless `NONUT` is set.
+    #[doc(alias = "swe_get_ayanamsa_ex_ut")]
     pub fn get_ayanamsa_ut(&self, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error> {
         let config = self.effective_config(flags, &self.config);
         let dt = crate::deltat::calc_deltat(jd_ut, &config);
         self.get_ayanamsa_ex(jd_ut + dt, flags)
     }
 
-    /// Legacy ayanamsa accessor (no nutation) at `jd_tt` (TT).
+    /// Legacy ayanamsa accessor (no nutation) at `jd_tt` (TT), degrees.
+    #[doc(alias = "swe_get_ayanamsa")]
     pub fn get_ayanamsa(&self, jd_tt: f64) -> Result<f64, Error> {
         crate::ayanamsa::get_ayanamsa_ex(
             &self.config,
@@ -436,7 +454,11 @@ impl Ephemeris {
         )
     }
 
-    /// Tropical houses at `tjd_ut` (UT), no flags. Port of `swe_houses` (swehouse.c:120-160).
+    /// Tropical houses at `tjd_ut` (UT1), no flags.
+    ///
+    /// `geolat`/`geolon` in degrees (north/east positive). Returns cusps (degrees) and
+    /// special points (Asc, MC, ARMC, Vertex, etc.).
+    #[doc(alias = "swe_houses")]
     pub fn houses(
         &self,
         tjd_ut: f64,
@@ -447,9 +469,8 @@ impl Ephemeris {
         self.houses_ex2(tjd_ut, CalcFlags::empty(), geolat, geolon, hsys)
     }
 
-    /// Houses at `tjd_ut` (UT) with flags, no speeds requested by the caller (speeds are
-    /// always computed — `HouseResult` carries them unconditionally). Port of `swe_houses_ex`
-    /// (swehouse.c:200-236).
+    /// Houses at `tjd_ut` (UT1) with flags. Speeds are always included in the result.
+    #[doc(alias = "swe_houses_ex")]
     pub fn houses_ex(
         &self,
         tjd_ut: f64,
@@ -461,10 +482,12 @@ impl Ephemeris {
         self.houses_ex2(tjd_ut, flags, geolat, geolon, hsys)
     }
 
-    /// Houses at `tjd_ut` (UT) with flags and speeds. Port of `swe_houses_ex2`
-    /// (swehouse.c:238-270). Computes ARMC + true obliquity from `tjd_ut`, resolves the Sun's
-    /// declination for Sunshine house systems, and dispatches to the traditional-sidereal or
-    /// tropical driver. See docs/c-ref-houses.md §3, §6, §11.
+    /// Houses at `tjd_ut` (UT1) with flags and speeds.
+    ///
+    /// Computes ARMC + true obliquity, resolves the Sun's declination for Sunshine systems,
+    /// and dispatches to the sidereal or tropical driver. `geolat`/`geolon` in degrees
+    /// (north/east positive). Supports `SIDEREAL`, `NONUT`, `RADIANS` flags.
+    #[doc(alias = "swe_houses_ex2")]
     pub fn houses_ex2(
         &self,
         tjd_ut: f64,
@@ -595,14 +618,15 @@ impl Ephemeris {
         (armc, eps_true)
     }
 
-    /// Ecliptic/equatorial -> azimuth + true/apparent altitude at `tjd_ut` (UT). Port of
-    /// `swe_azalt` (swecl.c:2788-2825). `geopos` = [longitude, latitude, height above sea (m)].
-    /// `atpress` in hPa (`0` => standard-atmosphere estimate from `geopos[2]`), `attemp` in deg
-    /// C. `lapse_rate` in deg K/m -- C's default is `0.0065`; the stateless port has no
-    /// `swe_set_lapse_rate` equivalent, so callers pass it explicitly (see
-    /// docs/c-ref-refraction-azalt.md §9). `xin` = [lon/RA, lat/dec], degrees. Returns
-    /// `[azimuth (from south, positive clockwise via west), true altitude, apparent altitude]`,
+    /// Ecliptic/equatorial → azimuth + true/apparent altitude at `tjd_ut` (UT1).
+    ///
+    /// `geopos` = \[longitude (east+), latitude (north+), height (meters)\].
+    /// `atpress` in hPa (0 = auto from height), `attemp` in °C, `lapse_rate` in K/m (C default
+    /// 0.0065). `xin` = \[lon/RA, lat/dec\] in degrees.
+    ///
+    /// Returns \[azimuth (from south, clockwise via west), true altitude, apparent altitude\],
     /// degrees.
+    #[doc(alias = "swe_azalt")]
     #[allow(clippy::too_many_arguments)]
     pub fn azalt(
         &self,
@@ -620,11 +644,12 @@ impl Ephemeris {
         )
     }
 
-    /// Azimuth + true altitude -> ecliptic/equatorial coordinates at `tjd_ut` (UT). Port of
-    /// `swe_azalt_rev` (swecl.c:2839-2873). Inverse of [`Ephemeris::azalt`]'s geometric
-    /// transform only -- does NOT de-refract; `xin[1]` must already be a true altitude. `geopos`
-    /// = [longitude, latitude, height (unused)]. `xin` = [azimuth (from south, clockwise), true
-    /// altitude], degrees. Returns [lon/RA, lat/dec], degrees.
+    /// Azimuth + true altitude → ecliptic/equatorial coordinates at `tjd_ut` (UT1).
+    ///
+    /// Inverse of [`azalt`](Self::azalt)'s geometric transform (does NOT de-refract).
+    /// `geopos` = \[longitude, latitude, height (unused)\]. `xin` = \[azimuth (from south,
+    /// clockwise), true altitude\], degrees. Returns \[lon/RA, lat/dec\], degrees.
+    #[doc(alias = "swe_azalt_rev")]
     pub fn azalt_rev(
         &self,
         tjd_ut: f64,
@@ -636,12 +661,13 @@ impl Ephemeris {
         crate::azalt::azalt_rev(dir, armc, eps_true, geopos[1], xin)
     }
 
-    /// Rise/set/meridian-transit search (full algorithm). Port of `swe_rise_trans_true_hor`
-    /// (swecl.c:4387-4686); dispatches to `calc_mer_trans` when `rsmi` requests
-    /// `MTRANSIT`/`ITRANSIT`. `starname` selects a fixed star (ignoring `body`); `horhgt` is the
-    /// local horizon height above/below the sea-level horizon, degrees (`-100` = auto dip from
-    /// `geopos[2]`). See docs/c-ref-riseset.md. The fast-path optimization and the
-    /// `swe_rise_trans` dispatcher are a separate module (RSE 4).
+    /// Rise/set/meridian-transit search (full precision algorithm).
+    ///
+    /// `starname` selects a fixed star (ignoring `body`); `horhgt` is the local horizon
+    /// height in degrees (-100 = auto-dip from `geopos[2]`). `geopos` = \[longitude (east+),
+    /// latitude (north+), height (m)\]. `atpress` in hPa, `attemp` in °C.
+    /// Returns the UT of the next event, or [`Error::CircumpolarBody`].
+    #[doc(alias = "swe_rise_trans_true_hor")]
     #[allow(clippy::too_many_arguments)]
     pub fn rise_trans_true_hor(
         &self,
@@ -661,10 +687,11 @@ impl Ephemeris {
     }
 
     /// Rise/set/meridian-transit search, dispatching to the fast algorithm when eligible.
-    /// Port of `swe_rise_trans` (swecl.c:4355-4383, docs/c-ref-riseset.md §4). Fast-path
-    /// eligible iff: not a fixed star, requesting RISE/SET (not a transit), `FORCE_SLOW` not
-    /// set, no twilight bit, `body` in `Sun..=TrueNode`, and `|geopos[1]| <= 60` (`<= 65` for
-    /// the Sun). Otherwise delegates to [`Ephemeris::rise_trans_true_hor`] with `horhgt = 0.0`.
+    ///
+    /// Fast path: not a fixed star, RISE/SET only, no FORCE_SLOW/twilight, body in
+    /// Sun..TrueNode, |lat| <= 60 (65 for Sun). Otherwise falls back to
+    /// [`rise_trans_true_hor`](Self::rise_trans_true_hor) with `horhgt = 0.0`.
+    #[doc(alias = "swe_rise_trans")]
     #[allow(clippy::too_many_arguments)]
     pub fn rise_trans(
         &self,
@@ -707,10 +734,10 @@ impl Ephemeris {
         }
     }
 
-    /// Solar eclipse shadow geometry: geographic position of greatest eclipse + core/penumbra
-    /// shadow diameters, geocentric. Port of `swe_sol_eclipse_where`'s shadow-geometry pass
-    /// (`eclipse_where`, swecl.c:565-582, 640-886); local-circumstance attributes (`attr[]`) come
-    /// from [`Ephemeris::sol_eclipse_how`] instead.
+    /// Solar eclipse shadow geometry at `tjd_ut` (UT1): geographic position of greatest eclipse
+    /// + core/penumbra shadow diameters, geocentric. Local circumstances come from
+    /// [`sol_eclipse_how`](Self::sol_eclipse_how).
+    #[doc(alias = "swe_sol_eclipse_where")]
     pub fn sol_eclipse_where(
         &self,
         tjd_ut: f64,
@@ -719,9 +746,10 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_where(self, tjd_ut, ifl)
     }
 
-    /// Local circumstances of a solar eclipse at a specific observer: magnitude, obscuration,
-    /// contact geometry, azimuth/altitude. Port of `swe_sol_eclipse_how` (swecl.c:922-964).
-    /// `geopos` = [longitude, latitude, height above sea (m)], degrees/degrees/meters.
+    /// Local circumstances of a solar eclipse at a specific observer at `tjd_ut` (UT1):
+    /// magnitude, obscuration, contact geometry, azimuth/altitude.
+    /// `geopos` = \[longitude (east+), latitude (north+), height (m)\].
+    #[doc(alias = "swe_sol_eclipse_how")]
     pub fn sol_eclipse_how(
         &self,
         tjd_ut: f64,
@@ -731,10 +759,10 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_how(self, tjd_ut, ifl, geopos)
     }
 
-    /// Planetary phenomena (phase angle, illuminated fraction, elongation, apparent diameter,
-    /// apparent magnitude, Moon horizontal parallax) at `tjd_et` (ET). Port of `swe_pheno`
-    /// (swecl.c:3802-4123). Returns the [`Phenomena`](crate::phenomena::Phenomena) plus the flags
-    /// actually used.
+    /// Planetary phenomena at `tjd_et` (TT): phase angle (deg), illuminated fraction,
+    /// elongation (deg), apparent diameter (deg), apparent magnitude, horizontal parallax (deg
+    /// Moon only). Returns [`Phenomena`](crate::phenomena::Phenomena) + flags actually used.
+    #[doc(alias = "swe_pheno")]
     pub fn pheno(
         &self,
         tjd_et: f64,
@@ -744,7 +772,8 @@ impl Ephemeris {
         crate::phenomena::pheno(self, tjd_et, body, flags)
     }
 
-    /// UT-based [`pheno`](Self::pheno). Port of `swe_pheno_ut` (swecl.c:4125-4142).
+    /// UT-based [`pheno`](Self::pheno).
+    #[doc(alias = "swe_pheno_ut")]
     pub fn pheno_ut(
         &self,
         tjd_ut: f64,
@@ -754,8 +783,12 @@ impl Ephemeris {
         crate::phenomena::pheno_ut(self, tjd_ut, body, flags)
     }
 
-    /// Limiting visual magnitude at `tjd_ut` (UT). Port of `swe_vis_limit_mag`
-    /// (swehel.c:1464-1541).
+    /// Limiting visual magnitude of an object at `tjd_ut` (UT1).
+    ///
+    /// `dgeo` = \[longitude (east+), latitude (north+), altitude (m)\].
+    /// `datm` = \[atmospheric pressure hPa, temperature °C, humidity 0��1, extinction coeff\].
+    /// `dobs` = \[age, Snellen ratio, 0=naked-eye/1=binocular/2=telescope, aperture, magnification, 0\].
+    #[doc(alias = "swe_vis_limit_mag")]
     #[allow(clippy::too_many_arguments)]
     pub fn vis_limit_mag(
         &self,
@@ -779,9 +812,10 @@ impl Ephemeris {
         )
     }
 
-    /// Topocentric arcus visionis at `tjd_ut` (UT). Port of
-    /// `swe_topo_arcus_visionis` (swehel.c:1601-1610). All geometry is
-    /// caller-supplied; no ephemeris lookups beyond the crude `sun_ra`.
+    /// Topocentric arcus visionis at `tjd_ut` (UT1), degrees.
+    ///
+    /// All geometry is caller-supplied. Angles in degrees.
+    #[doc(alias = "swe_topo_arcus_visionis")]
     #[allow(clippy::too_many_arguments)]
     pub fn topo_arcus_visionis(
         &self,
@@ -802,8 +836,8 @@ impl Ephemeris {
         )
     }
 
-    /// Heliacal angle (optimal altitude / arcus visionis) at `tjd_ut` (UT).
-    /// Port of `swe_heliacal_angle` (swehel.c:1695-1705).
+    /// Heliacal angle (optimal altitude / arcus visionis) at `tjd_ut` (UT1).
+    #[doc(alias = "swe_heliacal_angle")]
     #[allow(clippy::too_many_arguments)]
     pub fn heliacal_angle(
         &self,
@@ -823,8 +857,8 @@ impl Ephemeris {
         )
     }
 
-    /// Heliacal phenomena at `tjd_ut` (UT). Port of `swe_heliacal_pheno_ut`
-    /// (swehel.c:1862-2074).
+    /// Heliacal phenomena (visibility window, geometry, Yallop criteria) at `tjd_ut` (UT1).
+    #[doc(alias = "swe_heliacal_pheno_ut")]
     #[allow(clippy::too_many_arguments)]
     pub fn heliacal_pheno_ut(
         &self,
@@ -850,9 +884,9 @@ impl Ephemeris {
         )
     }
 
-    /// Find the next heliacal event (rising, setting, evening first, morning last,
-    /// acronychal) for `object_name` after `tjd_start_ut`. Port of `swe_heliacal_ut`
-    /// (swehel.c:3385-3511).
+    /// Find the next heliacal event (morning first, evening last, evening first, morning last,
+    /// acronychal rising/setting) for `object_name` after `tjd_start_ut` (UT1).
+    #[doc(alias = "swe_heliacal_ut")]
     #[allow(clippy::too_many_arguments)]
     pub fn heliacal_ut(
         &self,
@@ -878,10 +912,11 @@ impl Ephemeris {
         )
     }
 
-    /// Nodes & apsides of `body` at `tjd_et` (TT). Port of `swe_nod_aps`
-    /// (swecl.c:5075-5654). `method` selects mean vs osculating elements
-    /// ([`NodApsMethod`](crate::NodApsMethod)); the mean branch (Sun..Neptune,
-    /// Earth, Moon) is implemented, osculating is not yet (PNOC 5).
+    /// Planetary nodes and apsides of `body` at `tjd_et` (TT).
+    ///
+    /// Returns ascending/descending nodes and perihelion/aphelion as ecliptic positions (degrees).
+    /// `method` selects mean or osculating elements.
+    #[doc(alias = "swe_nod_aps")]
     pub fn nod_aps(
         &self,
         tjd_et: f64,
@@ -898,8 +933,8 @@ impl Ephemeris {
         crate::nodaps::nod_aps(self, tjd_et, body, flags, method)
     }
 
-    /// UT-based [`nod_aps`](Self::nod_aps). Port of `swe_nod_aps_ut`
-    /// (swecl.c:5656-5665): converts UT→TT via deltaT, then delegates.
+    /// UT-based [`nod_aps`](Self::nod_aps): converts UT→TT via Delta T, then delegates.
+    #[doc(alias = "swe_nod_aps_ut")]
     pub fn nod_aps_ut(
         &self,
         tjd_ut: f64,
@@ -912,11 +947,11 @@ impl Ephemeris {
         self.nod_aps(tjde, body, flags, method)
     }
 
-    /// Osculating (Keplerian) orbital elements of `body` at `tjd_et` (TT). Port
-    /// of `swe_get_orbital_elements` (swecl.c:5783-5971). Rejects the Sun, the
-    /// lunar nodes, and the apsides. Note: `SEFLG_TOPOCTR` is bit-aliased onto
-    /// `SEFLG_ORBEL_AA` here ("sum masses inside the orbit"), NOT a topocentric
-    /// request — see [`crate::orbit`].
+    /// Osculating (Keplerian) orbital elements of `body` at `tjd_et` (TT).
+    ///
+    /// Rejects Sun, lunar nodes, and apsides. Note: `TOPOCTR` flag is bit-aliased as
+    /// `ORBEL_AA` here (sum masses inside the orbit), not a topocentric request.
+    #[doc(alias = "swe_get_orbital_elements")]
     pub fn get_orbital_elements(
         &self,
         tjd_et: f64,
@@ -926,9 +961,9 @@ impl Ephemeris {
         crate::orbit::get_orbital_elements(self, tjd_et, body, flags)
     }
 
-    /// Maximum, minimum, and current true distance of `body` (AU) at `tjd_et`
-    /// (TT), returned as `(dmax, dmin, dtrue)`. Port of
-    /// `swe_orbit_max_min_true_distance` (swecl.c:6170-6287).
+    /// Maximum, minimum, and current true distance of `body` at `tjd_et` (TT), in AU.
+    /// Returns `(dmax, dmin, dtrue)`.
+    #[doc(alias = "swe_orbit_max_min_true_distance")]
     pub fn orbit_max_min_true_distance(
         &self,
         tjd_et: f64,
@@ -942,27 +977,32 @@ impl Ephemeris {
     // Crossings (swe_solcross / mooncross / mooncross_node / helio_cross)
     // -----------------------------------------------------------------------
 
-    /// Next JD (ET) at which the Sun's ecliptic longitude equals `x2cross`.
+    /// Next JD (TT) at which the Sun's ecliptic longitude equals `x2cross` (degrees).
+    #[doc(alias = "swe_solcross")]
     pub fn solcross(&self, x2cross: f64, jd_et: f64, flags: CalcFlags) -> Result<f64, Error> {
         crate::crossings::solcross(self, x2cross, jd_et, flags)
     }
 
     /// UT-based [`solcross`](Self::solcross).
+    #[doc(alias = "swe_solcross_ut")]
     pub fn solcross_ut(&self, x2cross: f64, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error> {
         crate::crossings::solcross_ut(self, x2cross, jd_ut, flags)
     }
 
-    /// Next JD (ET) at which the Moon's ecliptic longitude equals `x2cross`.
+    /// Next JD (TT) at which the Moon's ecliptic longitude equals `x2cross` (degrees).
+    #[doc(alias = "swe_mooncross")]
     pub fn mooncross(&self, x2cross: f64, jd_et: f64, flags: CalcFlags) -> Result<f64, Error> {
         crate::crossings::mooncross(self, x2cross, jd_et, flags)
     }
 
     /// UT-based [`mooncross`](Self::mooncross).
+    #[doc(alias = "swe_mooncross_ut")]
     pub fn mooncross_ut(&self, x2cross: f64, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error> {
         crate::crossings::mooncross_ut(self, x2cross, jd_ut, flags)
     }
 
-    /// Next JD (ET) at which the Moon crosses its node (latitude = 0).
+    /// Next JD (TT) at which the Moon crosses its node (ecliptic latitude = 0).
+    #[doc(alias = "swe_mooncross_node")]
     pub fn mooncross_node(
         &self,
         jd_et: f64,
@@ -972,6 +1012,7 @@ impl Ephemeris {
     }
 
     /// UT-based [`mooncross_node`](Self::mooncross_node).
+    #[doc(alias = "swe_mooncross_node_ut")]
     pub fn mooncross_node_ut(
         &self,
         jd_ut: f64,
@@ -980,8 +1021,9 @@ impl Ephemeris {
         crate::crossings::mooncross_node_ut(self, jd_ut, flags)
     }
 
-    /// Next JD (ET) at which `body`'s heliocentric longitude equals `x2cross`.
+    /// Next JD (TT) at which `body`'s heliocentric longitude equals `x2cross` (degrees).
     /// `dir >= 0` searches forward, `dir < 0` searches backward.
+    #[doc(alias = "swe_helio_cross")]
     pub fn helio_cross(
         &self,
         body: Body,
@@ -994,6 +1036,7 @@ impl Ephemeris {
     }
 
     /// UT-based [`helio_cross`](Self::helio_cross).
+    #[doc(alias = "swe_helio_cross_ut")]
     pub fn helio_cross_ut(
         &self,
         body: Body,
@@ -1005,8 +1048,9 @@ impl Ephemeris {
         crate::crossings::helio_cross_ut(self, body, x2cross, jd_ut, flags, dir)
     }
 
-    /// Position of `body` as seen from `center` (planetocentric coordinates).
-    /// Ports `swe_calc_pctr` (sweph.c:8042–8283).
+    /// Position of `body` as seen from `center` (planetocentric coordinates) at `jd_tt` (TT).
+    /// Swiss/JPL only (Moshier returns `Err`).
+    #[doc(alias = "swe_calc_pctr")]
     pub fn calc_pctr(
         &self,
         jd_tt: f64,
@@ -1306,9 +1350,9 @@ impl Ephemeris {
         Ok(xx)
     }
 
-    /// Global eclipse search: next/previous solar eclipse anywhere on Earth from `tjd_start`
-    /// (UT), restricted to eclipse types in `ifltype` (empty = all types). Port of
-    /// `swe_sol_eclipse_when_glob` (swecl.c:1185-1515).
+    /// Global solar eclipse search: next/previous eclipse anywhere on Earth from `tjd_start`
+    /// (UT1). `ifltype` filters eclipse types (empty = all). `backward` searches past.
+    #[doc(alias = "swe_sol_eclipse_when_glob")]
     pub fn sol_eclipse_when_glob(
         &self,
         tjd_start: f64,
@@ -1319,10 +1363,9 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_when_glob(self, tjd_start, ifl, ifltype, backward)
     }
 
-    /// Local eclipse search: next/previous solar eclipse *visible from* `geopos` (topocentric),
-    /// with local contact times C1-C4 and full local circumstances. Port of
-    /// `swe_sol_eclipse_when_loc` (swecl.c:2019-2041, 2100-2410). `geopos` = [longitude,
-    /// latitude, height above sea (m)], degrees/degrees/meters.
+    /// Local solar eclipse search: next/previous eclipse visible from `geopos`, with contact
+    /// times and local circumstances. `geopos` = \[lon (east+), lat (north+), height (m)\].
+    #[doc(alias = "swe_sol_eclipse_when_loc")]
     pub fn sol_eclipse_when_loc(
         &self,
         tjd_start: f64,
@@ -1333,10 +1376,9 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_when_loc(self, tjd_start, ifl, geopos, backward)
     }
 
-    /// Local circumstances of a lunar eclipse at `geopos`: umbral/penumbral magnitude, Saros
-    /// series/member, and the Moon's azimuth/true/apparent altitude. Port of
-    /// `swe_lun_eclipse_how` (swecl.c:3190-3239). `geopos` = [longitude, latitude, height above
-    /// sea (m)], degrees/degrees/meters.
+    /// Local circumstances of a lunar eclipse at `tjd_ut` (UT1): magnitude, Saros, Moon
+    /// azimuth/altitude. `geopos` = \[lon (east+), lat (north+), height (m)\].
+    #[doc(alias = "swe_lun_eclipse_how")]
     pub fn lun_eclipse_how(
         &self,
         tjd_ut: f64,
@@ -1346,9 +1388,9 @@ impl Ephemeris {
         crate::eclipse::swe_lun_eclipse_how(self, tjd_ut, ifl, geopos)
     }
 
-    /// Global lunar-eclipse search: next/previous lunar eclipse from `tjd_start` (UT), restricted
-    /// to eclipse types in `ifltype` (empty = any of TOTAL/PARTIAL/PENUMBRAL). Purely geocentric,
-    /// no geographic position. Port of `swe_lun_eclipse_when` (swecl.c:3389-3616).
+    /// Global lunar eclipse search from `tjd_start` (UT1). Geocentric — no observer position.
+    /// `ifltype` filters types (empty = any).
+    #[doc(alias = "swe_lun_eclipse_when")]
     pub fn lun_eclipse_when(
         &self,
         tjd_start: f64,
@@ -1359,10 +1401,9 @@ impl Ephemeris {
         crate::eclipse::lun_eclipse_when(self, tjd_start, ifl, ifltype, backward)
     }
 
-    /// Local lunar-eclipse search: next/previous lunar eclipse visible from `geopos` (Moon above
-    /// the horizon during some phase), with contact times clipped to moonrise/moonset. Port of
-    /// `swe_lun_eclipse_when_loc` (swecl.c:3644-3739). `geopos` = [longitude, latitude, height
-    /// above sea (m)], degrees/degrees/meters.
+    /// Local lunar eclipse search: visible from `geopos` (Moon above horizon), contact times
+    /// clipped to moonrise/moonset. `geopos` = \[lon (east+), lat (north+), height (m)\].
+    #[doc(alias = "swe_lun_eclipse_when_loc")]
     pub fn lun_eclipse_when_loc(
         &self,
         tjd_start: f64,
@@ -1373,9 +1414,9 @@ impl Ephemeris {
         crate::eclipse::lun_eclipse_when_loc(self, tjd_start, ifl, geopos, backward)
     }
 
-    /// Geographic position of maximal occultation of `body`/`starname` by the Moon at `tjd_ut`
-    /// (UT). `starname` (if given, non-empty) takes precedence over `body`. Port of
-    /// `swe_lun_occult_where` (swecl.c:606-630).
+    /// Geographic position of maximal lunar occultation of `body`/`starname` at `tjd_ut` (UT1).
+    /// `starname` (if non-empty) takes precedence over `body`.
+    #[doc(alias = "swe_lun_occult_where")]
     pub fn lun_occult_where(
         &self,
         tjd_ut: f64,
@@ -1387,9 +1428,8 @@ impl Ephemeris {
     }
 
     /// Global occultation search: next/previous occultation of `body`/`starname` by the Moon
-    /// anywhere on Earth from `tjd_start` (UT), restricted to types in `ifltype` (empty = all
-    /// types valid for the occulted body). `starname` (if given, non-empty) takes precedence
-    /// over `body`. Port of `swe_lun_occult_when_glob` (swecl.c:1572-1984).
+    /// anywhere on Earth from `tjd_start` (UT1). `starname` (if non-empty) takes precedence.
+    #[doc(alias = "swe_lun_occult_when_glob")]
     pub fn lun_occult_when_glob(
         &self,
         tjd_start: f64,
@@ -1404,10 +1444,10 @@ impl Ephemeris {
         )
     }
 
-    /// Local occultation search: next/previous occultation of `body`/`starname` by the Moon
-    /// *visible from* `geopos` (topocentric), with local contact times and circumstances.
-    /// `starname` (if given, non-empty) takes precedence over `body`. Port of
-    /// `swe_lun_occult_when_loc` (swecl.c:2071-2098, 2412-2764).
+    /// Local occultation search: visible from `geopos`, with contact times and circumstances.
+    /// `starname` (if non-empty) takes precedence over `body`.
+    /// `geopos` = \[lon (east+), lat (north+), height (m)\].
+    #[doc(alias = "swe_lun_occult_when_loc")]
     #[allow(clippy::too_many_arguments)]
     pub fn lun_occult_when_loc(
         &self,
@@ -1421,16 +1461,11 @@ impl Ephemeris {
         crate::eclipse::lun_occult_when_loc(self, tjd_start, body, starname, ifl, geopos, backward)
     }
 
-    /// Gauquelin sector position of a body, geometric method (`imeth` 0 = with ecliptic
-    /// latitude, 1 = without). Port of `swe_gauquelin_sector`'s `imeth ∈ {0,1}` branch
-    /// (swecl.c:6338-6356) — reuses `swe_house_pos`'s `'G'` branch directly. `imeth ∈ {2,3,4,5}`
-    /// Gauquelin sector position via geometric house position (imeth 0/1).
-    /// See docs/c-ref-houses.md §10, docs/c-ref-gauquelin-riseset.md §9.
+    /// Gauquelin sector position (geometric method, `imeth` 0 or 1) at `t_ut` (UT1).
     ///
-    /// When `starname` is `Some(non_empty)`, uses `fixstar2` instead of `calc` to resolve
-    /// the body position (swecl.c:6356-6362). Unlike [`Ephemeris::houses_ex2`], the
-    /// deltaT/obliquity/nutation resolution here uses the caller's `flags` directly, not a
-    /// forced `TIDAL_DEFAULT` override.
+    /// `imeth` 0 = with ecliptic latitude, 1 = without. Returns sector 1.0–36.0.
+    /// `starname` (if non-empty) uses the fixed-star position instead of `body`.
+    #[doc(alias = "swe_gauquelin_sector")]
     #[allow(clippy::too_many_arguments)]
     pub fn gauquelin_sector_geometric(
         &self,
@@ -1480,9 +1515,10 @@ impl Ephemeris {
         )
     }
 
-    /// Full Gauquelin sector dispatcher. Routes imeth 0/1 to the geometric method
-    /// and imeth 2–5 to the rise/set method. Port of `swe_gauquelin_sector`
-    /// (swecl.c:6309-6439, docs/c-ref-gauquelin-riseset.md).
+    /// Full Gauquelin sector dispatcher at `t_ut` (UT1). Routes imeth 0/1 to geometric,
+    /// imeth 2–5 to rise/set-based method. `geopos` = \[lon, lat, height\].
+    /// `atpress` in hPa, `attemp` in °C.
+    #[doc(alias = "swe_gauquelin_sector")]
     #[allow(clippy::too_many_arguments)]
     pub fn gauquelin_sector(
         &self,
@@ -2424,8 +2460,9 @@ impl Ephemeris {
 
     /// Compute apparent position of a fixed star at `jd_tt` (TT).
     ///
-    /// Returns `(canonical_name, CalcResult)` where the name is
-    /// `"traditional,bayer"` matching `swe_fixstar2` output.
+    /// `star` is searched case-insensitively in the star catalog. Returns
+    /// `(canonical_name, CalcResult)` where the name is `"traditional,bayer"`.
+    #[doc(alias = "swe_fixstar2")]
     pub fn fixstar2(
         &self,
         star: &str,
@@ -2468,7 +2505,8 @@ impl Ephemeris {
         ))
     }
 
-    /// UT variant of `fixstar2`.
+    /// UT-based [`fixstar2`](Self::fixstar2).
+    #[doc(alias = "swe_fixstar2_ut")]
     pub fn fixstar2_ut(
         &self,
         star: &str,
@@ -2480,8 +2518,9 @@ impl Ephemeris {
         self.fixstar2(star, jd_ut + dt, flags)
     }
 
-    /// Magnitude lookup for a star by name. Searches catalog only — builtin
-    /// stars are not available via this function, matching C `swe_fixstar2_mag`.
+    /// Magnitude lookup for a star by name. Searches the catalog file only (built-in reference
+    /// stars are not available via this function). Returns `(canonical_name, magnitude)`.
+    #[doc(alias = "swe_fixstar2_mag")]
     pub fn fixstar2_mag(&self, star: &str) -> Result<(String, f64), Error> {
         let resolved = self.stars.search(star)?;
         let name = format!("{},{}", resolved.name, resolved.bayer);
@@ -3057,7 +3096,8 @@ impl Ephemeris {
     // -----------------------------------------------------------------------
 
     /// Equation of time: `E = LAT − LMT`, returned in **days**.
-    /// Port of `swe_time_equ` (sweph.c:7387–7413).
+    /// Equation of time at `tjd_ut` (UT1), returned in days (positive = Sun ahead of mean).
+    #[doc(alias = "swe_time_equ")]
     pub fn time_equ(&self, tjd_ut: f64) -> crate::Result<f64> {
         let deltat_config = {
             let mut c = self.config.clone();
@@ -3079,7 +3119,8 @@ impl Ephemeris {
     }
 
     /// Convert Local Mean Time to Local Apparent Time.
-    /// Port of `swe_lmt_to_lat` (sweph.c:7415–7423).
+    /// `geolon` in degrees (east-positive). Both input and output are Julian Day (UT-scale).
+    #[doc(alias = "swe_lmt_to_lat")]
     pub fn lmt_to_lat(&self, tjd_lmt: f64, geolon: f64) -> crate::Result<f64> {
         let tjd_lmt0 = tjd_lmt - geolon / 360.0;
         let e = self.time_equ(tjd_lmt0)?;
@@ -3087,7 +3128,8 @@ impl Ephemeris {
     }
 
     /// Convert Local Apparent Time to Local Mean Time.
-    /// Port of `swe_lat_to_lmt` (sweph.c:7425–7436).
+    /// `geolon` in degrees (east-positive). Both input and output are Julian Day (UT-scale).
+    #[doc(alias = "swe_lat_to_lmt")]
     pub fn lat_to_lmt(&self, tjd_lat: f64, geolon: f64) -> crate::Result<f64> {
         let tjd_lmt0 = tjd_lat - geolon / 360.0;
         let mut e = self.time_equ(tjd_lmt0)?;
@@ -3100,7 +3142,8 @@ impl Ephemeris {
     // Body name lookup (sweph.c:6946–7125)
     // -----------------------------------------------------------------------
 
-    /// Resolve a body ID to its display name. Port of `swe_get_planet_name`.
+    /// Resolve a body to its display name (e.g. "Sun", "Chiron", asteroid name from file).
+    #[doc(alias = "swe_get_planet_name")]
     pub fn get_planet_name(&self, body: Body) -> String {
         let body = crate::calc::normalize_asteroid_aliases(body);
         match body {
@@ -3220,9 +3263,19 @@ impl DeltaT for Ephemeris {
     }
 }
 
+/// Result of a planetary position calculation.
+///
+/// `data[0..3]` = position (ecliptic longitude/latitude/distance in degrees/degrees/AU by
+/// default; RA/dec/dist with `EQUATORIAL`; x/y/z AU with `XYZ`; radians with `RADIANS`).
+/// `data[3..6]` = speed (degrees/day or AU/day) when `SPEED` is set in the input flags.
+///
+/// `flags_used` reports the flags actually applied — compare with requested flags to detect
+/// fallbacks (e.g. `SWIEPH` requested but `MOSEPH` used because files were unavailable).
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CalcResult {
+    /// Position and speed array. Layout depends on flags (see struct-level docs).
     pub data: [f64; 6],
+    /// Flags that were actually applied (may differ from requested).
     pub flags_used: CalcFlags,
 }

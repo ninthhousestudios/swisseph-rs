@@ -6,6 +6,8 @@ use crate::constants;
 // Body ID newtypes — private inner fields enforce range invariants
 // ---------------------------------------------------------------------------
 
+/// Validated ID for a fictitious (hypothetical) planet, range 40–999.
+/// C equivalent: `SE_FICT_OFFSET` + index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FictitiousId(i32);
@@ -24,6 +26,8 @@ impl FictitiousId {
     }
 }
 
+/// Validated MPC number for a numbered asteroid (>= 0).
+/// C equivalent: `SE_AST_OFFSET` + mpc_number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AsteroidId(i32);
@@ -42,6 +46,8 @@ impl AsteroidId {
     }
 }
 
+/// Validated encoded ID for a planetary moon (0–999, where 9n99 = center-of-body).
+/// C equivalent: `SE_PLMOON_OFFSET` + encoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PlanetMoonId(i32);
@@ -64,6 +70,10 @@ impl PlanetMoonId {
 // Body
 // ---------------------------------------------------------------------------
 
+/// A celestial body or computational pseudo-body for ephemeris calculations.
+///
+/// Fixed variants (Sun through Vesta) correspond to C's `SE_SUN` through `SE_VESTA`.
+/// Parameterized variants handle fictitious planets, numbered asteroids, and planetary moons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Body {
@@ -185,6 +195,8 @@ impl TryFrom<i32> for Body {
 // FictitiousBody — named companion for Body::Fictitious (IDs 40-58)
 // ---------------------------------------------------------------------------
 
+/// Named fictitious (hypothetical) planets from the built-in Neely catalog (IDs 40–58).
+/// Converts to [`Body`] via `From<FictitiousBody>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum FictitiousBody {
@@ -248,6 +260,8 @@ impl TryFrom<i32> for FictitiousBody {
 // HouseSystem
 // ---------------------------------------------------------------------------
 
+/// Astrological house system. Each variant maps to the single-character code used by
+/// C's `swe_houses` family (accessible via [`HouseSystem::to_char`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HouseSystem {
@@ -379,11 +393,14 @@ impl TryFrom<u8> for HouseSystem {
 // CalendarType
 // ---------------------------------------------------------------------------
 
+/// Calendar system for Julian Day conversions. C: `SE_JUL_CAL` / `SE_GREG_CAL`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum CalendarType {
+    /// Julian calendar.
     Julian = 0,
+    /// Gregorian calendar.
     Gregorian = 1,
 }
 
@@ -403,6 +420,8 @@ impl TryFrom<i32> for CalendarType {
 // SiderealMode
 // ---------------------------------------------------------------------------
 
+/// Sidereal zodiac ayanamsa definition. Each variant defines a fixed reference point
+/// that anchors the sidereal zodiac to the sky. C: `SE_SIDM_*` constants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
@@ -574,11 +593,15 @@ impl TryFrom<i32> for SiderealMode {
 // EphemerisSource
 // ---------------------------------------------------------------------------
 
+/// Ephemeris backend selection. Determines which data source is used for planetary positions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EphemerisSource {
+    /// JPL Development Ephemeris (DE441 or similar). Highest accuracy, requires a `.eph` file.
     Jpl,
+    /// Swiss Ephemeris compressed format (`.se1` files). Near-JPL accuracy, smaller files.
     Swiss,
+    /// Moshier semi-analytical series. No files needed; ~1 arcsec accuracy for modern epochs.
     Moshier,
 }
 
@@ -586,6 +609,7 @@ pub enum EphemerisSource {
 // Astronomical model enums
 // ---------------------------------------------------------------------------
 
+/// Precession model selection. C: models 1–11 in `swe_set_astro_models` slots 1/2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
@@ -603,92 +627,140 @@ pub enum PrecessionModel {
     Newcomb = 11,
 }
 
+/// Nutation model selection. C: `swe_set_astro_models` slot 3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum NutationModel {
+    /// IAU 1980 (Wahr) nutation series, 106 terms.
     IAU1980 = 1,
+    /// IAU 1980 with Herring 1987 corrections.
     IAUCorr1987 = 2,
+    /// IAU 2000A full nutation model, 1365 terms.
     IAU2000A = 3,
+    /// IAU 2000B abridged nutation model, 77 terms. Default.
     IAU2000B = 4,
+    /// Woolard 1953 nutation model.
     Woolard = 5,
 }
 
+/// Delta T (TT − UT) model selection. C: `swe_set_astro_models` slot 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum DeltaTModel {
+    /// Stephenson & Morrison 1984.
     StephensonMorrison1984 = 1,
+    /// Stephenson 1997.
     Stephenson1997 = 2,
+    /// Stephenson & Morrison 2004.
     StephensonMorrison2004 = 3,
+    /// Espenak & Meeus 2006.
     EspenakMeeus2006 = 4,
+    /// Stephenson, Morrison & Hohenkerk 2016. Default.
     StephensonEtc2016 = 5,
 }
 
+/// Sidereal time (GMST) model selection. C: `swe_set_astro_models` slot 7.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum SiderealTimeModel {
+    /// IAU 1976 GMST.
     IAU1976 = 1,
+    /// IAU 2006 GMST (Capitaine).
     IAU2006 = 2,
+    /// IERS Conventions 2010.
     IersConv2010 = 3,
+    /// Long-term model (Vondrák). Default.
     Longterm = 4,
 }
 
+/// Frame bias model (GCRS �� J2000 rotation). C: `swe_set_astro_models` slot 4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum BiasModel {
+    /// No frame bias applied.
     None = 1,
+    /// IAU 2000 frame bias.
     IAU2000 = 2,
+    /// IAU 2006 frame bias. Default.
     IAU2006 = 3,
 }
 
+/// JPL Horizons agreement mode. C: `swe_set_astro_models` slot 5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum JplHorMode {
+    /// Long-term agreement with JPL Horizons (dpsi/deps corrections applied).
     LongAgreement = 1,
 }
 
+/// JPL Horizons approximate agreement mode variant. C: `swe_set_astro_models` slot 6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum JplHoraMode {
+    /// Version 1 approximation.
     V1 = 1,
+    /// Version 2 approximation.
     V2 = 2,
+    /// Version 3 approximation. Default.
     V3 = 3,
 }
 
+/// Collection of astronomical model overrides. Replaces C's `swe_set_astro_models`
+/// (8 comma-separated values in a string). See [`AstroModels::default`] for the recommended
+/// modern configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AstroModels {
+    /// Delta T (TT − UT) model.
     pub delta_t: DeltaTModel,
+    /// Long-term precession model (outside ±CTIES centuries of J2000).
     pub prec_longterm: PrecessionModel,
+    /// Short-term precession model (within ±CTIES centuries of J2000).
     pub prec_shortterm: PrecessionModel,
+    /// Nutation model.
     pub nutation: NutationModel,
+    /// Frame bias model (GCRS ↔ J2000).
     pub bias: BiasModel,
+    /// JPL Horizons dpsi/deps mode.
     pub jplhor_mode: JplHorMode,
+    /// JPL Horizons approximate agreement variant.
     pub jplhora_mode: JplHoraMode,
+    /// Sidereal time (GMST) model.
     pub sidereal_time: SiderealTimeModel,
 }
 
+/// Direction of frame-bias rotation (GCRS ↔ J2000).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FrameTransform {
+    /// Rotate from J2000 dynamical frame to GCRS (kinematically non-rotating).
     J2000ToGcrs,
+    /// Rotate from GCRS to J2000 dynamical frame.
     GcrsToJ2000,
 }
 
+/// Direction of precession rotation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrecessionDirection {
+    /// Precess from J2000 to the ecliptic/equator of date.
     J2000ToDate,
+    /// Precess from the ecliptic/equator of date back to J2000.
     DateToJ2000,
 }
 
+/// Mean or true obliquity of the ecliptic with precomputed trig values (radians).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Epsilon {
+    /// Obliquity in radians.
     pub eps: f64,
+    /// sin(eps).
     pub sin_eps: f64,
+    /// cos(eps).
     pub cos_eps: f64,
 }
 
@@ -702,9 +774,12 @@ impl Epsilon {
     }
 }
 
+/// Nutation angles (radians). `dpsi` = nutation in longitude, `deps` = nutation in obliquity.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Nutation {
+    /// Nutation in longitude (radians).
     pub dpsi: f64,
+    /// Nutation in obliquity (radians).
     pub deps: f64,
 }
 
@@ -712,9 +787,18 @@ pub struct Nutation {
 // Julian Day newtypes
 // ---------------------------------------------------------------------------
 
+/// Julian Day Number on the TT (Terrestrial Time) time scale.
+///
+/// TT is the uniform time scale used for ephemeris calculations. It differs from UT1 by
+/// Delta T (TT = UT1 + ΔT). The newtype prevents accidentally passing a UT value where TT
+/// is expected.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct JdTt(pub f64);
 
+/// Julian Day Number on the UT1 (Universal Time) time scale.
+///
+/// UT1 tracks the Earth's rotation and is the time scale of civil clocks (approximately).
+/// The newtype prevents accidentally passing a TT value where UT is expected.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct JdUt1(pub f64);
 
@@ -748,6 +832,7 @@ impl_jd_ops!(JdUt1);
 // UTC components
 // ---------------------------------------------------------------------------
 
+/// Broken-down UTC date/time for `swe_utc_to_jd` / `swe_jd_to_utc` conversions.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UtcComponents {
@@ -756,12 +841,16 @@ pub struct UtcComponents {
     pub day: i32,
     pub hour: i32,
     pub minute: i32,
+    /// Fractional seconds (allows leap-second representation up to 60.999...).
     pub second: f64,
 }
 
+/// Result of a UTC → Julian Day conversion, providing both time scales.
 #[derive(Debug, Clone, Copy)]
 pub struct UtcToJd {
+    /// Julian Day on the TT time scale.
     pub tt: JdTt,
+    /// Julian Day on the UT1 time scale.
     pub ut1: JdUt1,
 }
 
@@ -769,7 +858,9 @@ pub struct UtcToJd {
 // DeltaT trait
 // ---------------------------------------------------------------------------
 
+/// Trait for types that can supply a Delta T value (TT − UT1, in days) at a given UT instant.
 pub trait DeltaT {
+    /// Returns Delta T in days for the given Julian Day (UT1).
     fn delta_t(&self, jd_ut: JdUt1) -> f64;
 }
 
@@ -777,13 +868,20 @@ pub trait DeltaT {
 // DegreeParts — result of swe_split_deg
 // ---------------------------------------------------------------------------
 
+/// Decomposed degree value from [`split_degrees`](crate::math::split_degrees).
+/// Port of `swe_split_deg` output.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DegreeParts {
+    /// Whole degrees (or zodiacal sign index when `ZODIACAL` flag is set).
     pub degrees: i32,
+    /// Arc-minutes (0–59).
     pub minutes: i32,
+    /// Arc-seconds (0–59).
     pub seconds: i32,
+    /// Fractional arc-seconds remainder.
     pub second_fraction: f64,
+    /// Sign indicator: 0 = positive, 1 = negative (or zodiacal sign number).
     pub sign: i32,
 }
 
