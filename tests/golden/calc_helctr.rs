@@ -120,24 +120,9 @@ fn golden_calc_helctr() {
             }
         };
 
-        // JPL HELCTR Earth: C's JPL light-time loop only updates xearth (not
-        // xsun), while C's Swiss sweplan updates both. We use retarded sun_bary
-        // (matching Swiss exactly); JPL Earth diverges by ~5e-8 AU (~1.5e-6°
-        // in longitude) from C's original-epoch xsun — a C-internal backend
-        // inconsistency, not a Rust bug.
-        let is_jpl_earth = c.backend == "jpl" && c.body == 14 && !c.flag_name.starts_with("bary");
-
         for k in 0..6 {
             let diff = (c.output[k] - result.data[k]).abs();
-            let eps = if is_jpl_earth && k < 3 {
-                5e-6
-            } else if is_jpl_earth {
-                1e-5
-            } else if k >= 3 {
-                1e-7
-            } else {
-                1e-9
-            };
+            let eps = if k >= 3 { 1e-7 } else { 1e-9 };
             if diff > eps {
                 failures.push(format!(
                     "{label} [{k}]: expected {:.15e}, got {:.15e}, diff {diff:.3e} > eps {eps:.1e}",

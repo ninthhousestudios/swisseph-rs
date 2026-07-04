@@ -418,6 +418,7 @@ SUNBARY segment alongside EARTH). `swi_pleph` is a single-body call. The code
 wasn't designed for them to diverge — it's an implementation accident from the
 different call granularity.
 
-**Our Rust code:** Uses retarded sun_bary (matching the Swiss path bitwise). JPL
-Earth HELCTR golden cases carry a widened 5e-6° position / 1e-5°/day speed
-tolerance. Found during swisseph-rs/96.
+**Our Rust code:** Matches each backend's C behavior: Swiss uses retarded
+sun_bary (sweplan batch-fetches both), JPL uses original-epoch sun_bary
+(swi_pleph only re-fetches earth). Both backends match C at standard golden
+tolerance (1e-9° position, 1e-7°/day speed). Found during swisseph-rs/96.

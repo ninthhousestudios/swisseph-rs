@@ -1430,6 +1430,12 @@ pub(crate) trait PositionProvider {
     fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error>;
     /// Geocentric equatorial-J2000 Moon at `jd`.
     fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error>;
+    /// Whether `positions()` returns sun_bary freshly evaluated at the requested
+    /// epoch. Swiss (sweplan) batch-fetches sun_bary alongside earth; JPL
+    /// (swi_pleph) only fetches the target body. Affects Earth HELCTR light-time.
+    fn updates_sun_in_light_time(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) struct SwephProvider<'a> {
@@ -1735,12 +1741,12 @@ fn apparent_sun<P: PositionProvider>(
     // Light-time (sweph.c:3968-4030). The loop always uses niter=1 (0..=1 = 2
     // iterations). For HELCTR/BARYCTR Earth, re-evaluate Earth at retarded time;
     // for geocentric Sun, re-evaluate Sun at retarded time.
-    // C's Swiss path (sweplan) updates both xearth and xsun to retarded-time
-    // values; C's JPL path (swi_pleph) only updates xearth, leaving xsun at the
-    // original epoch — a C-internal backend inconsistency (~3e-8 AU). We use
-    // retarded sun_bary (matching Swiss exactly); JPL golden cases use a wider
-    // tolerance to accommodate the C inconsistency.
+    // For HELCTR Earth: C's Swiss path (sweplan) batch-fetches both xearth and
+    // xsun at retarded epoch; C's JPL path (swi_pleph) only re-fetches xearth,
+    // leaving xsun at the original epoch. We match per-backend via
+    // updates_sun_in_light_time.
     if !flags.contains(CalcFlags::TRUEPOS) {
+        let orig_sun_bary = pos.sun_bary;
         for _ in 0..=1 {
             let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
             let dt = dist * AUNIT / CLIGHT / 86400.0;
@@ -1751,8 +1757,13 @@ fn apparent_sun<P: PositionProvider>(
                         *x = pos_ret.earth_bary[i] + offset[i];
                     }
                 } else {
+                    let sun_bary = if p.updates_sun_in_light_time() {
+                        &pos_ret.sun_bary
+                    } else {
+                        &orig_sun_bary
+                    };
                     for (i, x) in xx.iter_mut().enumerate() {
-                        *x = pos_ret.earth_bary[i] + offset[i] - pos_ret.sun_bary[i];
+                        *x = pos_ret.earth_bary[i] + offset[i] - sun_bary[i];
                     }
                 }
             } else {
@@ -1958,6 +1969,10 @@ impl<'a> PositionProvider for JplProvider<'a> {
     fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
         use crate::jpl::{J_EARTH, J_MOON, jpl_pleph};
         jpl_pleph(self.file, jd, J_MOON, J_EARTH, need_speed)
+    }
+
+    fn updates_sun_in_light_time(&self) -> bool {
+        false
     }
 }
 
@@ -2263,6 +2278,10 @@ impl<'a, P: PositionProvider> PositionProvider for AsteroidProvider<'a, P> {
 
     fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
         self.inner.moon_geo(jd, need_speed)
+    }
+
+    fn updates_sun_in_light_time(&self) -> bool {
+        self.inner.updates_sun_in_light_time()
     }
 }
 

@@ -98,12 +98,11 @@ pub fn object_to_body(name: &str) -> Option<Body> {
     }
     // C uses atoi(s) which parses leading digits, ignoring trailing text
     let leading: String = lower.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if !leading.is_empty() {
-        if let Ok(n) = leading.parse::<i32>() {
-            if n > 0 {
-                return Body::try_from(n + AST_OFFSET).ok();
-            }
-        }
+    if !leading.is_empty()
+        && let Ok(n) = leading.parse::<i32>()
+        && n > 0
+    {
+        return Body::try_from(n + AST_OFFSET).ok();
     }
     None
 }
@@ -272,7 +271,7 @@ fn sgn(x: f64) -> f64 {
 
 pub fn kw(height_eye: f64, temp_s: f64, rh: f64) -> f64 {
     let mut wt = 0.031;
-    wt *= 0.94 * (rh / 100.0) * (temp_s / 15.0).exp() * (-1.0 * height_eye / SCALE_H_WATER).exp();
+    wt *= 0.94 * (rh / 100.0) * (temp_s / 15.0).exp() * (-height_eye / SCALE_H_WATER).exp();
     wt
 }
 
@@ -298,7 +297,7 @@ pub fn kr(alt_s: f64, height_eye: f64) -> f64 {
     }
     let changek = 1.0 - 0.166667 * val;
     let lambda = 0.55 + (changek - 1.0) * 0.04;
-    0.1066 * (-1.0 * height_eye / SCALE_H_RAYLEIGH).exp() * (lambda / 0.55_f64).powf(-4.0)
+    0.1066 * (-height_eye / SCALE_H_RAYLEIGH).exp() * (lambda / 0.55_f64).powf(-4.0)
 }
 
 pub fn ka(alt_s: f64, sunra: f64, lat: f64, height_eye: f64, temp_s: f64, rh: f64, vr: f64) -> f64 {
@@ -330,7 +329,7 @@ pub fn ka(alt_s: f64, sunra: f64, lat: f64, height_eye: f64, temp_s: f64, rh: f6
             rh_clamped = 99.99999999;
         }
         let base = 0.1
-            * (-1.0 * height_eye / SCALE_H_AEROSOL).exp()
+            * (-height_eye / SCALE_H_AEROSOL).exp()
             * (1.0 - 0.32 / (rh_clamped / 100.0).ln()).powf(1.33)
             * (1.0 + 0.33 * sl * (sunra * DEGTORAD).sin());
         kaact = base * (lambda / 0.55_f64).powf(-1.3);
