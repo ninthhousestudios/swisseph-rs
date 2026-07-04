@@ -3,7 +3,8 @@ name = "swisseph"
 version = "0.1.0"
 edition = "2024"
 description = "Pure-Rust port of the Swiss Ephemeris astronomical calculation library"
-license = "AGPL-3.0-only"
+license = "AGPL-3.0-or-later"
+readme = "README.md"
 keywords = ["astronomy", "ephemeris", "astrology", "swisseph"]
 categories = ["science"]
 
