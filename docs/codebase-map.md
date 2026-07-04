@@ -17,14 +17,20 @@ src/
 │                          backends with Jpl→Swiss→Moshier fallback, adjusts tidal_acceleration via
 │                          user_tidal_acceleration (pre-bake value captured in Ephemeris::new);
 │                          Cow::Borrowed for matched combos, Cow::Owned only for mismatches;
-│                          calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_with_config (swisseph-rs/79, mirrors calc_with_config — threads an explicit &EphemerisConfig into calc_fixstar/calc_fixstar_moshier/_sweph/_jpl so TOPOCTR gets a per-call topographic override instead of always reading self.config; fixstar2 delegates to it with &self.config), fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion, gauquelin_sector_geometric — swe_gauquelin_sector imeth 0/1 port: own ARMC/eps/nutation setup using the caller's flags directly (NOT houses_ex2's forced TIDAL_DEFAULT — swe_gauquelin_sector's C deltaT call genuinely carries the caller's ephemeris-source iflag), calc() or fixstar2() per starname, house_pos with hsys=Gauquelin (swisseph-rs/97: starname threaded through); gauquelin_sector — full swe_gauquelin_sector dispatcher (swisseph-rs/89, PNOC 8): imeth 0/1 → gauquelin_sector_geometric, imeth 2–5 → gauquelin_sector_risetrans (rise/set-based: finds bracketing rise+set via Ephemeris::rise_trans with DISC_CENTER/NO_REFRACTION per imeth, §7 bracket+re-search logic, linear interpolation into sectors 1–36; circumpolar bodies propagate Err)), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris
+│                          calc, calc_ut, calc_inner, calc_speed3, extract_for_body, fixstar2, fixstar2_with_config (swisseph-rs/79, mirrors calc_with_config — threads an explicit &EphemerisConfig into calc_fixstar/calc_fixstar_moshier/_sweph/_jpl so TOPOCTR gets a per-call topographic override instead of always reading self.config; fixstar2 delegates to it with &self.config), fixstar2_ut, fixstar2_mag, calc_fixstar, houses/houses_ex/houses_ex2 — UT-based house wrappers: ARMC+eps+nutation setup, Sun-declination resolution for Sunshine, traditional-sidereal dispatch, RADIANS conversion, gauquelin_sector_geometric — swe_gauquelin_sector imeth 0/1 port: own ARMC/eps/nutation setup using the caller's flags directly (NOT houses_ex2's forced TIDAL_DEFAULT — swe_gauquelin_sector's C deltaT call genuinely carries the caller's ephemeris-source iflag), calc() or fixstar2() per starname, house_pos with hsys=Gauquelin (swisseph-rs/97: starname threaded through); gauquelin_sector — full swe_gauquelin_sector dispatcher (swisseph-rs/89, PNOC 8): imeth 0/1 → gauquelin_sector_geometric, imeth 2–5 → gauquelin_sector_risetrans (rise/set-based: finds bracketing rise+set via Ephemeris::rise_trans with DISC_CENTER/NO_REFRACTION per imeth, §7 bracket+re-search logic, linear interpolation into sectors 1–36; circumpolar bodies propagate Err)), EphemerisConfig, CalcResult; stars: StarCatalog field on Ephemeris;
+│                          time_equ/lmt_to_lat/lat_to_lmt (swisseph-rs/124: equation of
+│                          time + LMT↔LAT conversion, sidereal-time forced TIDAL_DEFAULT);
+│                          get_planet_name (swisseph-rs/124: body→display name dispatcher:
+│                          fixed bodies, fictitious via catalog, asteroids via .se1 file +
+│                          seasnam.txt fallback)
 ├── math.rs             — pure math functions: normalize, chebyshev, cartpol, cotrans, poly_eval
 ├── date.rs             — Julian Day ↔ calendar conversion, delta-T, UTC
 ├── obliquity.rs        — swi_epsiln port: all 11 obliquity models
 ├── bias.rs             — swi_bias port: GCRS↔J2000 frame rotation; icrs2fk5 (RB matrix), fk4_fk5 (B1950 RA correction)
 ├── precession.rs       — swi_precess port: 3 algorithm families, 11 models, JPLHOR paths
 ├── deltat/
-│   ├── mod.rs          — calc_deltat dispatcher, 5 historical models, Bessel interpolation, future extrapolation, tidal correction
+│   ├── mod.rs          — calc_deltat dispatcher (delta_t_userdef short-circuit at top,
+│   │                       swisseph-rs/124), 5 historical models, Bessel interpolation, future extrapolation, tidal correction
 │   └── data.rs         — static tables: DT (409 entries 1620–2028), DT97 (43), DT2 (27), DTCF16 (54×6 spline)
 ├── nutation/
 │   ├── mod.rs          — router + 5 algorithms: IAU 1980, Herring 1987, IAU 2000A/B, Woolard
@@ -360,6 +366,11 @@ src/
 │                          xearth/xsun barycentric shift; FICT_GEO flag switches
 │                          dmot/K/anchor for geocentric bodies). FictitiousCatalog field
 │                          on Ephemeris, loaded eagerly in Ephemeris::new.
+├── format.rs           — centisecond string formatting (swisseph-rs/124): csroundsec
+│                          (round to nearest arcsecond with 30°-boundary guard),
+│                          cs2timestr (HH:MM:SS with configurable separator),
+│                          cs2lonlatstr (deg+direction+min'sec), cs2degstr
+│                          (degrees-within-sign, truncates not rounds)
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -929,6 +940,12 @@ tests/
 │                          swe_heliacal_pheno_ut (pheno key, 15 cases; swisseph-rs/109),
 │                          swe_heliacal_ut (events key, 12 cases; swisseph-rs/111);
 │                          see tests/golden/heliacal.rs
+│   ├── utilities.json  — C-generated reference data for utility functions (swisseph-rs/124):
+│   │                       time_equ (12 epochs), lmt_to_lat/lat_to_lmt (6 pairs each),
+│   │                       planet_name (45 ipls incl. 3 asteroids), house_name (26 systems),
+│   │                       ayanamsa_name (48 modes incl. User→null), csroundsec/cs2timestr/
+│   │                       cs2lonlatstr/cs2degstr (16 centisecond values each); all string
+│   │                       comparisons exact, times eps 1e-9
 │   └── crossings.json  — C-generated reference data for swe_solcross/mooncross/mooncross_node/helio_cross (66 cases: 18 solcross + 18 mooncross + 6 mooncross_node + 24 helio_cross, all Moshier)
 └── c-gen/
     ├── gen_asteroid.c  — C harness to regenerate asteroid.json (6 bodies × 5 epochs × 10 flags
@@ -1003,6 +1020,10 @@ tests/
     │                       swe_heliacal_ut (swisseph-rs/111): 12 event cases — Sirius/Venus/Moon
     │                       at Cairo/Mecca/Athens, TypeEvent 1–4, LONG_SEARCH, AVKIND_VR ×2,
     │                       HIGH_PRECISION; links libswe.a normally, does NOT #include swehel.c)
+    ├── gen_utilities.c  — C harness to regenerate utilities.json (time_equ 12 epochs, lmt/lat
+    │                       6 pairs, planet_name 45 ipls, house_name 26, ayanamsa_name 48,
+    │                       csroundsec/cs2timestr/cs2lonlatstr/cs2degstr 16 values each;
+    │                       swe_set_ephe_path("../../ephe") for asteroid .se1 name access)
     └── gen_cross.c      — C harness to regenerate crossings.json (66 cases: solcross 18,
                             mooncross 18, mooncross_node 6, helio_cross 24, all SEFLG_MOSEPH)
 ```
