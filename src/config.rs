@@ -32,6 +32,11 @@ pub struct EphemerisConfig {
     pub extra_leap_seconds: Vec<i32>,
     pub leap_seconds_file: Option<PathBuf>,
     pub asteroid_numbers: Vec<i32>,
+    /// Raw planetary-moon/COB ids per `ephe/sat/plmolist.txt` (9401–9999;
+    /// COB entries are 9n99). Both `Body::PlanetMoon(id)` calc AND
+    /// `CalcFlags::CENTER_BODY` on Jupiter..Pluto (which resolves to the 9n99
+    /// COB id) require the id listed here — stateless design, no lazy file opening.
+    pub planet_moon_numbers: Vec<i32>,
 }
 
 impl Default for EphemerisConfig {
@@ -52,6 +57,7 @@ impl Default for EphemerisConfig {
             extra_leap_seconds: Vec::new(),
             leap_seconds_file: None,
             asteroid_numbers: Vec::new(),
+            planet_moon_numbers: Vec::new(),
         }
     }
 }

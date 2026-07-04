@@ -50,6 +50,7 @@ pub struct Ephemeris {
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
     main_asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
     asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
+    planet_moon_files: Vec<crate::sweph_file::SwissEphFile>,
     jpl_file: Option<crate::jpl::JplFile>,
     stars: crate::stars::StarCatalog,
     fictitious_catalog: crate::fictitious::FictitiousCatalog,
@@ -116,6 +117,32 @@ impl Ephemeris {
             (Vec::new(), Vec::new())
         };
 
+        // Planet-moon files load when ephe_path is set, regardless of ephemeris source
+        // (the moon/COB offset always comes from the sepm file regardless of epheflag).
+        let planet_moon_files = if let Some(dir) = config.ephe_path.as_ref() {
+            if !config.planet_moon_numbers.is_empty() {
+                let mut nums = config.planet_moon_numbers.clone();
+                nums.sort_unstable();
+                nums.dedup();
+                let mut files = Vec::with_capacity(nums.len());
+                for &n in &nums {
+                    if !(9000..=9999).contains(&n) {
+                        return Err(Error::InvalidBody(n));
+                    }
+                    files.push(crate::sweph_file::open_planet_moon_file(dir, n)?);
+                }
+                files
+            } else {
+                Vec::new()
+            }
+        } else if !config.planet_moon_numbers.is_empty() {
+            return Err(Error::FileFormat(
+                "ephe_path required for planetary moon files".to_string(),
+            ));
+        } else {
+            Vec::new()
+        };
+
         // Resolve the ephemeris-specific tidal acceleration from the open file's
         // DE number, mirroring C's `swi_get_tid_acc` (swephlib.c:3211–3221): JPL
         // uses the JPL file's denum, SWIEPH the moon (SEI_FILE_MOON) file's. This
@@ -144,6 +171,7 @@ impl Ephemeris {
             moon_files,
             main_asteroid_files,
             asteroid_files,
+            planet_moon_files,
             jpl_file,
             stars,
             fictitious_catalog,

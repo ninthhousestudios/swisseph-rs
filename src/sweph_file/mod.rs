@@ -132,6 +132,21 @@ pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error> {
     Err(Error::FileNotFound(candidates[0].clone()))
 }
 
+pub fn open_planet_moon_file(dir: &Path, raw_id: i32) -> Result<SwissEphFile, Error> {
+    let primary = dir.join("sat").join(format!("sepm{raw_id}.se1"));
+    match SwissEphFile::open(&primary) {
+        Ok(f) => return Ok(f),
+        Err(Error::FileNotFound(_)) => {}
+        Err(e) => return Err(e),
+    }
+    let flat = dir.join(format!("sepm{raw_id}.se1"));
+    match SwissEphFile::open(&flat) {
+        Ok(f) => Ok(f),
+        Err(Error::FileNotFound(_)) => Err(Error::FileNotFound(primary)),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn open_ephemeris_files(dir: &Path, prefix: &str) -> Result<Vec<SwissEphFile>, Error> {
     let mut files = Vec::new();
     let entries = std::fs::read_dir(dir).map_err(|_| Error::FileNotFound(dir.to_path_buf()))?;
@@ -273,6 +288,126 @@ mod tests {
     fn ephemeris_new_asteroid_numbers_without_path_errors() {
         let config = crate::config::EphemerisConfig {
             asteroid_numbers: vec![433],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config);
+        assert!(eph.is_err());
+    }
+
+    #[test]
+    fn detect_file_type_planet_moon() {
+        let path = Path::new("/tmp/sepm9401.se1");
+        assert_eq!(detect_file_type(path).unwrap(), FileType::PlanetaryMoon);
+    }
+
+    #[test]
+    fn planet_moon_jupiter_cob() {
+        let dir = ephe_dir();
+        let path = dir.join("sat/sepm9599.se1");
+        if !path.exists() {
+            return;
+        }
+        let f = SwissEphFile::open(&path).unwrap();
+        assert_eq!(f.header().file_type, FileType::PlanetaryMoon);
+        assert_eq!(f.planets()[0].body_id, 9599);
+        assert_eq!(f.header().time_range, (2378491.5, 2524599.5));
+        assert_eq!(f.planets()[0].dseg, 4.0);
+        assert_eq!(f.planets()[0].ncoe, 39);
+        assert_eq!(f.planets()[0].rmax, 10.0 / 1_000_000.0);
+        assert!(f.header().asteroid.is_none());
+    }
+
+    #[test]
+    fn planet_moon_phobos() {
+        let dir = ephe_dir();
+        let path = dir.join("sat/sepm9401.se1");
+        if !path.exists() {
+            return;
+        }
+        let f = SwissEphFile::open(&path).unwrap();
+        assert_eq!(f.header().file_type, FileType::PlanetaryMoon);
+        assert_eq!(f.planets()[0].body_id, 9401);
+        assert_eq!(f.header().time_range, (2415015.5, 2469082.5));
+        assert_eq!(f.planets()[0].dseg, 1.0);
+        assert_eq!(f.planets()[0].ncoe, 39);
+        // Mars-moon fine-scale: raw 10000 / 1e6
+        assert_eq!(f.planets()[0].rmax, 10000.0 / 1_000_000.0);
+    }
+
+    #[test]
+    fn planet_moon_io() {
+        let dir = ephe_dir();
+        let path = dir.join("sat/sepm9501.se1");
+        if !path.exists() {
+            return;
+        }
+        let f = SwissEphFile::open(&path).unwrap();
+        assert_eq!(f.header().file_type, FileType::PlanetaryMoon);
+        assert_eq!(f.planets()[0].body_id, 9501);
+        // Ordinary branch: raw 10 / 1e3
+        assert_eq!(f.planets()[0].rmax, 10.0 / 1000.0);
+    }
+
+    #[test]
+    fn open_planet_moon_file_via_sat_subdir() {
+        let dir = ephe_dir();
+        if !dir.join("sat/sepm9599.se1").exists() {
+            return;
+        }
+        let f = open_planet_moon_file(&dir, 9599).unwrap();
+        assert_eq!(f.planets()[0].body_id, 9599);
+    }
+
+    #[test]
+    fn open_planet_moon_file_missing() {
+        let dir = ephe_dir();
+        let result = open_planet_moon_file(&dir, 9098);
+        assert!(matches!(result, Err(Error::FileNotFound(_))));
+    }
+
+    #[test]
+    fn ephemeris_new_with_planet_moons() {
+        let dir = ephe_dir();
+        if !dir.join("sat/sepm9599.se1").exists() {
+            return;
+        }
+        let config = crate::config::EphemerisConfig {
+            ephe_path: Some(dir),
+            planet_moon_numbers: vec![9599, 9401],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config);
+        assert!(eph.is_ok());
+    }
+
+    #[test]
+    fn ephemeris_new_planet_moon_missing_file_errors() {
+        let dir = ephe_dir();
+        let config = crate::config::EphemerisConfig {
+            ephe_path: Some(dir),
+            planet_moon_numbers: vec![9098],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config);
+        assert!(matches!(eph, Err(Error::FileNotFound(_))));
+    }
+
+    #[test]
+    fn ephemeris_new_planet_moon_invalid_range_errors() {
+        let dir = ephe_dir();
+        let config = crate::config::EphemerisConfig {
+            ephe_path: Some(dir),
+            planet_moon_numbers: vec![12345],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config);
+        assert!(matches!(eph, Err(Error::InvalidBody(12345))));
+    }
+
+    #[test]
+    fn ephemeris_new_planet_moon_without_path_errors() {
+        let config = crate::config::EphemerisConfig {
+            planet_moon_numbers: vec![9599],
             ..Default::default()
         };
         let eph = crate::context::Ephemeris::new(config);
