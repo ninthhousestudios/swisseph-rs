@@ -25,9 +25,9 @@
 //! `Send + Sync`.
 //!
 //! Configuration is set once via [`EphemerisConfig`] (which implements
-//! `Default`). Per-call overrides for ephemeris source, topographic position,
-//! and sidereal mode are available through flag bits and the `*_with_config`
-//! internal variants.
+//! `Default`). The ephemeris source for a single call can be overridden via
+//! [`CalcFlags`] flag bits (`MOSEPH`, `SWIEPH`, `JPLEPH`); topographic
+//! position, sidereal mode, and other settings are fixed at construction.
 //!
 //! # Modules
 //!
@@ -51,7 +51,11 @@
 //! | [`date`] | Julian Day ↔ calendar, UTC conversion |
 //! | [`mod@format`] | Degree/time string formatting |
 //! | [`math`] | Coordinate transforms, Chebyshev evaluation, degree splitting |
+//! | [`constants`] | Physical constants, epochs, unit conversions |
+//! | [`calc`] | Calculation pipeline internals (light-time, aberration, frame transforms) |
 //! | [`moshier`] | Moshier analytical backend (always available) |
+//! | [`sweph_file`] | Swiss Ephemeris `.se1` file reader (requires feature `swisseph-files`) |
+//! | [`jpl`] | JPL DE ephemeris reader (requires feature `jpl`) |
 //! | [`precession`], [`nutation`], [`obliquity`], [`bias`], [`sidereal_time`], [`deltat`] | Low-level positional astronomy — prefer `Ephemeris` methods |
 //! | [`ayanamsa`] | Sidereal ayanamsa computation |
 //! | [`corrections`] | Aberration, light deflection, relativistic mass effect |
