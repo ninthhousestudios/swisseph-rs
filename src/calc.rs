@@ -100,6 +100,60 @@ pub(crate) fn normalize_asteroid_aliases(body: Body) -> Body {
     }
 }
 
+/// Ports sweph.c:416-437's three-clause CENTER_BODY / PlanetMoon normalization.
+/// Returns `(body, moon_raw, flags)` where `moon_raw > 0` means a plmoon
+/// offset must be fetched and added, and `flags` may have CENTER_BODY set or
+/// cleared relative to the input.
+pub(crate) fn normalize_center_body(
+    body: Body,
+    flags: CalcFlags,
+) -> (Body, Option<i32>, CalcFlags) {
+    let mut flags = flags;
+    let mut moon_raw: Option<i32> = None;
+
+    // Clause (i): planet ipl <= SE_PLUTO + CENTER_BODY → synthesize COB number
+    if flags.contains(CalcFlags::CENTER_BODY) {
+        let raw = body.to_raw_id();
+        if raw >= 0 && raw <= 9 {
+            moon_raw = Some(raw * 100 + 9099);
+        }
+    }
+
+    // Clause (ii): direct 9pmm ipl → extract parent, force CENTER_BODY
+    if let Body::PlanetMoon(id) = body {
+        let encoded = id.encoded();
+        let raw = PLMOON_OFFSET + encoded;
+        moon_raw = Some(raw);
+        let parent_raw = (raw - 9000) / 100;
+        // parent_raw is 0..=9 by construction (encoded 0..=999)
+        let parent = Body::try_from(parent_raw).expect("parent planet is valid");
+        flags |= CalcFlags::CENTER_BODY;
+        return normalize_center_body_cancel(parent, moon_raw, flags);
+    }
+
+    normalize_center_body_cancel(body, moon_raw, flags)
+}
+
+fn normalize_center_body_cancel(
+    body: Body,
+    moon_raw: Option<i32>,
+    mut flags: CalcFlags,
+) -> (Body, Option<i32>, CalcFlags) {
+    // Clause (iii): parent <= SE_MARS && suffix == 99 → cancel
+    if flags.contains(CalcFlags::CENTER_BODY) {
+        let raw = body.to_raw_id();
+        if raw >= 0 && raw <= 4 {
+            if let Some(mr) = moon_raw {
+                if mr % 100 == 99 {
+                    flags -= CalcFlags::CENTER_BODY;
+                    return (body, None, flags);
+                }
+            }
+        }
+    }
+    (body, moon_raw, flags)
+}
+
 /// Observer offset (position + velocity, AU / AU-day, J2000 mean equatorial)
 /// at `jd`, or the zero vector when TOPOCTR isn't requested. Stateless
 /// equivalent of C's `swed.topd.xobs` cache: recomputed fresh every call
@@ -2435,6 +2489,130 @@ pub(crate) fn calc_asteroid_moshier(
         ast_id,
         body,
         source: EphemerisSource::Moshier,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
+// ---------------------------------------------------------------------------
+// Planet-moon calc pipeline — ports calc_center_body (sweph.c:2445)
+// ---------------------------------------------------------------------------
+
+pub(crate) struct PlanetMoonProvider<'a, P: PositionProvider> {
+    inner: &'a P,
+    moon_file: &'a SwissEphFile,
+    moon_id: i32,
+    parent: Body,
+}
+
+impl<P: PositionProvider> PositionProvider for PlanetMoonProvider<'_, P> {
+    fn positions(&self, _body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
+        let mut pos = self.inner.positions(self.parent, jd, need_speed)?;
+        let n = if need_speed { 6 } else { 3 };
+        let (offset, _) = evaluate_body(self.moon_file, self.moon_id, jd, need_speed)?;
+        for i in 0..n {
+            pos.planet_bary[i] += offset[i];
+        }
+        Ok(pos)
+    }
+
+    fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
+        self.inner.moon_geo(jd, need_speed)
+    }
+
+    fn updates_sun_in_light_time(&self) -> bool {
+        self.inner.updates_sun_in_light_time()
+    }
+}
+
+pub(crate) struct MoshierPlanetProvider<'a> {
+    pub(crate) eps_j2000: &'a Epsilon,
+}
+
+impl PositionProvider for MoshierPlanetProvider<'_> {
+    fn positions(&self, body: Body, jd: f64, _need_speed: bool) -> Result<SwephPositions, Error> {
+        let pp = compute_pipeline(jd, body, self.eps_j2000)?;
+        let earth_pp = compute_pipeline(jd, Body::Sun, self.eps_j2000)?;
+        Ok(SwephPositions {
+            planet_bary: pp.planet_helio,
+            earth_bary: earth_pp.earth_helio,
+            earth_helio: earth_pp.earth_helio,
+            sun_bary: [0.0; 6],
+        })
+    }
+
+    fn moon_geo(&self, jd: f64, _need_speed: bool) -> Result<[f64; 6], Error> {
+        raw_osc_moon_moshier(jd, self.eps_j2000)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_plmoon_sweph(
+    jd: f64,
+    body: Body,
+    moon_file: &SwissEphFile,
+    moon_id: i32,
+    parent: Body,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = SwephProvider {
+        planet_files,
+        moon_files,
+    };
+    let p = PlanetMoonProvider {
+        inner: &inner,
+        moon_file,
+        moon_id,
+        parent,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_plmoon_jpl(
+    jd: f64,
+    body: Body,
+    moon_file: &SwissEphFile,
+    moon_id: i32,
+    parent: Body,
+    jpl_file: &crate::jpl::JplFile,
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = JplProvider { file: jpl_file };
+    let p = PlanetMoonProvider {
+        inner: &inner,
+        moon_file,
+        moon_id,
+        parent,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_plmoon_moshier(
+    jd: f64,
+    body: Body,
+    moon_file: &SwissEphFile,
+    moon_id: i32,
+    parent: Body,
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = MoshierPlanetProvider { eps_j2000 };
+    let p = PlanetMoonProvider {
+        inner: &inner,
+        moon_file,
+        moon_id,
+        parent,
     };
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }

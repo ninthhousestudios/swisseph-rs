@@ -50,7 +50,6 @@ pub struct Ephemeris {
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
     main_asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
     asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
-    #[expect(dead_code, reason = "used by calc dispatch in swisseph-rs/126")]
     planet_moon_files: Vec<crate::sweph_file::SwissEphFile>,
     jpl_file: Option<crate::jpl::JplFile>,
     stars: crate::stars::StarCatalog,
@@ -1560,6 +1559,7 @@ impl Ephemeris {
         config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6], CalcFlags), Error> {
         let body = crate::calc::normalize_asteroid_aliases(body);
+        let (body, moon_raw, flags) = crate::calc::normalize_center_body(body, flags);
         let models = &config.astro_models;
 
         if body == Body::EclipticNutation {
@@ -1714,6 +1714,48 @@ impl Ephemeris {
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
+        if let Some(moon_id) = moon_raw {
+            let (moon_file, parent) = self.planet_moon_file_for(body, moon_id, jd_tt)?;
+            return match config.ephemeris_source {
+                EphemerisSource::Swiss => {
+                    let (xr, x2000) = crate::calc::calc_plmoon_sweph(
+                        jd_tt,
+                        body,
+                        moon_file,
+                        moon_id,
+                        parent,
+                        &self.planet_files,
+                        &self.moon_files,
+                        &eps_j2000,
+                        flags,
+                        config,
+                        models,
+                    )?;
+                    Ok((xr, x2000, flags))
+                }
+                EphemerisSource::Jpl => {
+                    let jpl = self.jpl_file.as_ref().ok_or(Error::EphemerisNotAvailable {
+                        body,
+                        source: EphemerisSource::Jpl,
+                    })?;
+                    let (xr, x2000) = crate::calc::calc_plmoon_jpl(
+                        jd_tt, body, moon_file, moon_id, parent, jpl, &eps_j2000, flags, config,
+                        models,
+                    )?;
+                    Ok((xr, x2000, flags))
+                }
+                EphemerisSource::Moshier => {
+                    if flags.contains(CalcFlags::BARYCTR) {
+                        return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
+                    }
+                    let (xr, x2000) = crate::calc::calc_plmoon_moshier(
+                        jd_tt, body, moon_file, moon_id, parent, &eps_j2000, flags, config, models,
+                    )?;
+                    Ok((xr, x2000, flags))
+                }
+            };
+        }
+
         match config.ephemeris_source {
             EphemerisSource::Swiss => {
                 match self.calc_body_sweph(jd_tt, body, &eps_j2000, flags, models, config) {
@@ -1744,6 +1786,22 @@ impl Ephemeris {
                 Ok((xr, x2000, flags))
             }
         }
+    }
+
+    fn planet_moon_file_for(
+        &self,
+        body: Body,
+        moon_id: i32,
+        jd: f64,
+    ) -> Result<(&crate::sweph_file::SwissEphFile, Body), Error> {
+        let file = crate::sweph_file::find_file_for_jd(&self.planet_moon_files, moon_id, jd)
+            .ok_or(Error::EphemerisNotAvailable {
+                body,
+                source: self.config.ephemeris_source,
+            })?;
+        let parent_raw = (moon_id - 9000) / 100;
+        let parent = Body::try_from(parent_raw).expect("parent planet is valid");
+        Ok((file, parent))
     }
 
     fn asteroid_file_for(

@@ -101,6 +101,7 @@ pub fn body_file_id(body: Body) -> Option<i32> {
         Body::Juno => Some(16),
         Body::Vesta => Some(17),
         Body::Asteroid(id) => Some(10000 + id.mpc_number()),
+        Body::PlanetMoon(id) => Some(9000 + id.encoded()),
         _ => None,
     }
 }
