@@ -554,6 +554,7 @@ pub fn calc_sun(
     flags: CalcFlags,
     config: &EphemerisConfig,
     models: &AstroModels,
+    is_earth: bool,
 ) -> Result<([f64; 24], [f64; 6]), Error> {
     let pp = compute_pipeline(jd, Body::Sun, eps_j2000)?;
     let earth_helio = pp.earth_helio;
@@ -564,13 +565,35 @@ pub fn calc_sun(
         xobs[i] += offset[i];
     }
 
-    // Geocentric (or topocentric) Sun = -observer heliocentric
-    // For Moshier, Sun is at heliocentric origin — light-time retardation of
-    // the Sun gives zero (it doesn't move). Observer position stays at time t.
-    let mut xx = [0.0; 6];
-    for i in 0..3 {
-        xx[i] = -xobs[i];
-        xx[i + 3] = -xobs[i + 3];
+    let is_hb = flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR);
+
+    let mut xx = if is_earth && is_hb {
+        // HELCTR/BARYCTR Earth: xx = xobs (Moshier's earth_helio IS the
+        // heliocentric Earth; Sun ≈ barycenter in Moshier, so helio ≈ bary).
+        xobs
+    } else {
+        // Geocentric Sun = -observer heliocentric.
+        let mut v = [0.0; 6];
+        for i in 0..3 {
+            v[i] = -xobs[i];
+            v[i + 3] = -xobs[i + 3];
+        }
+        v
+    };
+
+    // Light-time for HELCTR/BARYCTR Earth (Moshier): C enters the retardation
+    // block when HELCTR|BARYCTR even for MOSEPH (sweph.c:3969 gate), re-evaluating
+    // Earth at the retarded time via swi_moshplan (niter=1, loop 0..=1).
+    // Geocentric Moshier Sun has no light-time (Sun at origin, block skipped).
+    if is_earth && is_hb && !flags.contains(CalcFlags::TRUEPOS) {
+        for _ in 0..=1 {
+            let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+            let dt = dist * AUNIT / CLIGHT / 86400.0;
+            let pp_ret = compute_pipeline(jd - dt, Body::Sun, eps_j2000)?;
+            for i in 0..6 {
+                xx[i] = pp_ret.earth_helio[i] + offset[i];
+            }
+        }
     }
 
     if !flags.contains(CalcFlags::SPEED) {
@@ -579,9 +602,9 @@ pub fn calc_sun(
         xx[5] = 0.0;
     }
 
-    // No deflection for Sun
+    // No deflection for Sun (or Earth through this path)
 
-    // Aberration
+    // Aberration (skipped for HELCTR/BARYCTR via plaus_iflag's NOABERR)
     if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOABERR) {
         aberr_light(
             &mut xx,
@@ -1671,6 +1694,7 @@ fn apparent_sun<P: PositionProvider>(
     flags: CalcFlags,
     config: &EphemerisConfig,
     models: &AstroModels,
+    is_earth: bool,
 ) -> Result<([f64; 24], [f64; 6]), Error> {
     let need_speed = flags.contains(CalcFlags::SPEED);
 
@@ -1686,20 +1710,52 @@ fn apparent_sun<P: PositionProvider>(
         xobs[i] += offset[i];
     }
 
-    // Geocentric (or topocentric) Sun = -(observer heliocentric)
+    let is_hb = flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR);
+    let is_bary = flags.contains(CalcFlags::BARYCTR);
+
+    // Frame construction (sweph.c:3944-3950):
+    //   BARYCTR      → xx = xobs (earth_bary, the barycentric Earth directly)
+    //   HELCTR       → xx = xobs - sun_bary (earth_bary - sun_bary = helio_earth)
+    //   geocentric   → xx = -(xobs - sun_bary) (geo_sun = -helio_earth)
     let mut xx = [0.0; 6];
-    for (i, x) in xx.iter_mut().enumerate() {
-        *x = -(xobs[i] - pos.sun_bary[i]);
+    if is_earth && is_bary {
+        for (i, x) in xx.iter_mut().enumerate() {
+            *x = xobs[i];
+        }
+    } else if is_earth && is_hb {
+        for (i, x) in xx.iter_mut().enumerate() {
+            *x = xobs[i] - pos.sun_bary[i];
+        }
+    } else {
+        for (i, x) in xx.iter_mut().enumerate() {
+            *x = -(xobs[i] - pos.sun_bary[i]);
+        }
     }
 
-    // Light-time: re-evaluate Sun at retarded time, observer stays at t
+    // Light-time (sweph.c:3968-4030). The loop always uses niter=1 (0..=1 = 2
+    // iterations). For HELCTR/BARYCTR Earth, re-evaluate Earth at retarded time;
+    // for geocentric Sun, re-evaluate Sun at retarded time.
     if !flags.contains(CalcFlags::TRUEPOS) {
         for _ in 0..=1 {
             let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
             let dt = dist * AUNIT / CLIGHT / 86400.0;
             let pos_ret = p.positions(Body::Sun, jd - dt, true)?;
-            for (i, x) in xx.iter_mut().enumerate() {
-                *x = -(xobs[i] - pos_ret.sun_bary[i]);
+            if is_earth && is_hb {
+                // Re-evaluated Earth; use ORIGINAL-epoch sun_bary (pos.sun_bary).
+                if is_bary {
+                    for (i, x) in xx.iter_mut().enumerate() {
+                        *x = pos_ret.earth_bary[i] + offset[i];
+                    }
+                } else {
+                    for (i, x) in xx.iter_mut().enumerate() {
+                        *x = pos_ret.earth_bary[i] + offset[i] - pos.sun_bary[i];
+                    }
+                }
+            } else {
+                // Geocentric Sun: re-evaluate Sun position at retarded time.
+                for (i, x) in xx.iter_mut().enumerate() {
+                    *x = -(xobs[i] - pos_ret.sun_bary[i]);
+                }
             }
         }
     }
@@ -1710,9 +1766,9 @@ fn apparent_sun<P: PositionProvider>(
         xx[5] = 0.0;
     }
 
-    // No deflection for Sun
+    // No deflection for Sun (or Earth through this path)
 
-    // Aberration
+    // Aberration (skipped for HELCTR/BARYCTR via plaus_iflag's NOABERR)
     if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOABERR) {
         aberr_light(&mut xx, &[xobs[3], xobs[4], xobs[5]], need_speed);
     }
@@ -1921,9 +1977,10 @@ pub fn calc_sun_jpl(
     flags: CalcFlags,
     config: &EphemerisConfig,
     models: &AstroModels,
+    is_earth: bool,
 ) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = JplProvider { file };
-    apparent_sun(&p, jd, flags, config, models)
+    apparent_sun(&p, jd, flags, config, models, is_earth)
 }
 
 pub fn calc_moon_jpl(
@@ -1962,12 +2019,13 @@ pub fn calc_sun_sweph(
     flags: CalcFlags,
     config: &EphemerisConfig,
     models: &AstroModels,
+    is_earth: bool,
 ) -> Result<([f64; 24], [f64; 6]), Error> {
     let p = SwephProvider {
         planet_files,
         moon_files,
     };
-    apparent_sun(&p, jd, flags, config, models)
+    apparent_sun(&p, jd, flags, config, models, is_earth)
 }
 
 pub fn calc_moon_sweph(

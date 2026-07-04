@@ -252,7 +252,7 @@ impl Ephemeris {
             ));
         }
 
-        if body == Body::Earth {
+        if body == Body::Earth && !flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {
             return Ok(CalcResult {
                 data: [0.0; 6],
                 flags_used: flags,
@@ -1611,16 +1611,17 @@ impl Ephemeris {
         }
 
         // Heliocentric (SEFLG_HELCTR) is supported below (per-backend/-body branches in calc.rs);
-        // plaus_iflag has already forced NOABERR|NOGDEFL for it. Barycentric is still unported.
-        if flags.contains(CalcFlags::BARYCTR) {
+        // plaus_iflag has already forced NOABERR|NOGDEFL for it. Barycentric is still unported
+        // except for Earth (routed through the Sun pipeline, swisseph-rs/96).
+        if flags.contains(CalcFlags::BARYCTR) && body != Body::Earth {
             return Err(Error::UnsupportedFlags(flags & CalcFlags::BARYCTR));
         }
 
         // Heliocentric Sun is the origin (the Sun relative to itself) — C's swe_calc returns an
         // all-zero xx (position and speed) across every output frame, since the zero vector is
         // invariant under bias/precession/nutation and polar-converts to zeros. calc_sun has no
-        // HELCTR branch (it always builds the geocentric -observer vector), so short-circuit here,
-        // matching the MeanNode/MeanApogee HELCTR handling above.
+        // HELCTR branch for the Sun itself, so short-circuit here, matching the MeanNode/MeanApogee
+        // HELCTR-zeros handling above.
         if body == Body::Sun && flags.contains(CalcFlags::HELCTR) {
             return Ok(([0.0; 24], [0.0; 6], flags));
         }
@@ -1700,7 +1701,9 @@ impl Ephemeris {
         config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         match body {
-            Body::Sun => crate::calc::calc_sun(jd_tt, eps_j2000, flags, config, models),
+            Body::Sun | Body::Earth => {
+                crate::calc::calc_sun(jd_tt, eps_j2000, flags, config, models, body == Body::Earth)
+            }
             Body::Moon => crate::calc::calc_moon(jd_tt, eps_j2000, flags, config, models),
             Body::Mercury
             | Body::Venus
@@ -1741,13 +1744,14 @@ impl Ephemeris {
         config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         match body {
-            Body::Sun => crate::calc::calc_sun_sweph(
+            Body::Sun | Body::Earth => crate::calc::calc_sun_sweph(
                 jd_tt,
                 &self.planet_files,
                 &self.moon_files,
                 flags,
                 config,
                 models,
+                body == Body::Earth,
             ),
             Body::Moon => crate::calc::calc_moon_sweph(
                 jd_tt,
@@ -1813,7 +1817,9 @@ impl Ephemeris {
     ) -> Result<([f64; 24], [f64; 6]), Error> {
         let file = self.jpl_file.as_ref().unwrap();
         match body {
-            Body::Sun => crate::calc::calc_sun_jpl(jd_tt, file, flags, config, models),
+            Body::Sun | Body::Earth => {
+                crate::calc::calc_sun_jpl(jd_tt, file, flags, config, models, body == Body::Earth)
+            }
             Body::Moon => crate::calc::calc_moon_jpl(jd_tt, file, flags, config, models),
             Body::Mercury
             | Body::Venus

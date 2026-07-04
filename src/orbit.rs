@@ -308,28 +308,7 @@ fn get_orbital_elements_dret(
 
     // 2.3 — GM and final position query.
     let gmsm = get_gmsm(eph, tjd_et, ipl, iflag, r)?;
-    let mut xpos = if ipl == Body::Earth {
-        // This codebase's `calc` has no heliocentric-Earth path — Earth is the
-        // observer origin, so `calc(Body::Earth, ..)` returns the zero vector.
-        // Heliocentric Earth (geometric) is exactly the negation of the
-        // geocentric Sun: with TRUEPOS/NONUT there is no light-time/aberration
-        // asymmetry, so `Earth - Sun == -(Sun - Earth)`. This reproduces C's
-        // `swe_calc(SE_EARTH, .. | SEFLG_HELCTR)` bare-Earth output.
-        let sun_geo = eph
-            .calc(
-                tjd_et,
-                Body::Sun,
-                iflj2000 & !(CalcFlags::HELCTR | CalcFlags::BARYCTR),
-            )?
-            .data;
-        let mut e = [0.0f64; 6];
-        for j in 0..6 {
-            e[j] = -sun_geo[j];
-        }
-        e
-    } else {
-        eph.calc(tjd_et, ipl, iflj2000)?.data
-    };
+    let mut xpos = eph.calc(tjd_et, ipl, iflj2000)?.data;
     if ipl == Body::Earth {
         // "Earth" elements are actually the Earth-Moon barycentre.
         let xposm = eph
