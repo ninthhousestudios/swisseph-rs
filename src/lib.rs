@@ -104,7 +104,9 @@ pub use eclipse::{
     OccultLocal, SolarEclipseGlobal, SolarEclipseLocal,
 };
 pub use error::Error;
-pub use flags::{CalcFlags, EclipseFlags, HeliacalFlags, RiseSetFlags, SplitDegFlags, VisLimFlags};
+pub use flags::{
+    CalcFlags, EclipseFlags, HeliacalFlags, RiseSetFlags, SiderealBits, SplitDegFlags, VisLimFlags,
+};
 pub use heliacal::{
     HeliacalAngleResult, HeliacalEvent, HeliacalEventType, HeliacalPheno, VisLimitResult,
 };

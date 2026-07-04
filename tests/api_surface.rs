@@ -72,6 +72,7 @@ fn imports_compile() {
         RiseSetFlags,
         // riseset
         RiseSetResult,
+        SiderealBits,
         SiderealMode,
         SiderealTimeModel,
         SolarEclipseGlobal,
@@ -114,6 +115,7 @@ fn imports_compile() {
     let _ = std::any::type_name::<Nutation>();
     let _ = std::any::type_name::<PlanetMoonId>();
     let _ = std::any::type_name::<PrecessionDirection>();
+    let _ = std::any::type_name::<SiderealBits>();
     let _ = std::any::type_name::<SiderealMode>();
     let _ = std::any::type_name::<UtcComponents>();
     let _ = std::any::type_name::<UtcToJd>();
