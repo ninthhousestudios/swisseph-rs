@@ -1714,7 +1714,11 @@ impl Ephemeris {
         let eps_j2000 =
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
-        if let Some(moon_id) = moon_raw {
+        // C's main_planet only opens the moon file when ipli >= SE_MARS (4) &&
+        // ipli <= SE_PLUTO (9). For parents Sun..Venus with CENTER_BODY set but
+        // suffix != 99, the flag survives inertly and the ordinary planet path runs.
+        let parent_raw = body.to_raw_id();
+        if let Some(moon_id) = moon_raw.filter(|_| (4..=9).contains(&parent_raw)) {
             let (moon_file, parent) = self.planet_moon_file_for(body, moon_id, jd_tt)?;
             return match config.ephemeris_source {
                 EphemerisSource::Swiss => {

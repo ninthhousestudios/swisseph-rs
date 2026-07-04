@@ -172,3 +172,72 @@ fn golden_plmoon() {
     assert!(cancel_checked >= 5, "expected at least 5 cancellation rows");
     assert_eq!(skipped, 0, "no cases should be skipped");
 }
+
+/// Direct 9pmm IDs with parent below Mars (e.g. 9201 → Mercury) must NOT
+/// error — C's main_planet skips the moon-file fetch when ipli < SE_MARS,
+/// returning the plain parent planet with CENTER_BODY inert in retflag.
+#[test]
+fn plmoon_sub_mars_parent_inert() {
+    let eph = Ephemeris::new(EphemerisConfig {
+        ephemeris_source: EphemerisSource::Moshier,
+        ..EphemerisConfig::default()
+    })
+    .unwrap();
+
+    // 9201 → parent = Mercury (raw 2), suffix 01 ≠ 99 → not cancelled, but
+    // parent < Mars so no moon file opened. Should succeed (plain Mercury).
+    let body = Body::planet_moon(201).unwrap(); // raw 9201
+    let flags = CalcFlags::MOSEPH | CalcFlags::SPEED;
+    let result = eph
+        .calc(2451545.0, body, flags)
+        .expect("9201 should not error");
+
+    // CENTER_BODY should survive in flags_used (inert but present)
+    assert!(
+        result.flags_used.contains(CalcFlags::CENTER_BODY),
+        "CENTER_BODY bit should survive for sub-Mars parent"
+    );
+
+    // The output should match plain Mercury
+    let mercury = eph
+        .calc(2451545.0, Body::Mercury, flags)
+        .expect("Mercury calc");
+    for k in 0..6 {
+        let diff = (result.data[k] - mercury.data[k]).abs();
+        assert!(
+            diff < 1e-9,
+            "9201 output[{k}] should match Mercury: diff={diff:.3e}"
+        );
+    }
+}
+
+/// 9099 (Sun COB) → clause (iii) cancels: parent=Sun (0 ≤ 4), suffix=99.
+/// Should return plain Sun with CENTER_BODY CLEARED.
+#[test]
+fn plmoon_9099_sun_cob_cancelled() {
+    let eph = Ephemeris::new(EphemerisConfig {
+        ephemeris_source: EphemerisSource::Moshier,
+        ..EphemerisConfig::default()
+    })
+    .unwrap();
+
+    let body = Body::planet_moon(99).unwrap(); // raw 9099
+    let flags = CalcFlags::MOSEPH | CalcFlags::SPEED;
+    let result = eph
+        .calc(2451545.0, body, flags)
+        .expect("9099 should not error");
+
+    assert!(
+        !result.flags_used.contains(CalcFlags::CENTER_BODY),
+        "CENTER_BODY should be cleared for 9099 (Sun COB cancelled)"
+    );
+
+    let sun = eph.calc(2451545.0, Body::Sun, flags).expect("Sun calc");
+    for k in 0..6 {
+        let diff = (result.data[k] - sun.data[k]).abs();
+        assert!(
+            diff < 1e-9,
+            "9099 output[{k}] should match Sun: diff={diff:.3e}"
+        );
+    }
+}
