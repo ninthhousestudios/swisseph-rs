@@ -99,6 +99,18 @@ src/
 │                          backend match — bypasses calc_body_moshier's BARYCTR guard (C
 │                          allows BARYCTR for fictitious); Swiss→Moshier fallback on
 │                          BeyondEphemerisLimits mirrors the asteroid path
+│                          Planet-moon calc (swisseph-rs/126):
+│                          normalize_center_body (sweph.c:416-437 three-clause port:
+│                          planet+CENTER_BODY→COB, direct 9pmm→parent+moon,
+│                          Mercury..Mars COB→cancel); PlanetMoonProvider<P> wraps
+│                          inner PositionProvider, adds planetocentric rectangular
+│                          offset from sepm .se1 file (no sun_bary addition — offset
+│                          is rectangular, not heliocentric per c-ref-plmoon.md §5);
+│                          MoshierPlanetProvider (parent planet heliocentric via
+│                          compute_pipeline); calc_plmoon_sweph/jpl/moshier delegate
+│                          to apparent_planet. Dispatch in calc_inner (context.rs):
+│                          normalized moon_raw routes to plmoon pipeline before the
+│                          backend match; planet_moon_file_for helper on Ephemeris
 ├── topocentric.rs      — get_observer: swi_get_observer port (NONUT-forced mean-frame path only, docs/c-ref-topocentric.md §3), geodetic→geocentric flattening + diurnal rotation + precession to J2000, returns observer position+velocity offset (AU/AU-day) from the geocenter
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
@@ -648,6 +660,15 @@ tests/
 │                          5e-9 (Swiss), speeds eps 1e-7; exercises Nibiru high-eccentricity
 │                          Kepler, Vulcan/WhiteMoon T-term+JDATE+geocentric elements,
 │                          HELCTR observer-zeroing, Swiss→Moshier Earth/Sun sourcing
+│   ├── plmoon.rs      — golden tests for planetary moon calc dispatch (swisseph-rs/126):
+│                          690 cases (11 bodies × 5 epochs × 10 flags full matrix +
+│                          21 bodies × 5 epochs × SWIEPH|SPEED reduced matrix +
+│                          15 CENTER_BODY equivalence pairs + 5 cancellation rows);
+│                          positions eps 1e-9 / speeds 1e-7 (SWIEPH); JPLEPH widened to
+│                          2e-4 pos / 1e-3 speed (parent-planet source difference);
+│                          retflag CENTER_BODY bit assertion; equivalence: planet+CENTER_BODY
+│                          bitwise-matches 9n99 direct call; cancellation: Sun..Mars+CENTER_BODY
+│                          equals plain planet (flag cleared)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
