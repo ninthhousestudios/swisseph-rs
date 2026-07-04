@@ -1,15 +1,17 @@
-const DEG30: i32 = 30 * 360000;
+const DEG30: i64 = 30 * 360000;
 
 /// Round centiseconds to the nearest arcsecond (multiple of 100), with a
 /// zodiac-sign-boundary guard: if rounding up would land exactly on a 30-degree
 /// boundary, round down instead. Port of `swe_csroundsec` (swephlib.c:3836–3843).
 pub fn csroundsec(x: i32) -> i32 {
+    let x = x as i64;
     let t = (x + 50) / 100 * 100;
-    if t > x && t % DEG30 == 0 {
+    let result = if t > x && t % DEG30 == 0 {
         x / 100 * 100
     } else {
         t
-    }
+    };
+    result as i32
 }
 
 /// Format time-of-day centiseconds as `"HH:MM:SS"` (or `"HH:MM"` when
@@ -17,7 +19,7 @@ pub fn csroundsec(x: i32) -> i32 {
 /// character placed between HH/MM and MM/SS.
 /// Port of `swe_cs2timestr` (swephlib.c:3864–3886).
 pub fn cs2timestr(t: i32, sep: char, suppress_zero: bool) -> String {
-    let t = ((t + 50) / 100) % (24 * 3600);
+    let t = ((t as i64 + 50) / 100) % (24 * 3600);
     let s = t % 60;
     let m = (t / 60) % 60;
     let h = t / 3600 % 100;
@@ -35,7 +37,7 @@ pub fn cs2timestr(t: i32, sep: char, suppress_zero: bool) -> String {
 /// Port of `swe_cs2lonlatstr` (swephlib.c:3888–3916).
 pub fn cs2lonlatstr(t: i32, pchar: char, mchar: char) -> String {
     let dir = if t < 0 { mchar } else { pchar };
-    let t = (t.unsigned_abs() as i32 + 50) / 100;
+    let t = ((t as i64).unsigned_abs() as i64 + 50) / 100;
     let s = t % 60;
     let m = (t / 60) % 60;
     let h = t / 3600 % 1000;
@@ -51,7 +53,7 @@ pub fn cs2lonlatstr(t: i32, pchar: char, mchar: char) -> String {
 /// **Truncates** (no rounding) and wraps into `[0, 30°)`.
 /// Port of `swe_cs2degstr` (swephlib.c:3918–3929).
 pub fn cs2degstr(t: i32) -> String {
-    let t = t / 100 % (30 * 3600);
+    let t = (t as i64) / 100 % (30 * 3600);
     let s = t % 60;
     let m = (t / 60) % 60;
     let h = t / 3600 % 100;
@@ -75,7 +77,7 @@ mod tests {
         // 29°59'59.50" = 29*360000 + 59*6000 + 59*100 + 50
         let near_30 = 29 * 360000 + 59 * 6000 + 59 * 100 + 50;
         let rounded = csroundsec(near_30);
-        assert!(rounded < DEG30);
+        assert!((rounded as i64) < DEG30);
         assert_eq!(rounded, near_30 / 100 * 100);
     }
 

@@ -2872,9 +2872,12 @@ impl Ephemeris {
                 &self.fictitious_catalog,
                 (id.raw_id() - crate::constants::FICT_OFFSET) as usize,
             ),
-            Body::Asteroid(id) => self.asteroid_name(id.mpc_number()),
-            Body::PlanetMoon(id) => format!("{}", id.encoded()),
-            Body::Comet(id) => format!("{}", id.number()),
+            Body::Asteroid(id) => match id.mpc_number() {
+                2060 => "Chiron".into(),
+                5145 => "Pholus".into(),
+                mpc => self.asteroid_name(mpc),
+            },
+            Body::PlanetMoon(_) | Body::Comet(_) => format!("{}", body.to_raw_id()),
         }
     }
 
@@ -2910,15 +2913,22 @@ impl Ephemeris {
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 continue;
             }
-            let num_str: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let stripped = trimmed.trim_start_matches(['(', '[', '{']);
+            let num_str: String = stripped
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
             if num_str.is_empty() {
                 continue;
             }
-            let file_mpc: i32 = num_str.parse().ok()?;
+            let file_mpc: i32 = match num_str.parse() {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
             if file_mpc != mpc {
                 continue;
             }
-            let rest = &trimmed[num_str.len()..];
+            let rest = &stripped[num_str.len()..];
             let name_part = rest.trim_start();
             if name_part.is_empty() {
                 continue;
