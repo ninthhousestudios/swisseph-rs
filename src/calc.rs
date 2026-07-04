@@ -2439,6 +2439,114 @@ pub(crate) fn calc_asteroid_moshier(
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
 
+// ---------------------------------------------------------------------------
+// Fictitious planet calc pipeline
+// ---------------------------------------------------------------------------
+
+pub(crate) struct FictitiousProvider<'a, P: PositionProvider> {
+    inner: &'a P,
+    catalog: &'a crate::fictitious::FictitiousCatalog,
+    ipl: usize,
+    models: &'a AstroModels,
+}
+
+impl<P: PositionProvider> PositionProvider for FictitiousProvider<'_, P> {
+    fn positions(&self, _body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
+        let pos = self.inner.positions(Body::Sun, jd, need_speed)?;
+        let planet_bary = crate::fictitious::osc_el_plan(
+            jd,
+            self.catalog,
+            self.ipl,
+            &pos.earth_bary,
+            &pos.sun_bary,
+            self.models,
+        )?;
+        Ok(SwephPositions {
+            planet_bary,
+            earth_bary: pos.earth_bary,
+            earth_helio: pos.earth_helio,
+            sun_bary: pos.sun_bary,
+        })
+    }
+
+    fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
+        self.inner.moon_geo(jd, need_speed)
+    }
+
+    fn updates_sun_in_light_time(&self) -> bool {
+        self.inner.updates_sun_in_light_time()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_fictitious_sweph(
+    jd: f64,
+    body: Body,
+    catalog: &crate::fictitious::FictitiousCatalog,
+    ipl: usize,
+    planet_files: &[SwissEphFile],
+    moon_files: &[SwissEphFile],
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = SwephProvider {
+        planet_files,
+        moon_files,
+    };
+    let p = FictitiousProvider {
+        inner: &inner,
+        catalog,
+        ipl,
+        models,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_fictitious_jpl(
+    jd: f64,
+    body: Body,
+    catalog: &crate::fictitious::FictitiousCatalog,
+    ipl: usize,
+    jpl_file: &crate::jpl::JplFile,
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = JplProvider { file: jpl_file };
+    let p = FictitiousProvider {
+        inner: &inner,
+        catalog,
+        ipl,
+        models,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calc_fictitious_moshier(
+    jd: f64,
+    body: Body,
+    catalog: &crate::fictitious::FictitiousCatalog,
+    ipl: usize,
+    eps_j2000: &Epsilon,
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let inner = MoshierEarthProvider { eps_j2000 };
+    let p = FictitiousProvider {
+        inner: &inner,
+        catalog,
+        ipl,
+        models,
+    };
+    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

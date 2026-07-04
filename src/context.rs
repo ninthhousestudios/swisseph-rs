@@ -52,6 +52,7 @@ pub struct Ephemeris {
     asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
     jpl_file: Option<crate::jpl::JplFile>,
     stars: crate::stars::StarCatalog,
+    fictitious_catalog: crate::fictitious::FictitiousCatalog,
 }
 
 impl Ephemeris {
@@ -133,6 +134,8 @@ impl Ephemeris {
             }
         }
         let stars = crate::stars::load_catalog(config.ephe_path.as_deref());
+        let fictitious_catalog =
+            crate::fictitious::load_fictitious_catalog(config.ephe_path.as_deref())?;
         Ok(Self {
             config,
             user_tidal_acceleration,
@@ -143,6 +146,7 @@ impl Ephemeris {
             asteroid_files,
             jpl_file,
             stars,
+            fictitious_catalog,
         })
     }
 
@@ -1589,6 +1593,62 @@ impl Ephemeris {
                 (flags & !crate::calc::EPHMASK) | CalcFlags::MOSEPH
             };
             return Ok((xr, x2000, flags_used));
+        }
+
+        if let Body::Fictitious(fid) = body {
+            let ipl = (fid.raw_id() - crate::constants::FICT_OFFSET) as usize;
+            let eps_j2000 =
+                crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
+            let catalog = &self.fictitious_catalog;
+            return match config.ephemeris_source {
+                EphemerisSource::Swiss => {
+                    match crate::calc::calc_fictitious_sweph(
+                        jd_tt,
+                        body,
+                        catalog,
+                        ipl,
+                        &self.planet_files,
+                        &self.moon_files,
+                        &eps_j2000,
+                        flags,
+                        config,
+                        models,
+                    ) {
+                        Ok((xr, x2000)) => Ok((xr, x2000, flags)),
+                        Err(Error::BeyondEphemerisLimits { .. }) => {
+                            let fallback_flags = (flags & !CalcFlags::SWIEPH) | CalcFlags::MOSEPH;
+                            let (xr, x2000) = crate::calc::calc_fictitious_moshier(
+                                jd_tt,
+                                body,
+                                catalog,
+                                ipl,
+                                &eps_j2000,
+                                fallback_flags,
+                                config,
+                                models,
+                            )?;
+                            Ok((xr, x2000, fallback_flags))
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                EphemerisSource::Jpl => {
+                    let jpl = self.jpl_file.as_ref().ok_or(Error::EphemerisNotAvailable {
+                        body,
+                        source: EphemerisSource::Jpl,
+                    })?;
+                    let (xr, x2000) = crate::calc::calc_fictitious_jpl(
+                        jd_tt, body, catalog, ipl, jpl, &eps_j2000, flags, config, models,
+                    )?;
+                    Ok((xr, x2000, flags))
+                }
+                EphemerisSource::Moshier => {
+                    let (xr, x2000) = crate::calc::calc_fictitious_moshier(
+                        jd_tt, body, catalog, ipl, &eps_j2000, flags, config, models,
+                    )?;
+                    Ok((xr, x2000, flags))
+                }
+            };
         }
 
         if body == Body::Chiron
