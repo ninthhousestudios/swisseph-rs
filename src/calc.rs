@@ -2440,96 +2440,223 @@ pub(crate) fn calc_asteroid_moshier(
 }
 
 // ---------------------------------------------------------------------------
-// Fictitious planet calc pipeline
+// Fictitious planet calc pipeline — ports app_pos_etc_plan_osc (sweph.c:3365)
 // ---------------------------------------------------------------------------
+//
+// Structurally distinct from apparent_planet (which ports app_pos_etc_plan):
+// - Light-time loop works on barycentric/heliocentric positions; observer
+//   subtraction happens AFTER the loop (sweph.c:3497).
+// - HELCTR/BARYCTR handled via observer-zeroing, not early returns.
+// - niter=1 always (2 passes), regardless of backend.
+// - Speed refinement re-evaluates osc_el_plan at t-dt.
 
-pub(crate) struct FictitiousProvider<'a, P: PositionProvider> {
-    inner: &'a P,
-    catalog: &'a crate::fictitious::FictitiousCatalog,
+#[allow(clippy::too_many_arguments)]
+fn apparent_fictitious<P: PositionProvider>(
+    p: &P,
+    jd: f64,
+    catalog: &crate::fictitious::FictitiousCatalog,
     ipl: usize,
-    models: &'a AstroModels,
-}
+    flags: CalcFlags,
+    config: &EphemerisConfig,
+    models: &AstroModels,
+) -> Result<([f64; 24], [f64; 6]), Error> {
+    let need_speed = flags.contains(CalcFlags::SPEED);
 
-impl<P: PositionProvider> PositionProvider for FictitiousProvider<'_, P> {
-    fn positions(&self, _body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
-        let pos = self.inner.positions(Body::Sun, jd, need_speed)?;
-        let planet_bary = crate::fictitious::osc_el_plan(
-            jd,
-            self.catalog,
-            self.ipl,
-            &pos.earth_bary,
-            &pos.sun_bary,
-            self.models,
-        )?;
-        Ok(SwephPositions {
-            planet_bary,
-            earth_bary: pos.earth_bary,
-            earth_helio: pos.earth_helio,
-            sun_bary: pos.sun_bary,
-        })
+    let pos = p.positions(Body::Sun, jd, true)?;
+    let pdp_x =
+        crate::fictitious::osc_el_plan(jd, catalog, ipl, &pos.earth_bary, &pos.sun_bary, models)?;
+    let mut xx = pdp_x;
+
+    // Observer: geocenter, topocenter, heliocenter, or barycenter (sweph.c:3396-3422)
+    let offset = topo_offset(jd, flags, config, models);
+    let mut xobs = if flags.contains(CalcFlags::BARYCTR) {
+        [0.0; 6]
+    } else if flags.contains(CalcFlags::HELCTR) {
+        pos.sun_bary
+    } else {
+        let mut o = pos.earth_bary;
+        for i in 0..6 {
+            o[i] += offset[i];
+        }
+        o
+    };
+
+    let is_geo = !flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR);
+
+    // Light-time (sweph.c:3426-3493)
+    let mut dt = 0.0;
+    let mut xxsp = [0.0; 3];
+    let mut xobs2 = [0.0; 6];
+    if !flags.contains(CalcFlags::TRUEPOS) {
+        // Speed pre-pass: estimate dt at t-1 (sweph.c:3428-3453)
+        if need_speed {
+            let xxsv_sp = [
+                pdp_x[0] - pdp_x[3],
+                pdp_x[1] - pdp_x[4],
+                pdp_x[2] - pdp_x[5],
+            ];
+            let mut xxsp_tmp = xxsv_sp;
+            for _ in 0..=1 {
+                let mut dx = xxsp_tmp;
+                if is_geo {
+                    for i in 0..3 {
+                        dx[i] -= xobs[i] - xobs[i + 3];
+                    }
+                }
+                let dist = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt();
+                let dt_sp = dist * AUNIT / CLIGHT / 86400.0;
+                for i in 0..3 {
+                    xxsp_tmp[i] = xxsv_sp[i] - dt_sp * pdp_x[i + 3];
+                }
+            }
+            for i in 0..3 {
+                xxsp[i] = xxsv_sp[i] - xxsp_tmp[i];
+            }
+        }
+
+        // Main light-time loop (sweph.c:3456-3471)
+        for _ in 0..=1 {
+            let mut dx = [xx[0], xx[1], xx[2]];
+            if is_geo {
+                for i in 0..3 {
+                    dx[i] -= xobs[i];
+                }
+            }
+            dt = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt() * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xx[i] = pdp_x[i] - dt * pdp_x[i + 3];
+                xx[i + 3] = pdp_x[i + 3];
+            }
+        }
+
+        // Speed refinement: re-evaluate at t-dt (sweph.c:3472-3492)
+        if need_speed {
+            for i in 0..3 {
+                xxsp[i] = pdp_x[i] - xx[i] - xxsp[i];
+            }
+            let t = jd - dt;
+            let pos_ret = p.positions(Body::Sun, t, true)?;
+            xx = crate::fictitious::osc_el_plan(
+                t,
+                catalog,
+                ipl,
+                &pos_ret.earth_bary,
+                &pos_ret.sun_bary,
+                models,
+            )?;
+            if flags.contains(CalcFlags::TOPOCTR) {
+                let offset_ret = topo_offset(t, flags, config, models);
+                xobs2 = pos_ret.earth_bary;
+                for i in 0..6 {
+                    xobs2[i] += offset_ret[i];
+                }
+            } else {
+                xobs2 = pos_ret.earth_bary;
+            }
+        }
     }
 
-    fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
-        self.inner.moon_geo(jd, need_speed)
+    // Geocentric conversion — uses original-epoch xobs (sweph.c:3497-3498)
+    for i in 0..6 {
+        xx[i] -= xobs[i];
+    }
+    // Speed dt-change correction (sweph.c:3505-3507)
+    if !flags.contains(CalcFlags::TRUEPOS) && need_speed {
+        for i in 0..3 {
+            xx[i + 3] -= xxsp[i];
+        }
+    }
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
     }
 
-    fn updates_sun_in_light_time(&self) -> bool {
-        self.inner.updates_sun_in_light_time()
+    // Deflection (sweph.c:3515-3517)
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOGDEFL) {
+        let earth_helio = [
+            pos.earth_bary[0] - pos.sun_bary[0],
+            pos.earth_bary[1] - pos.sun_bary[1],
+            pos.earth_bary[2] - pos.sun_bary[2],
+            pos.earth_bary[3] - pos.sun_bary[3],
+            pos.earth_bary[4] - pos.sun_bary[4],
+            pos.earth_bary[5] - pos.sun_bary[5],
+        ];
+        let mut planet_helio = [0.0; 6];
+        for i in 0..3 {
+            planet_helio[i] = xx[i] + earth_helio[i];
+            planet_helio[i + 3] = pdp_x[i + 3];
+        }
+        deflect_light(&mut xx, &earth_helio, &planet_helio, need_speed);
     }
+
+    // Aberration (sweph.c:3521-3531) — xobs is original epoch, xobs2 is t-dt
+    if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOABERR) {
+        aberr_light(&mut xx, &[xobs[3], xobs[4], xobs[5]], need_speed);
+        if need_speed {
+            for i in 0..3 {
+                xx[i + 3] += xobs[i + 3] - xobs2[i + 3];
+            }
+        }
+    }
+
+    if !need_speed {
+        xx[3] = 0.0;
+        xx[4] = 0.0;
+        xx[5] = 0.0;
+    }
+
+    // C's app_pos_etc_plan_osc does NOT call swi_bias — frame bias is omitted
+    // for fictitious bodies (unlike the general app_pos_etc_plan at sweph.c:2758).
+
+    let x2000 = xx;
+    let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);
+    Ok((
+        app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref()),
+        x2000,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_fictitious_sweph(
     jd: f64,
-    body: Body,
+    _body: Body,
     catalog: &crate::fictitious::FictitiousCatalog,
     ipl: usize,
     planet_files: &[SwissEphFile],
     moon_files: &[SwissEphFile],
-    eps_j2000: &Epsilon,
+    _eps_j2000: &Epsilon,
     flags: CalcFlags,
     config: &EphemerisConfig,
     models: &AstroModels,
 ) -> Result<([f64; 24], [f64; 6]), Error> {
-    let inner = SwephProvider {
+    let p = SwephProvider {
         planet_files,
         moon_files,
     };
-    let p = FictitiousProvider {
-        inner: &inner,
-        catalog,
-        ipl,
-        models,
-    };
-    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+    apparent_fictitious(&p, jd, catalog, ipl, flags, config, models)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_fictitious_jpl(
     jd: f64,
-    body: Body,
+    _body: Body,
     catalog: &crate::fictitious::FictitiousCatalog,
     ipl: usize,
     jpl_file: &crate::jpl::JplFile,
-    eps_j2000: &Epsilon,
+    _eps_j2000: &Epsilon,
     flags: CalcFlags,
     config: &EphemerisConfig,
     models: &AstroModels,
 ) -> Result<([f64; 24], [f64; 6]), Error> {
-    let inner = JplProvider { file: jpl_file };
-    let p = FictitiousProvider {
-        inner: &inner,
-        catalog,
-        ipl,
-        models,
-    };
-    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+    let p = JplProvider { file: jpl_file };
+    apparent_fictitious(&p, jd, catalog, ipl, flags, config, models)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_fictitious_moshier(
     jd: f64,
-    body: Body,
+    _body: Body,
     catalog: &crate::fictitious::FictitiousCatalog,
     ipl: usize,
     eps_j2000: &Epsilon,
@@ -2537,14 +2664,8 @@ pub(crate) fn calc_fictitious_moshier(
     config: &EphemerisConfig,
     models: &AstroModels,
 ) -> Result<([f64; 24], [f64; 6]), Error> {
-    let inner = MoshierEarthProvider { eps_j2000 };
-    let p = FictitiousProvider {
-        inner: &inner,
-        catalog,
-        ipl,
-        models,
-    };
-    apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
+    let p = MoshierEarthProvider { eps_j2000 };
+    apparent_fictitious(&p, jd, catalog, ipl, flags, config, models)
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ mod crossings;
 mod date;
 mod deltat;
 mod eclipse;
+mod fictitious;
 mod fictitious_elements;
 mod fixstar;
 mod fixstar_ayanamsa;
