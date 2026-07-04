@@ -1,3 +1,6 @@
+//! Sidereal ayanamsa computation — the precession-corrected offset between
+//! the tropical and sidereal zodiacs.
+
 use crate::config::EphemerisConfig;
 use crate::constants::{
     B1950, DEGTORAD, J1900, J2000, RADTODEG, SSY_PLANE_INCL, SSY_PLANE_NODE_E2000,

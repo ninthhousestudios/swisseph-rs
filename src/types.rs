@@ -1,3 +1,6 @@
+//! Core value types: body identifiers, house systems, calendar/sidereal/model enums,
+//! Julian Day newtypes, and small result structs shared across the crate's public API.
+
 use std::ops::{Add, Sub};
 
 use crate::constants;
@@ -13,6 +16,7 @@ use crate::constants;
 pub struct FictitiousId(i32);
 
 impl FictitiousId {
+    /// Validates and constructs a `FictitiousId` from a raw C body ID (40–999).
     pub fn new(raw_id: i32) -> crate::Result<Self> {
         if (constants::FICT_OFFSET..=constants::FICT_MAX).contains(&raw_id) {
             Ok(Self(raw_id))
@@ -21,6 +25,7 @@ impl FictitiousId {
         }
     }
 
+    /// Returns the raw C body ID.
     pub fn raw_id(self) -> i32 {
         self.0
     }
@@ -33,6 +38,7 @@ impl FictitiousId {
 pub struct AsteroidId(i32);
 
 impl AsteroidId {
+    /// Validates and constructs an `AsteroidId` from an MPC catalog number (>= 0).
     pub fn new(mpc_number: i32) -> crate::Result<Self> {
         if mpc_number >= 0 {
             Ok(Self(mpc_number))
@@ -41,6 +47,7 @@ impl AsteroidId {
         }
     }
 
+    /// Returns the MPC catalog number.
     pub fn mpc_number(self) -> i32 {
         self.0
     }
@@ -53,6 +60,7 @@ impl AsteroidId {
 pub struct PlanetMoonId(i32);
 
 impl PlanetMoonId {
+    /// Validates and constructs a `PlanetMoonId` from an encoded planet/moon value (0–999).
     pub fn new(encoded: i32) -> crate::Result<Self> {
         if (0..=999).contains(&encoded) {
             Ok(Self(encoded))
@@ -61,6 +69,7 @@ impl PlanetMoonId {
         }
     }
 
+    /// Returns the raw encoded planet/moon value.
     pub fn encoded(self) -> i32 {
         self.0
     }
@@ -77,48 +86,79 @@ impl PlanetMoonId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Body {
+    /// The Sun.
     Sun,
+    /// The Moon.
     Moon,
+    /// Mercury.
     Mercury,
+    /// Venus.
     Venus,
+    /// Mars.
     Mars,
+    /// Jupiter.
     Jupiter,
+    /// Saturn.
     Saturn,
+    /// Uranus.
     Uranus,
+    /// Neptune.
     Neptune,
+    /// Pluto.
     Pluto,
+    /// Mean lunar node.
     MeanNode,
+    /// True (osculating) lunar node.
     TrueNode,
+    /// Mean lunar apogee (mean "Black Moon" / Lilith).
     MeanApogee,
+    /// Osculating lunar apogee (true "Black Moon" / Lilith).
     OscuApogee,
+    /// The Earth (heliocentric/barycentric calculations).
     Earth,
+    /// Asteroid/comet 2060 Chiron.
     Chiron,
+    /// Asteroid 5145 Pholus.
     Pholus,
+    /// Asteroid 1 Ceres.
     Ceres,
+    /// Asteroid 2 Pallas.
     Pallas,
+    /// Asteroid 3 Juno.
     Juno,
+    /// Asteroid 4 Vesta.
     Vesta,
+    /// Interpolated lunar apogee.
     IntpApogee,
+    /// Interpolated lunar perigee.
     IntpPerigee,
+    /// Named fictitious (hypothetical) planet, keyed by [`FictitiousId`].
     Fictitious(FictitiousId),
+    /// Numbered minor planet, keyed by [`AsteroidId`] (MPC catalog number).
     Asteroid(AsteroidId),
+    /// Planetary moon, keyed by [`PlanetMoonId`] (encoded planet/moon pair).
     PlanetMoon(PlanetMoonId),
+    /// Pseudo-body representing the ecliptic and nutation (not a physical body).
     EclipticNutation,
 }
 
 impl Body {
+    /// Constructs a `Body::Fictitious` from a raw fictitious-planet ID (40–999).
     pub fn fictitious(raw_id: i32) -> crate::Result<Self> {
         Ok(Self::Fictitious(FictitiousId::new(raw_id)?))
     }
 
+    /// Constructs a `Body::Asteroid` from an MPC catalog number.
     pub fn asteroid(mpc_number: i32) -> crate::Result<Self> {
         Ok(Self::Asteroid(AsteroidId::new(mpc_number)?))
     }
 
+    /// Constructs a `Body::PlanetMoon` from an encoded planet/moon value.
     pub fn planet_moon(encoded: i32) -> crate::Result<Self> {
         Ok(Self::PlanetMoon(PlanetMoonId::new(encoded)?))
     }
 
+    /// Converts this `Body` to the raw C body ID used by `swe_calc` and friends.
     pub fn to_raw_id(self) -> i32 {
         match self {
             Self::Sun => 0,
@@ -200,24 +240,43 @@ impl TryFrom<i32> for Body {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum FictitiousBody {
+    /// Cupido (Hamburg school hypothetical planet).
     Cupido = 40,
+    /// Hades (Hamburg school hypothetical planet).
     Hades = 41,
+    /// Zeus (Hamburg school hypothetical planet).
     Zeus = 42,
+    /// Kronos (Hamburg school hypothetical planet).
     Kronos = 43,
+    /// Apollon (Hamburg school hypothetical planet).
     Apollon = 44,
+    /// Admetos (Hamburg school hypothetical planet).
     Admetos = 45,
+    /// Vulkanus (Hamburg school hypothetical planet).
     Vulkanus = 46,
+    /// Poseidon (Hamburg school hypothetical planet).
     Poseidon = 47,
+    /// Isis (Sepharial's hypothetical planet).
     Isis = 48,
+    /// Nibiru (hypothetical planet).
     Nibiru = 49,
+    /// Harrington (hypothetical trans-Neptunian planet).
     Harrington = 50,
+    /// Neptune per Le Verrier's original orbital elements.
     NeptuneLeverrier = 51,
+    /// Neptune per Adams' original orbital elements.
     NeptuneAdams = 52,
+    /// Pluto per Lowell's predicted orbital elements.
     PlutoLowell = 53,
+    /// Pluto per Pickering's predicted orbital elements.
     PlutoPickering = 54,
+    /// Vulcan (hypothetical intra-Mercurial planet).
     Vulcan = 55,
+    /// Selena/White Moon (hypothetical lunar-derived point).
     WhiteMoon = 56,
+    /// Proserpina (hypothetical planet).
     Proserpina = 57,
+    /// Waldemath's second (hypothetical dark) Moon.
     Waldemath = 58,
 }
 
@@ -265,34 +324,60 @@ impl TryFrom<i32> for FictitiousBody {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HouseSystem {
+    /// Equal houses from the Ascendant.
     Equal,
+    /// Alcabitius house system.
     Alcabitius,
+    /// Campanus house system.
     Campanus,
+    /// Equal houses from the MC.
     EqualMC,
+    /// Carter poli-equatorial house system.
     Carter,
+    /// Gauquelin sectors (36 divisions).
     Gauquelin,
+    /// Horizon/azimuth-based house system.
     Horizon,
+    /// Sunshine house system.
     Sunshine,
+    /// Sunshine house system, alternate method.
     SunshineAlt,
+    /// Savard-A house system.
     SavardA,
+    /// Koch house system.
     Koch,
+    /// Pullen SD (sinusoidal delta) house system.
     PullenSD,
+    /// Morinus house system.
     Morinus,
+    /// Equal houses with house 1 starting at 0° Aries.
     EqualAries,
+    /// Porphyry house system.
     Porphyry,
+    /// Placidus house system.
     Placidus,
+    /// Pullen SR (sinusoidal ratio) house system.
     PullenSR,
+    /// Regiomontanus house system.
     Regiomontanus,
+    /// Sripati house system.
     Sripati,
+    /// Polich/Page (topocentric) house system.
     PolichPage,
+    /// Krusinski-Pisa-Goelzer house system.
     KrusinskiPisaGoelzer,
+    /// Equal houses, Vehlow variant (cusp 1 at Ascendant - 15°).
     Vehlow,
+    /// Whole-sign house system.
     WholeSign,
+    /// Axial rotation (Meridian) house system.
     Meridian,
+    /// APC (astrological process control) house system.
     APC,
 }
 
 impl HouseSystem {
+    /// Returns the single-character house system code used by C's `swe_houses` family.
     pub fn to_char(self) -> u8 {
         match self {
             Self::Equal => b'A',
@@ -323,6 +408,7 @@ impl HouseSystem {
         }
     }
 
+    /// Returns the human-readable name of the house system.
     pub fn name(self) -> &'static str {
         match self {
             Self::Equal => "equal",
@@ -426,57 +512,106 @@ impl TryFrom<i32> for CalendarType {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum SiderealMode {
+    /// Fagan/Bradley ayanamsa.
     FaganBradley = 0,
+    /// Lahiri (Chitrapaksha) ayanamsa.
     Lahiri = 1,
+    /// De Luce ayanamsa.
     DeLuce = 2,
+    /// Raman ayanamsa.
     Raman = 3,
+    /// Usha/Shashi ayanamsa.
     Ushashashi = 4,
+    /// Krishnamurti ayanamsa.
     Krishnamurti = 5,
+    /// Djwhal Khul ayanamsa.
     DjwhalKhul = 6,
+    /// Yukteshwar ayanamsa.
     Yukteshwar = 7,
+    /// J.N. Bhasin ayanamsa.
     JnBhasin = 8,
+    /// Babylonian/Kugler 1 ayanamsa.
     BabylKugler1 = 9,
+    /// Babylonian/Kugler 2 ayanamsa.
     BabylKugler2 = 10,
+    /// Babylonian/Kugler 3 ayanamsa.
     BabylKugler3 = 11,
+    /// Babylonian/Huber ayanamsa.
     BabylHuber = 12,
+    /// Babylonian/Eta Piscium ayanamsa.
     BabylEtpsc = 13,
+    /// Babylonian ayanamsa with Aldebaran fixed at 15° Taurus.
     Aldebaran15Tau = 14,
+    /// Hipparchos ayanamsa.
     Hipparchos = 15,
+    /// Sassanian ayanamsa.
     Sassanian = 16,
+    /// Ayanamsa with the Galactic Center fixed at 0° Sagittarius.
     GalCent0Sag = 17,
+    /// J2000 ayanamsa (fixed offset from J2000 epoch).
     J2000 = 18,
+    /// J1900 ayanamsa (fixed offset from J1900 epoch).
     J1900 = 19,
+    /// B1950 ayanamsa (fixed offset from B1950 epoch).
     B1950 = 20,
+    /// Suryasiddhanta ayanamsa.
     Suryasiddhanta = 21,
+    /// Suryasiddhanta ayanamsa, mean Sun variant.
     SuryasiddhantaMsun = 22,
+    /// Aryabhata ayanamsa.
     Aryabhata = 23,
+    /// Aryabhata ayanamsa, mean Sun variant.
     AryabhataMsun = 24,
+    /// SS (Suryasiddhanta) Revati ayanamsa.
     SsRevati = 25,
+    /// SS (Suryasiddhanta) Citra ayanamsa.
     SsCitra = 26,
+    /// True Citra ayanamsa.
     TrueCitra = 27,
+    /// True Revati ayanamsa.
     TrueRevati = 28,
+    /// True Pushya ayanamsa (PVRN Rao).
     TruePushya = 29,
+    /// Galactic Center ayanamsa (Gil Brand).
     GalCentRgilbrand = 30,
+    /// Galactic Equator ayanamsa (IAU 1958).
     GalEquIau1958 = 31,
+    /// Galactic Equator ayanamsa (true).
     GalEquTrue = 32,
+    /// Galactic Equator ayanamsa, mid-Mula variant.
     GalEquMula = 33,
+    /// Skydram galactic alignment ayanamsa (Mardyks).
     GalAlignMardyks = 34,
+    /// True Mula ayanamsa (Chandra Hari).
     TrueMula = 35,
+    /// Dhruva/Galactic Center/Mula ayanamsa (Wilhelm).
     GalCentMulaWilhelm = 36,
+    /// Aryabhata 522 ayanamsa.
     Aryabhata522 = 37,
+    /// Babylonian/Britton ayanamsa.
     BabylBritton = 38,
+    /// "Vedic"/Sheoran ayanamsa.
     TrueSheoran = 39,
+    /// Cochrane ayanamsa (Galactic Center = 0° Capricorn).
     GalCentCochrane = 40,
+    /// Galactic Equator ayanamsa (Fiorenza).
     GalEquFiorenza = 41,
+    /// Vettius Valens Moon ayanamsa.
     ValensMoon = 42,
+    /// Lahiri 1940 ayanamsa.
     Lahiri1940 = 43,
+    /// Lahiri VP285 ayanamsa.
     LahiriVp285 = 44,
+    /// Krishnamurti-Senthilathiban ayanamsa (VP291).
     KrishnamurtiVp291 = 45,
+    /// Lahiri ICRC ayanamsa.
     LahiriIcrc = 46,
+    /// User-defined ayanamsa (custom reference point/date supplied by the caller).
     User = 255,
 }
 
 impl SiderealMode {
+    /// Returns the human-readable ayanamsa name, or `None` for the user-defined mode.
     pub fn name(self) -> Option<&'static str> {
         match self {
             Self::FaganBradley => Some("Fagan/Bradley"),
@@ -614,16 +749,27 @@ pub enum EphemerisSource {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum PrecessionModel {
+    /// IAU 1976 precession model.
     IAU1976 = 1,
+    /// Laskar 1986 precession model.
     Laskar1986 = 2,
+    /// Williams 1994 precession model with Laskar-derived obliquity rate.
     WillEpsLask = 3,
+    /// Williams 1994 precession model.
     Williams1994 = 4,
+    /// Simon 1994 precession model.
     Simon1994 = 5,
+    /// IAU 2000 precession model.
     IAU2000 = 6,
+    /// Bretagnon 2003 precession model.
     Bretagnon2003 = 7,
+    /// IAU 2006 precession model.
     IAU2006 = 8,
+    /// Vondrák 2011 long-term precession model.
     Vondrak2011 = 9,
+    /// Owen 1990 precession model.
     Owen1990 = 10,
+    /// Newcomb precession model.
     Newcomb = 11,
 }
 
@@ -765,6 +911,7 @@ pub struct Epsilon {
 }
 
 impl Epsilon {
+    /// Constructs an `Epsilon` from an obliquity value in radians, precomputing sin/cos.
     pub fn new(eps_rad: f64) -> Self {
         Self {
             eps: eps_rad,
@@ -793,14 +940,20 @@ pub struct Nutation {
 /// Delta T (TT = UT1 + ΔT). The newtype prevents accidentally passing a UT value where TT
 /// is expected.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct JdTt(pub f64);
+pub struct JdTt(
+    /// Julian Day number on the TT time scale.
+    pub f64,
+);
 
 /// Julian Day Number on the UT1 (Universal Time) time scale.
 ///
 /// UT1 tracks the Earth's rotation and is the time scale of civil clocks (approximately).
 /// The newtype prevents accidentally passing a TT value where UT is expected.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct JdUt1(pub f64);
+pub struct JdUt1(
+    /// Julian Day number on the UT1 time scale.
+    pub f64,
+);
 
 macro_rules! impl_jd_ops {
     ($T:ty) => {
@@ -836,10 +989,15 @@ impl_jd_ops!(JdUt1);
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UtcComponents {
+    /// Calendar year.
     pub year: i32,
+    /// Calendar month (1–12).
     pub month: i32,
+    /// Calendar day of month (1–31).
     pub day: i32,
+    /// Hour of day (0–23).
     pub hour: i32,
+    /// Minute of hour (0–59).
     pub minute: i32,
     /// Fractional seconds (allows leap-second representation up to 60.999...).
     pub second: f64,

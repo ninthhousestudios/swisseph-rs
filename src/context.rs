@@ -1,3 +1,7 @@
+//! Primary API — [`Ephemeris`] construction, configuration dispatch, and all
+//! public calculation entry points ([`calc`](Ephemeris::calc),
+//! [`houses`](Ephemeris::houses), eclipses, rise/set, heliacal, etc.).
+
 use std::fs;
 
 #[cfg(feature = "jpl")]

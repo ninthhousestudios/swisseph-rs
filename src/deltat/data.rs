@@ -1,13 +1,21 @@
+//! Delta-T historical and tidal-acceleration tables. Do not hand-edit.
+
 #![allow(clippy::unreadable_literal)]
 #![allow(clippy::excessive_precision)]
 
+/// First year covered by the [`DT`] tabulated delta-T table.
 pub const TABSTART: i32 = 1620;
+/// Number of entries in the [`DT`] tabulated delta-T table.
 pub const TABSIZ: usize = 409;
 
+/// First year covered by the [`DT2`] (Morrison & Stephenson 2004) table.
 pub const TAB2_START: i32 = -1000;
+/// Year step between entries of the [`DT2`] table.
 pub const TAB2_STEP: i32 = 100;
 
+/// First year covered by the [`DT97`] (Stephenson & Morrison 1997) table.
 pub const TAB97_START: i32 = -500;
+/// Year step between entries of the [`DT97`] table.
 pub const TAB97_STEP: i32 = 50;
 
 /// Tabulated delta-T values 1620–2028, one entry per year, units: seconds.

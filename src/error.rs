@@ -1,3 +1,5 @@
+//! Error types for the Swiss Ephemeris calculation pipeline.
+
 use std::fmt;
 use std::path::PathBuf;
 

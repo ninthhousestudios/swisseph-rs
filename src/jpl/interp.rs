@@ -1,3 +1,7 @@
+//! JPL DE Chebyshev record reading and interpolation.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::error::Error;
 
 use super::JplFile;

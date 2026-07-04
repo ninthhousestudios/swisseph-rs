@@ -9,7 +9,7 @@
 //!   `SE_NODBIT_FOPOINT`): the true instantaneous two-body (angular-momentum)
 //!   ellipse, sampled at up to 3 epochs for a central-difference speed.
 //!
-//! Both families share the [`transform_nodaps_output`] pipeline (C `swe_nod_aps`
+//! Both families share the `transform_nodaps_output` pipeline (C `swe_nod_aps`
 //! A.5), which takes the four raw node/apsis vectors in heliocentric
 //! ecliptic-of-date cartesian and produces the observer-relative apparent output
 //! (light deflection, aberration, precession, nutation, sidereal, frame/units).

@@ -1,3 +1,8 @@
+//! Obliquity of the ecliptic — 11 models (IAU 1976/2000/2006, Vondrák, Owen,
+//! Laskar, etc.) ported from the C `swi_epsiln`.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 // Obliquity coefficient tables (IAU 1976/2000/2006, Vondrák, Owen) are verbatim
 // transcriptions from the C Swiss Ephemeris; rounding their literals to f64
 // precision would change bit patterns and break golden-data fidelity.

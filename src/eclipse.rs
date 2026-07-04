@@ -419,9 +419,10 @@ pub struct EclipseHow {
     /// Saros series member number, 1-based (solar eclipses of the Sun only).
     pub saros_member: f64,
     /// Eclipse-type classification (TOTAL/ANNULAR/PARTIAL, possibly OR'd with VISIBLE); empty
-    /// means no eclipse visible from this location at this instant. [`sol_eclipse_how`]
+    /// means no eclipse visible from this location at this instant.
+    /// [`Ephemeris::sol_eclipse_how`](crate::Ephemeris::sol_eclipse_how)
     /// additionally merges CENTRAL/NONCENTRAL in from the geocentric shadow geometry
-    /// (`eclipse_where`) -- `eclipse_how` itself never sets those bits.
+    /// — the internal `eclipse_how` itself never sets those bits.
     pub flags: EclipseFlags,
 }
 
@@ -1102,13 +1103,13 @@ pub struct SolarEclipseLocal {
     pub time_sunset: f64,
     /// Local circumstances (`attr[]`) at whichever instant was written last: the moment of
     /// maximum eclipse, unless a sunrise/sunset re-anchor (below) overwrote it. `core_diameter_km`
-    /// is filled in by [`sol_eclipse_when_loc`] from a geocentric `eclipse_where` call at
+    /// is filled in by [`Ephemeris::sol_eclipse_when_loc`](crate::Ephemeris::sol_eclipse_when_loc) from a geocentric `eclipse_where` call at
     /// `time_maximum` (§6.1 step 4), same "geocentric, not observer-specific" caveat as
     /// `sol_eclipse_how`.
     pub attr: EclipseHow,
     /// Eclipse-type classification (TOTAL/ANNULAR/PARTIAL) OR'd with VISIBLE and whichever of
     /// MAX/1ST/2ND/3RD/4TH_VISIBLE applied at some contact; `NONCENTRAL` merged in by
-    /// [`sol_eclipse_when_loc`]. The search loop retries internally until a visible eclipse is
+    /// [`Ephemeris::sol_eclipse_when_loc`](crate::Ephemeris::sol_eclipse_when_loc). The search loop retries internally until a visible eclipse is
     /// found -- never empty.
     pub flags: EclipseFlags,
 }
@@ -2350,7 +2351,7 @@ pub(crate) fn lun_occult_where(
 /// (swecl.c:1572-1984, §2). Same slot layout as [`SolarEclipseGlobal`], but `time_ra_conjunction`
 /// (`tret[1]`) is the transit instant of the *occulted body* (not necessarily the Sun), and the
 /// search never produces `ANNULAR`/`HYBRID` for `ipl != Body::Sun` (rejected/stripped from
-/// `ifltype` up front -- see [`lun_occult_when_glob`]).
+/// `ifltype` up front — see [`Ephemeris::lun_occult_when_glob`](crate::Ephemeris::lun_occult_when_glob)).
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OccultGlobal {
@@ -2732,15 +2733,15 @@ pub struct OccultLocal {
     /// Time (UT) of fourth contact (disc-edge tangency out; for a star, aliased from
     /// `time_third_contact`). `tret[4]`.
     pub time_fourth_contact: f64,
-    /// Time (UT) of the occulted body's rise, if within the [1st,4th]-contact window; `0.0`
+    /// Time (UT) of the occulted body's rise, if within the \[1st,4th\]-contact window; `0.0`
     /// otherwise (including circumpolar). `tret[5]`.
     pub time_rise: f64,
-    /// Time (UT) of the occulted body's set, if within the [1st,4th]-contact window; `0.0`
+    /// Time (UT) of the occulted body's set, if within the \[1st,4th\]-contact window; `0.0`
     /// otherwise (including circumpolar). `tret[6]`.
     pub time_set: f64,
     /// Local circumstances (`attr[]`) at whichever instant was written last in the descending
     /// visibility scan (§3 step 10): the moment of maximum occultation. `core_diameter_km` is
-    /// filled in by [`lun_occult_when_loc`] from a geocentric `eclipse_where` call at
+    /// filled in by [`Ephemeris::lun_occult_when_loc`](crate::Ephemeris::lun_occult_when_loc) from a geocentric `eclipse_where` call at
     /// `time_maximum` (§3 "Public wrapper" step 5), same convention as `sol_eclipse_when_loc`.
     pub attr: EclipseHow,
     /// Occultation-type classification (TOTAL/ANNULAR/PARTIAL) OR'd with VISIBLE and whichever
@@ -2749,7 +2750,7 @@ pub struct OccultLocal {
     /// [`EclipseFlags::TOTEND_VISIBLE`]/[`EclipseFlags::PARTEND_VISIBLE`] -- numerically
     /// identical bits, different names by call-site context), plus
     /// [`EclipseFlags::OCC_BEG_DAYLIGHT`]/[`EclipseFlags::OCC_END_DAYLIGHT`] (§3 step 12, no
-    /// solar equivalent) and `NONCENTRAL` merged in by [`lun_occult_when_loc`]. The search loop
+    /// solar equivalent) and `NONCENTRAL` merged in by [`Ephemeris::lun_occult_when_loc`](crate::Ephemeris::lun_occult_when_loc). The search loop
     /// retries internally until a visible occultation is found -- never empty.
     pub flags: EclipseFlags,
 }

@@ -1,3 +1,10 @@
+//! Calculation pipeline internals: light-time iteration, aberration, deflection,
+//! frame transforms, and SPEED3 numerical differentiation.
+//!
+//! Low-level internals; exposed for golden tests and advanced use. The primary
+//! entry points are [`Ephemeris::calc`](crate::Ephemeris::calc) and
+//! [`Ephemeris::calc_ut`](crate::Ephemeris::calc_ut).
+
 use crate::bias::frame_bias;
 use crate::config::EphemerisConfig;
 use crate::constants::*;
@@ -43,6 +50,8 @@ pub(crate) fn requested_source(flags: CalcFlags) -> Option<EphemerisSource> {
     }
 }
 
+/// Internal: sanitizes and normalizes the caller-supplied `CalcFlags` (plausibilization),
+/// resolving mutually exclusive bits and stamping in the resolved ephemeris `source`.
 pub fn plaus_iflag(mut flags: CalcFlags, source: EphemerisSource) -> CalcFlags {
     if flags.contains(CalcFlags::DPSIDEPS_1980) && flags.contains(CalcFlags::JPLHOR_APPROX) {
         flags.remove(CalcFlags::JPLHOR_APPROX);
@@ -461,6 +470,9 @@ fn finish_helctr(
     )
 }
 
+/// Internal: computes `body`'s apparent position (24-slot `xreturn` plus J2000
+/// equatorial `x2000`) using the Moshier backend, running light-time, deflection,
+/// aberration, frame bias, and precession/nutation per `flags`.
 pub fn calc_planet(
     jd: f64,
     body: Body,
@@ -603,6 +615,9 @@ pub fn calc_planet(
     ))
 }
 
+/// Internal: computes the Sun's (or, with `is_earth`, Earth's) apparent position
+/// using the Moshier backend, following the same light-time/aberration/precession
+/// pipeline as [`calc_planet`] with the Sun-specific heliocentric shortcuts.
 pub fn calc_sun(
     jd: f64,
     eps_j2000: &Epsilon,
@@ -689,6 +704,9 @@ pub fn calc_sun(
     ))
 }
 
+/// Internal: computes the Moon's apparent position using the Moshier backend,
+/// following the same light-time/aberration/precession pipeline as
+/// [`calc_planet`] with the Moon-specific geocentric shortcuts.
 pub fn calc_moon(
     jd: f64,
     eps_j2000: &Epsilon,
@@ -785,6 +803,9 @@ pub fn calc_moon(
     ))
 }
 
+/// Internal: extracts the caller-facing 6-element position/speed vector from
+/// the internal 24-slot `xreturn` buffer, selecting ecliptic/equatorial and
+/// polar/cartesian variants and applying radians conversion per `flags`.
 pub fn extract_output(xreturn: &[f64; 24], flags: CalcFlags) -> [f64; 6] {
     let base = if flags.contains(CalcFlags::EQUATORIAL) {
         12
@@ -816,6 +837,9 @@ pub fn extract_output(xreturn: &[f64; 24], flags: CalcFlags) -> [f64; 6] {
     data
 }
 
+/// Internal: extracts the ecliptic-and-nutation auxiliary output (true/mean
+/// obliquity, nutation in longitude/obliquity) for `swe_calc`'s side-channel
+/// output, zeroed when `flags` requests equatorial or cartesian output.
 pub fn extract_ecl_nut(ecl_nut: &[f64; 6], flags: CalcFlags) -> [f64; 6] {
     if flags.intersects(CalcFlags::EQUATORIAL | CalcFlags::XYZ) {
         return [0.0; 6];
@@ -829,6 +853,8 @@ pub fn extract_ecl_nut(ecl_nut: &[f64; 6], flags: CalcFlags) -> [f64; 6] {
     data
 }
 
+/// Internal: returns the finite-difference step (days) used for `SPEED3`
+/// numerical differentiation of `body`'s position.
 pub fn speed3_interval(body: Body) -> f64 {
     match body {
         Body::Moon => MOON_SPEED_INTV,
@@ -837,6 +863,9 @@ pub fn speed3_interval(body: Body) -> f64 {
     }
 }
 
+/// Internal: un-wraps the ±360° longitude/right-ascension discontinuity between
+/// the three `SPEED3` sample epochs so their finite difference isn't corrupted
+/// by a wraparound.
 pub fn denormalize_positions(x0: &mut [f64; 24], x1: &[f64; 24], x2: &mut [f64; 24]) {
     // Only ecliptic longitude [0] and right ascension [12] can wrap ±360°.
     for i in [0, 12] {
@@ -855,6 +884,9 @@ pub fn denormalize_positions(x0: &mut [f64; 24], x1: &[f64; 24], x2: &mut [f64; 
     }
 }
 
+/// Internal: fills in `x1`'s speed components (indices 3..6, 9..12, 15..18,
+/// 21..24) via central-difference quadratic interpolation from the bracketing
+/// samples `x0`/`x2` taken `dt` days apart (C's `calc_speed`).
 pub fn calc_speed_3point(x1: &mut [f64; 24], x0: &[f64; 24], x2: &[f64; 24], dt: f64) {
     // Quadratic interpolation derivative at t+dt (matches C's calc_speed).
     for base in [0, 6, 12, 18] {
@@ -966,6 +998,9 @@ pub fn mean_lunar_elements(tjd: f64) -> (f64, f64, f64, f64) {
     crate::moshier::moon::mean_lunar_elements(tjd)
 }
 
+/// Internal: computes the mean lunar node's apparent position for `SE_MEAN_NODE`,
+/// running the shared mean-element pipeline (ecliptic-to-equatorial rotation,
+/// optional sidereal/J2000 precession, nutation) on top of the raw mean-node ephemeris.
 pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result<OscOutput, Error> {
     let pos = crate::moshier::moon::mean_node(jd)?;
     let pos_prev = crate::moshier::moon::mean_node(jd - MEAN_NODE_SPEED_INTV)?;
@@ -991,6 +1026,9 @@ pub fn calc_mean_node(jd: f64, flags: CalcFlags, models: &AstroModels) -> Result
     Ok((xreturn, x2000))
 }
 
+/// Internal: computes the mean lunar apogee's apparent position for
+/// `SE_MEAN_APOG`, running the shared mean-element pipeline on top of the raw
+/// mean-apogee ephemeris.
 pub fn calc_mean_apogee(
     jd: f64,
     flags: CalcFlags,
@@ -1014,6 +1052,9 @@ pub fn calc_mean_apogee(
     Ok((xreturn, x2000))
 }
 
+/// Internal: computes the ecliptic obliquity and nutation side-channel output
+/// (true obliquity, mean obliquity, nutation in longitude, nutation in
+/// obliquity; degrees) returned alongside `swe_calc`'s main position.
 pub fn calc_ecl_nut(jd: f64, flags: CalcFlags, models: &AstroModels) -> [f64; 6] {
     let eps = obliquity(jd, flags, models);
     let nut_val = nutation(jd, flags, models);
@@ -2123,6 +2164,8 @@ impl<'a> PositionProvider for JplProvider<'a> {
     }
 }
 
+/// Computes `body`'s apparent position using the JPL DE ephemeris `file`,
+/// running the shared light-time/aberration/precession pipeline.
 #[cfg(feature = "jpl")]
 pub fn calc_planet_jpl(
     jd: f64,
@@ -2137,6 +2180,8 @@ pub fn calc_planet_jpl(
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
 
+/// Computes the Sun's (or, with `is_earth`, Earth's) apparent position using
+/// the JPL DE ephemeris `file`.
 #[cfg(feature = "jpl")]
 pub fn calc_sun_jpl(
     jd: f64,
@@ -2150,6 +2195,7 @@ pub fn calc_sun_jpl(
     apparent_sun(&p, jd, flags, config, models, is_earth)
 }
 
+/// Computes the Moon's apparent position using the JPL DE ephemeris `file`.
 #[cfg(feature = "jpl")]
 pub fn calc_moon_jpl(
     jd: f64,
@@ -2162,6 +2208,8 @@ pub fn calc_moon_jpl(
     apparent_moon(&p, jd, flags, config, models)
 }
 
+/// Computes `body`'s apparent position using the Swiss Ephemeris (.se1) file
+/// backend, selecting the appropriate `planet_files`/`moon_files` entries.
 #[cfg(feature = "swisseph-files")]
 #[allow(clippy::too_many_arguments)]
 pub fn calc_planet_sweph(
@@ -2181,6 +2229,8 @@ pub fn calc_planet_sweph(
     apparent_planet(&p, jd, body, _eps_j2000, flags, config, models)
 }
 
+/// Computes the Sun's (or, with `is_earth`, Earth's) apparent position using
+/// the Swiss Ephemeris (.se1) file backend.
 #[cfg(feature = "swisseph-files")]
 pub fn calc_sun_sweph(
     jd: f64,
@@ -2198,6 +2248,8 @@ pub fn calc_sun_sweph(
     apparent_sun(&p, jd, flags, config, models, is_earth)
 }
 
+/// Computes the Moon's apparent position using the Swiss Ephemeris (.se1) file
+/// backend.
 #[cfg(feature = "swisseph-files")]
 pub fn calc_moon_sweph(
     jd: f64,

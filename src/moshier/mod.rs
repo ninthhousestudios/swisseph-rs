@@ -1,18 +1,38 @@
+//! Moshier analytical ephemeris backend.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
+/// Moshier compute API: series evaluation entry points for planets and Moon.
 pub mod backend;
+/// Moshier lunar theory series (ELP2000-82B based).
 pub mod moon;
+/// Generated lunar perturbation correction tables. Do not hand-edit.
 pub mod moon_tables;
+/// Moshier planetary perturbation series.
 pub mod planets;
+/// Generated per-planet Moshier series tables. Do not hand-edit.
 pub mod tables;
 
+/// Re-export of the per-planet Moshier series table array.
 pub use tables::PLANETS;
 
+/// Header describing a Moshier planetary series: harmonic limits and the
+/// packed argument/coefficient tables used to evaluate longitude, latitude,
+/// and radius.
 pub struct PlantTbl {
+    /// Maximum harmonic multiplier used for each of the 9 fundamental arguments.
     pub max_harmonic: [i8; 9],
+    /// Highest power of time (T) present in the polynomial terms.
     pub max_power_of_t: i8,
+    /// Packed argument table describing which harmonics combine to form each term.
     pub arg_tbl: &'static [i8],
+    /// Longitude series coefficients, consumed in the order described by `arg_tbl`.
     pub lon_tbl: &'static [f64],
+    /// Latitude series coefficients, consumed in the order described by `arg_tbl`.
     pub lat_tbl: &'static [f64],
+    /// Radius series coefficients, consumed in the order described by `arg_tbl`.
     pub rad_tbl: &'static [f64],
+    /// Mean distance normalization factor for the radius series.
     pub distance: f64,
 }
 

@@ -1,3 +1,8 @@
+//! Relativistic corrections: aberration of light, gravitational light deflection,
+//! and effective mass lookup for the deflection calculation.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::constants::*;
 
 const EFF_ARR: [(f64, f64); 101] = [

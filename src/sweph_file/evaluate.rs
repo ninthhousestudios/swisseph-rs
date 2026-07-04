@@ -1,3 +1,7 @@
+//! Chebyshev segment evaluation for `.se1` planet data.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use std::f64::consts::TAU;
 
 use crate::error::Error;
@@ -13,6 +17,10 @@ const SEPS2000: f64 = 0.39777715572793088;
 #[allow(clippy::excessive_precision)]
 const CEPS2000: f64 = 0.91748206215761929;
 
+/// Evaluate body `body_id`'s position (and, if `need_speed`, velocity) at `jd` by
+/// loading its Chebyshev segment from `file`, rotating it to the reference frame if
+/// needed, and evaluating the polynomial. Returns the 6-element state vector and the
+/// number of coefficients actually evaluated (`neval`).
 pub fn evaluate_body(
     file: &SwissEphFile,
     body_id: i32,

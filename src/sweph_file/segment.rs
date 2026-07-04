@@ -1,3 +1,7 @@
+//! Packed Chebyshev coefficient segment unpacking for `.se1` files.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::error::Error;
 
 use super::types::{ByteOrder, PlanetFileData};

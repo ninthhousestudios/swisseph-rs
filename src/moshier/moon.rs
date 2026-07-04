@@ -1,3 +1,8 @@
+//! Moshier lunar series evaluator (`moshmoon2`), mean elements, mean node, and
+//! mean apogee.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use std::f64::consts::PI;
 
 use crate::constants::{
@@ -11,11 +16,18 @@ use crate::math::{
 
 use super::moon_tables::*;
 
+/// Mean lunar theory arguments (arcseconds) at a given time, before the `STR`
+/// arcsecond-to-radian conversion.
 pub struct MeanElements {
+    /// Mean anomaly of the Sun.
     pub m: f64,
+    /// Mean longitude of the lunar ascending node (F argument).
     pub nf: f64,
+    /// Mean anomaly of the Moon.
     pub mp: f64,
+    /// Mean elongation of the Moon from the Sun.
     pub d: f64,
+    /// Mean longitude of the Moon.
     pub swelp: f64,
 }
 
@@ -46,6 +58,7 @@ struct MoonState {
     cc: [[f64; 8]; 5],
 }
 
+/// Computes the mean lunar theory arguments at Julian centuries `t` since J2000.
 pub fn mean_elements(t: f64) -> MeanElements {
     mean_elements_t2(t, t * t)
 }
@@ -597,6 +610,8 @@ fn moon4(s: &mut MoonState) {
     s.moonpol[1] *= STR;
 }
 
+/// Computes the Moon's geocentric ecliptic-of-date polar position (longitude,
+/// latitude in radians; distance in AU) at `jd` via the Moshier lunar series.
 pub fn moshmoon2(jd: f64) -> [f64; 3] {
     let t = (jd - J2000) / 36525.0;
     let t2 = t * t;
@@ -649,6 +664,9 @@ fn corr_mean_apog(jd: f64) -> f64 {
     MEAN_APSIS_CORR[i] + dfrac * (MEAN_APSIS_CORR[i + 1] - MEAN_APSIS_CORR[i])
 }
 
+/// Computes the mean lunar ascending node's ecliptic-of-date polar position at
+/// `jd` (`SE_MEAN_NODE`), applying the JPL DE431 mean-node correction table when
+/// `jd` falls within its coverage.
 pub fn mean_node(jd: f64) -> Result<[f64; 3], Error> {
     if !(MOSHNDEPH_START..=MOSHNDEPH_END).contains(&jd) {
         return Err(Error::BeyondEphemerisLimits {
@@ -664,6 +682,9 @@ pub fn mean_node(jd: f64) -> Result<[f64; 3], Error> {
     Ok([lon, 0.0, MOON_MEAN_DIST / AUNIT])
 }
 
+/// Computes the mean lunar apogee (perigee-opposite point)'s ecliptic-of-date
+/// polar position at `jd` (`SE_MEAN_APOG`), applying the JPL DE431 mean-apsis
+/// correction table when `jd` falls within its coverage.
 pub fn mean_apogee(jd: f64) -> Result<[f64; 3], Error> {
     if !(MOSHNDEPH_START..=MOSHNDEPH_END).contains(&jd) {
         return Err(Error::BeyondEphemerisLimits {

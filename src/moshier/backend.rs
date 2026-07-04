@@ -1,10 +1,18 @@
+//! Moshier compute API: series evaluation entry points for planets and Moon.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::constants::{
     DEGTORAD, EARTH_MOON_MRAT, J1900, MOON_SPEED_INTV, MOSHLUEPH_END, MOSHLUEPH_START,
     MOSHPLEPH_END, MOSHPLEPH_START, PLAN_SPEED_INTV,
 };
 
+/// Heliocentric J2000 equatorial cartesian position and velocity for a target body
+/// and Earth, as computed by the Moshier pipeline before the geocentric combine step.
 pub struct PipelinePositions {
+    /// Target body heliocentric cartesian position (AU, 0..2) and velocity (AU/day, 3..5).
     pub planet_helio: [f64; 6],
+    /// Earth heliocentric cartesian position (AU, 0..2) and velocity (AU/day, 3..5).
     pub earth_helio: [f64; 6],
 }
 use crate::error::Error;
@@ -172,6 +180,8 @@ fn planet_table(body: Body) -> Result<&'static super::PlantTbl, Error> {
     }
 }
 
+/// Computes a planet's heliocentric J2000 equatorial velocity at `jd` by central
+/// difference of the Moshier series over `PLAN_SPEED_INTV`.
 pub fn planet_helio_velocity_at(
     jd: f64,
     body: Body,
@@ -187,6 +197,8 @@ pub fn planet_helio_velocity_at(
     ])
 }
 
+/// Computes Earth's heliocentric J2000 equatorial velocity at `jd` by finite
+/// difference over `PLAN_SPEED_INTV`, including the Earth-Moon barycenter offset.
 pub fn earth_helio_velocity_at(jd: f64, eps_j2000: &Epsilon) -> [f64; 3] {
     let eps_date = obliquity(jd, CalcFlags::empty(), &AstroModels::default());
     let eps_date_prev = obliquity(
@@ -203,6 +215,8 @@ pub fn earth_helio_velocity_at(jd: f64, eps_j2000: &Epsilon) -> [f64; 3] {
     ]
 }
 
+/// Internal: computes heliocentric position/velocity for both `body` and Earth at
+/// `jd`, returning both so the caller can form the geocentric vector itself.
 pub fn compute_pipeline(
     jd: f64,
     body: Body,
@@ -262,6 +276,9 @@ pub fn compute_pipeline(
     })
 }
 
+/// Computes `body`'s geocentric J2000 equatorial position and velocity at `jd`
+/// using the Moshier analytical series, erroring if `jd` is outside the series'
+/// valid ephemeris range.
 pub fn compute(jd: f64, body: Body, eps_j2000: &Epsilon) -> Result<[f64; 6], Error> {
     match body {
         Body::Moon => {

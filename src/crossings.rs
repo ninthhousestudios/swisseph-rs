@@ -1,3 +1,6 @@
+//! Longitude and latitude crossing search — find the instant a body reaches a
+//! given ecliptic longitude or zero latitude (node crossing).
+
 use crate::context::Ephemeris;
 use crate::error::Error;
 use crate::flags::CalcFlags;

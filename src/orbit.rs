@@ -1,10 +1,10 @@
 //! Osculating (Keplerian) orbital elements and geocentric distance extrema —
 //! `swe_get_orbital_elements` / `swe_orbit_max_min_true_distance`.
 //!
-//! * [`get_orbital_elements`] derives the momentary two-body Kepler elements of a
+//! * [`Ephemeris::get_orbital_elements`](crate::Ephemeris::get_orbital_elements) derives the momentary two-body Kepler elements of a
 //!   planet, asteroid, or the Earth-Moon barycentre from its J2000 state vector
 //!   (a full port of swecl.c:5783-5971, all 17 `dret` slots).
-//! * [`orbit_max_min_true_distance`] returns the maximum, minimum, and current
+//! * [`Ephemeris::orbit_max_min_true_distance`](crate::Ephemeris::orbit_max_min_true_distance) returns the maximum, minimum, and current
 //!   true distance of a body: heliocentric bodies read the extrema straight off
 //!   their own Kepler ellipse, geocentric ones run the two-ellipse
 //!   coordinate-descent search of swecl.c:6170-6287.
@@ -16,8 +16,8 @@
 //! bit as `SEFLG_ORBEL_AA` (swephexp.h:207). We replicate the bit-aliasing:
 //! passing [`CalcFlags::TOPOCTR`] to this API means "sum masses inside the
 //! orbit" (Astronomical Almanac method), never a topocentric request — the bit
-//! never reaches `eph.calc` (it is not in [`EPHMASK`]), it only gates
-//! [`get_gmsm`]'s mass summation.
+//! never reaches `eph.calc` (it is not in `EPHMASK`), it only gates
+//! `get_gmsm`'s mass summation.
 //!
 //! ## `SEFLG_BARYCTR` limitation
 //! The barycentric branch (`r > 6` AU) issues an `eph.calc(.. | BARYCTR)` which

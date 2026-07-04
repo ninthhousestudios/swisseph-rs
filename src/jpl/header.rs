@@ -1,12 +1,20 @@
+//! JPL DE binary file header parsing.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::error::Error;
 
+/// Byte order of a JPL DE file, detected by plausibility-testing the segment length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ByteOrder {
+    /// File stores multi-byte integers and floats in little-endian order.
     Little,
+    /// File stores multi-byte integers and floats in big-endian order.
     Big,
 }
 
 impl ByteOrder {
+    /// Decode a 4-byte integer according to this byte order.
     pub fn read_i32(self, bytes: [u8; 4]) -> i32 {
         match self {
             Self::Little => i32::from_le_bytes(bytes),
@@ -14,6 +22,7 @@ impl ByteOrder {
         }
     }
 
+    /// Decode an 8-byte float according to this byte order.
     pub fn read_f64(self, bytes: [u8; 8]) -> f64 {
         match self {
             Self::Little => f64::from_le_bytes(bytes),
@@ -22,17 +31,23 @@ impl ByteOrder {
     }
 }
 
+/// Internal: cursor over a JPL file's byte slice used while parsing the header.
 pub(super) struct Reader<'a> {
+    /// Internal: full file byte slice being read from.
     pub(super) data: &'a [u8],
+    /// Internal: current read offset into `data`.
     pub(super) pos: usize,
+    /// Internal: byte order to apply when decoding multi-byte values.
     pub(super) order: ByteOrder,
 }
 
 impl<'a> Reader<'a> {
+    /// Internal: create a reader starting at byte offset `pos`.
     pub(super) fn new(data: &'a [u8], pos: usize, order: ByteOrder) -> Self {
         Self { data, pos, order }
     }
 
+    /// Internal: check that at least `n` bytes remain from the current position.
     pub(super) fn ensure(&self, n: usize) -> Result<(), Error> {
         if self.pos + n > self.data.len() {
             Err(Error::FileFormat("unexpected end of file".into()))
@@ -41,6 +56,7 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Internal: read and advance past a 4-byte integer.
     pub(super) fn read_i32(&mut self) -> Result<i32, Error> {
         self.ensure(4)?;
         let bytes: [u8; 4] = self.data[self.pos..self.pos + 4].try_into().unwrap();
@@ -48,6 +64,7 @@ impl<'a> Reader<'a> {
         Ok(self.order.read_i32(bytes))
     }
 
+    /// Internal: read and advance past an 8-byte float.
     pub(super) fn read_f64(&mut self) -> Result<f64, Error> {
         self.ensure(8)?;
         let bytes: [u8; 8] = self.data[self.pos..self.pos + 8].try_into().unwrap();
@@ -56,16 +73,27 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Parsed header of a JPL DE ephemeris file: constants, body coefficient layout, and record sizing.
 pub struct JplHeader {
+    /// Byte order of the file.
     pub byte_order: ByteOrder,
+    /// Ephemeris start JD, end JD, and segment length in days.
     pub ss: [f64; 3],
+    /// Astronomical unit, in kilometers.
     pub au: f64,
+    /// Earth/Moon mass ratio.
     pub emrat: f64,
+    /// JPL DE number identifying this ephemeris (e.g. 405, 406, 441).
     pub denum: i32,
+    /// Number of constants defined in the file.
     pub ncon: i32,
+    /// Per-body Chebyshev layout table: for each of 13 bodies, `[coefficient offset, ncf, na]`.
     pub ipt: [i32; 39],
+    /// Size of one data record, in doubles.
     pub ksize: usize,
+    /// Size of one data record, in bytes (`4 * ksize`).
     pub irecsz: usize,
+    /// Number of coefficient doubles per data record (`ksize / 2`).
     pub ncoeffs: usize,
 }
 

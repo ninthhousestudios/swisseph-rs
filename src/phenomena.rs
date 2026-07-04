@@ -91,7 +91,7 @@ fn normalize_pheno_body(body: Body) -> Body {
 /// iflag`, the masked/patched flag copy signalling any ephemeris fallback).
 ///
 /// `Body::Asteroid` (numbered asteroids) reads the SE1 orbital-element H/G/diameter from the loaded
-/// asteroid file via [`Ephemeris::asteroid_meta`]. Main asteroids Chiron..Vesta use `MAG_ELEM`
+/// asteroid file via `Ephemeris::asteroid_meta`. Main asteroids Chiron..Vesta use `MAG_ELEM`
 /// (hard-coded table). 1566 Icarus has a JPL-database H/G override.
 pub fn pheno(
     eph: &Ephemeris,

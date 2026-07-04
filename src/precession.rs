@@ -1,3 +1,8 @@
+//! Precession models — 3 algorithm families (Vondrak, Williams, Owen) across
+//! 11 models, ported from the C `swi_precess`.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 // This module is almost entirely verbatim Vondrák 2011 / IAU precession
 // coefficient tables transcribed from the C Swiss Ephemeris. The literals carry
 // more digits than an f64 can represent; rounding them would change the bit

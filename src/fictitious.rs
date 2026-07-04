@@ -1,3 +1,6 @@
+//! Fictitious / hypothetical planet elements and orbital mechanics — Uranian
+//! (Hamburg School) bodies, Waldemath Black Moon, and custom `seorbel.txt` entries.
+
 use std::path::Path;
 
 use crate::constants::*;
@@ -381,16 +384,28 @@ struct ParsedRow {
 // Resolved elements (after T-term evaluation for a specific tjd)
 // ---------------------------------------------------------------------------
 
+/// Fictitious body's Keplerian orbital elements after T-term evaluation at a
+/// specific Julian day.
 pub struct ResolvedElements {
+    /// Reference epoch (Julian day) the elements are given for.
     pub tjd0: f64,
+    /// Equinox (Julian day) the elements are referred to.
     pub tequ: f64,
+    /// Mean anomaly at `tjd0` (degrees).
     pub mano: f64,
+    /// Semi-major axis (AU).
     pub sema: f64,
+    /// Orbital eccentricity.
     pub ecce: f64,
+    /// Argument (or longitude) of perihelion (degrees).
     pub parg: f64,
+    /// Longitude of the ascending node (degrees).
     pub node: f64,
+    /// Orbital inclination (degrees).
     pub incl: f64,
+    /// Body name as given in the catalog row.
     pub name: String,
+    /// Whether the elements are geocentric (vs. heliocentric).
     pub is_geo: bool,
 }
 
@@ -398,12 +413,16 @@ pub struct ResolvedElements {
 // Fictitious catalog
 // ---------------------------------------------------------------------------
 
+/// Catalog of fictitious/hypothetical planet orbital elements, either the
+/// built-in Neely-revised Uranian table or one parsed from a `seorbel.txt`-style file.
 pub struct FictitiousCatalog {
     rows: Vec<ParsedRow>,
     from_file: bool,
 }
 
 impl FictitiousCatalog {
+    /// Constructs the catalog from the built-in Neely-revised Uranian planet
+    /// table (no file I/O).
     pub fn builtin() -> Self {
         let rows = BUILTIN_TABLE
             .iter()
@@ -427,10 +446,12 @@ impl FictitiousCatalog {
         }
     }
 
+    /// Number of catalog entries.
     pub fn row_count(&self) -> usize {
         self.rows.len()
     }
 
+    /// Whether this catalog was loaded from an external file (vs. the built-in table).
     pub fn from_file(&self) -> bool {
         self.from_file
     }

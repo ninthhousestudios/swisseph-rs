@@ -1,3 +1,7 @@
+//! Swiss Ephemeris `.se1` binary file reader.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 mod evaluate;
 mod parse;
 mod segment;
@@ -16,6 +20,7 @@ pub use types::{
     AsteroidMeta, ByteOrder, FileHeader, FileType, PlanetFileData, SEI_FLG_HELIO, SEI_SUNBARY,
 };
 
+/// A memory-mapped, parsed `.se1` ephemeris file.
 pub struct SwissEphFile {
     mmap: Mmap,
     header: FileHeader,
@@ -23,6 +28,7 @@ pub struct SwissEphFile {
 }
 
 impl SwissEphFile {
+    /// Open and parse the `.se1` file at `path`, memory-mapping its contents.
     pub fn open(path: &Path) -> Result<Self, Error> {
         let file_type = detect_file_type(path)?;
         let file =
@@ -40,18 +46,22 @@ impl SwissEphFile {
         })
     }
 
+    /// Return the parsed file header.
     pub fn header(&self) -> &FileHeader {
         &self.header
     }
 
+    /// Look up the per-body metadata for `body_id`, if present in this file.
     pub fn planet_data(&self, body_id: i32) -> Option<&PlanetFileData> {
         self.planets.iter().find(|p| p.body_id == body_id)
     }
 
+    /// Return the per-body metadata for every body stored in this file.
     pub fn planets(&self) -> &[PlanetFileData] {
         &self.planets
     }
 
+    /// Return the raw memory-mapped file bytes.
     pub fn bytes(&self) -> &[u8] {
         &self.mmap
     }
@@ -121,6 +131,8 @@ fn asteroid_file_candidates(dir: &Path, mpc: i32) -> [std::path::PathBuf; 4] {
     ]
 }
 
+/// Open the `.se1` file for numbered asteroid `mpc`, trying the standard and
+/// short-name candidate paths under `dir` in order.
 pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error> {
     let candidates = asteroid_file_candidates(dir, mpc);
     for path in &candidates {
@@ -133,6 +145,8 @@ pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error> {
     Err(Error::FileNotFound(candidates[0].clone()))
 }
 
+/// Open the `.se1` file for planetary moon `raw_id`, trying the `sat/` subdirectory
+/// then the flat directory, and verifying the file actually contains the requested body.
 pub fn open_planet_moon_file(dir: &Path, raw_id: i32) -> Result<SwissEphFile, Error> {
     let primary = dir.join("sat").join(format!("sepm{raw_id}.se1"));
     match SwissEphFile::open(&primary) {
@@ -164,6 +178,8 @@ pub fn open_planet_moon_file(dir: &Path, raw_id: i32) -> Result<SwissEphFile, Er
     }
 }
 
+/// Open every `.se1` file in `dir` whose name starts with `prefix`, sorted ascending
+/// by each file's `time_range.0`.
 pub fn open_ephemeris_files(dir: &Path, prefix: &str) -> Result<Vec<SwissEphFile>, Error> {
     let mut files = Vec::new();
     let entries = std::fs::read_dir(dir).map_err(|_| Error::FileNotFound(dir.to_path_buf()))?;

@@ -1,3 +1,7 @@
+//! GCRS ↔ J2000 frame rotation (IERS 2006 frame bias matrix, `swi_bias`).
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::constants::*;
 use crate::flags::CalcFlags;
 use crate::math::{

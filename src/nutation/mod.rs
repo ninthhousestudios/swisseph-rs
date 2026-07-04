@@ -1,3 +1,8 @@
+//! Nutation model router: dispatches to IAU 1980, IAU 2000A/B, or Woolard series.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
+/// Generated nutation term tables (Delaunay/planetary argument coefficients).
 pub mod data;
 
 use crate::constants::*;
@@ -13,6 +18,9 @@ const MAX_MULT: [usize; 5] = [3, 2, 4, 4, 2];
 // Public entry point
 // ---------------------------------------------------------------------------
 
+/// Computes nutation in longitude and obliquity (`Nutation`, radians) at Julian
+/// day `jd`, dispatching to the IAU 1980, IAU 2000A/B, or Woolard model
+/// selected in `models`, with JPL Horizons compatibility adjustments per `flags`.
 pub fn nutation(jd: f64, flags: CalcFlags, models: &AstroModels) -> Nutation {
     let is_jplhor = flags.contains(CalcFlags::DPSIDEPS_1980)
         || (flags.contains(CalcFlags::JPLHOR_APPROX)

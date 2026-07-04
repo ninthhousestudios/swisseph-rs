@@ -1,3 +1,7 @@
+//! Moshier planetary perturbation series evaluation.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::constants::{J2000, STR};
 use crate::math::mods3600;
 
@@ -48,6 +52,8 @@ fn sscc(k: usize, arg: f64, n: i8, ss: &mut [[f64; 24]; 9], cc: &mut [[f64; 24];
     }
 }
 
+/// Evaluates a Moshier planetary series `table` at `jd`, returning heliocentric
+/// ecliptic-of-date polar coordinates (longitude, latitude in radians; distance in AU).
 pub fn moshplan2(jd: f64, table: &PlantTbl) -> [f64; 3] {
     let t = (jd - J2000) / TIMESCALE;
 

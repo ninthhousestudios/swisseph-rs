@@ -1,3 +1,7 @@
+//! Pure math utilities: angle normalization, coordinate transforms (cartesian ↔
+//! polar, ecliptic ↔ equatorial), Chebyshev evaluation, polynomial evaluation,
+//! and degree splitting.
+
 use std::f64::consts::PI;
 
 use crate::constants::{DEG180, DEG360, DEGTORAD, RADTODEG, TWOPI};

@@ -55,18 +55,29 @@ fn acosd(x: f64) -> f64 {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// Ascendant, midheaven, and related angular house-system points (degrees).
 pub struct AscMc {
+    /// Ascendant (rising degree of the ecliptic on the eastern horizon).
     pub ascendant: f64,
+    /// Midheaven (Medium Coeli): ecliptic point on the meridian.
     pub mc: f64,
+    /// Sidereal time expressed as the right ascension of the meridian (ARMC).
     pub armc: f64,
+    /// Vertex: the point where the prime vertical intersects the ecliptic.
     pub vertex: f64,
+    /// Equatorial ascendant (East Point).
     pub equatorial_ascendant: f64,
+    /// Co-ascendant per Walter Koch's method.
     pub coascendant_koch: f64,
+    /// Co-ascendant per Michael Munkasey's method.
     pub coascendant_munkasey: f64,
+    /// Polar ascendant (used at extreme geographic latitudes).
     pub polar_ascendant: f64,
 }
 
 impl AscMc {
+    /// Returns the eight angular points as a flat array, in the same order as
+    /// C's `ascmc[]` output.
     pub fn as_array(&self) -> [f64; 8] {
         [
             self.ascendant,
@@ -81,14 +92,20 @@ impl AscMc {
     }
 }
 
+/// Full house-system computation result: cusps, angular points, and their speeds.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HouseResult {
+    /// House cusp longitudes (degrees), indices 1..=36 populated per house
+    /// system (index 0 unused, matching C's `cusp[37]`).
     #[cfg_attr(feature = "serde", serde(with = "serde_37_array"))]
     pub cusps: [f64; 37],
+    /// House cusp speeds (degrees/day), same indexing as `cusps`.
     #[cfg_attr(feature = "serde", serde(with = "serde_37_array"))]
     pub cusp_speeds: [f64; 37],
+    /// Ascendant, MC, and related angular points.
     pub ascmc: AscMc,
+    /// Speeds (degrees/day) of the angular points in `ascmc`.
     pub ascmc_speeds: AscMc,
 }
 
@@ -102,6 +119,8 @@ mod serde_37_array {
     use serde::{Deserializer, Serializer};
     use std::fmt;
 
+    /// Serializes a `[f64; 37]` as a fixed-size tuple (serde's built-in array
+    /// impls only cover lengths up to 32).
     pub fn serialize<S>(arr: &[f64; 37], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -136,6 +155,8 @@ mod serde_37_array {
         }
     }
 
+    /// Deserializes a `[f64; 37]` from the fixed-size tuple encoding produced
+    /// by [`serialize`].
     pub fn deserialize<'de, D>(deserializer: D) -> Result<[f64; 37], D::Error>
     where
         D: Deserializer<'de>,
@@ -1496,6 +1517,9 @@ fn calc_h(
 // Driver — swe_houses_armc_ex2 (swehouse.c:622-774)
 // ---------------------------------------------------------------------------
 
+/// Computes house cusps and angular points (`swe_houses_armc_ex2`) for house
+/// system `hsys` from sidereal time `armc`, geographic latitude `geolat`, and
+/// obliquity `eps`, including cusp/angle speeds via ARMC finite-differencing.
 pub fn houses_armc(
     armc: f64,
     geolat: f64,

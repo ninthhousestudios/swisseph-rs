@@ -1,3 +1,7 @@
+//! JPL DE ephemeris (`.bin`) file reader and Chebyshev evaluation.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 mod header;
 mod interp;
 
@@ -11,28 +15,45 @@ use crate::error::Error;
 
 // JPL body indices (swejpl.h:68–83). Used as `ntarg`/`ncent` in `jpl_pleph`
 // and as slot indices in the internal `pv[13]` array.
+/// JPL body index for Mercury.
 pub const J_MERCURY: i32 = 0;
+/// JPL body index for Venus.
 pub const J_VENUS: i32 = 1;
+/// JPL body index for Earth.
 pub const J_EARTH: i32 = 2;
+/// JPL body index for Mars.
 pub const J_MARS: i32 = 3;
+/// JPL body index for Jupiter.
 pub const J_JUPITER: i32 = 4;
+/// JPL body index for Saturn.
 pub const J_SATURN: i32 = 5;
+/// JPL body index for Uranus.
 pub const J_URANUS: i32 = 6;
+/// JPL body index for Neptune.
 pub const J_NEPTUNE: i32 = 7;
+/// JPL body index for Pluto.
 pub const J_PLUTO: i32 = 8;
+/// JPL body index for the Moon (geocentric).
 pub const J_MOON: i32 = 9;
+/// JPL body index for the Sun.
 pub const J_SUN: i32 = 10;
+/// JPL body index for the Solar System Barycenter.
 pub const J_SBARY: i32 = 11;
+/// JPL body index for the Earth-Moon Barycenter.
 pub const J_EMB: i32 = 12;
+/// JPL body index for nutations.
 pub const J_NUT: i32 = 13;
+/// JPL body index for lunar librations.
 pub const J_LIB: i32 = 14;
 
+/// A memory-mapped, parsed JPL DE ephemeris file.
 pub struct JplFile {
     mmap: Mmap,
     header: JplHeader,
 }
 
 impl JplFile {
+    /// Open and parse the JPL DE file at `path`, memory-mapping its contents.
     pub fn open(path: &Path) -> Result<Self, Error> {
         let file =
             std::fs::File::open(path).map_err(|_| Error::FileNotFound(path.to_path_buf()))?;
@@ -46,14 +67,17 @@ impl JplFile {
         Ok(Self { mmap, header })
     }
 
+    /// Return the parsed file header.
     pub fn header(&self) -> &JplHeader {
         &self.header
     }
 
+    /// Return the raw memory-mapped file bytes.
     pub fn bytes(&self) -> &[u8] {
         &self.mmap
     }
 
+    /// Return the file's byte order.
     pub fn byte_order(&self) -> ByteOrder {
         self.header.byte_order
     }

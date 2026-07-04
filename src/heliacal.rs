@@ -1,3 +1,11 @@
+//! Heliacal visibility: first/last sightings of a body near the Sun.
+//!
+//! Pure-Rust port of the Swiss Ephemeris heliacal module (`swehel.c`): visual
+//! limiting-magnitude modeling (atmospheric extinction, sky background
+//! brightness, and visual physiology) plus the search machinery for heliacal
+//! risings/settings and acronychal (cosmical) risings/settings of planets,
+//! the Moon, and fixed stars.
+
 #![allow(clippy::too_many_arguments)]
 
 use crate::azalt::AzAltDir;
@@ -13,15 +21,22 @@ use crate::types::{Body, CalendarType};
 
 // ── Heliacal event types ───────────────────────────────────────────
 
+/// Classifies which heliacal or acronychal event a search targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum HeliacalEventType {
+    /// First visibility in the morning sky before sunrise.
     MorningFirst = 1,
+    /// Last visibility in the evening sky after sunset.
     EveningLast = 2,
+    /// First visibility in the evening sky after sunset.
     EveningFirst = 3,
+    /// Last visibility in the morning sky before sunrise.
     MorningLast = 4,
+    /// Acronychal (cosmical) rising: the body rises as the Sun sets.
     AcronymchalRising = 5,
+    /// Acronychal (cosmical) setting: the body sets as the Sun rises.
     AcronymchalSetting = 6,
 }
 
@@ -68,6 +83,8 @@ const RA: f64 = 6378136.6; // [m] WGS84 equatorial radius
 
 // ── Object resolution (swehel.c:305–336) ───────────────────────────
 
+/// Resolves an object name (planet name, "moon", or a leading asteroid number)
+/// to a `Body`; returns `None` for fixed stars.
 pub fn object_to_body(name: &str) -> Option<Body> {
     let lower = name.to_ascii_lowercase();
     if lower.starts_with("sun") {
@@ -108,6 +125,8 @@ pub fn object_to_body(name: &str) -> Option<Body> {
     None
 }
 
+/// Lowercases an object name, preserving the case of any comma-separated
+/// star-designation suffix (e.g. component letter).
 pub fn tolower_string_star(name: &str) -> String {
     if let Some(comma_pos) = name.find(',') {
         let mut result = name[..comma_pos].to_ascii_lowercase();
@@ -120,6 +139,8 @@ pub fn tolower_string_star(name: &str) -> String {
 
 // ── Default heliacal parameters (swehel.c:1324–1361) ───────────────
 
+/// Fills in unset atmospheric (`datm`) and observer (`dobs`) parameters with
+/// their standard-atmosphere / naked-eye defaults.
 pub fn default_heliacal_parameters(
     datm: &mut [f64; 4],
     dgeo: &[f64; 3],
@@ -165,14 +186,19 @@ fn mymax(a: f64, b: f64) -> f64 {
     if a >= b { a } else { b }
 }
 
+/// Internal: hyperbolic tangent computed from `exp`, matching the C
+/// implementation's expression order for bit-for-bit fidelity.
 pub fn tanh_manual(x: f64) -> f64 {
     (x.exp() - (-x).exp()) / (x.exp() + (-x).exp())
 }
 
+/// Converts a Celsius temperature to Kelvin.
 pub fn kelvin(temp: f64) -> f64 {
     temp + C2K
 }
 
+/// Converts an apparent (refracted) altitude to a topocentric (unrefracted)
+/// altitude, given the effective temperature and pressure at the eye.
 pub fn topo_alt_from_app_alt(app_alt: f64, temp_e: f64, pres_e: f64) -> f64 {
     if app_alt >= LOWEST_APP_ALT {
         let r = if app_alt > 17.904104638432 {
@@ -188,6 +214,9 @@ pub fn topo_alt_from_app_alt(app_alt: f64, temp_e: f64, pres_e: f64) -> f64 {
     }
 }
 
+/// Converts a topocentric (unrefracted) altitude to an apparent (refracted)
+/// altitude via iterative refinement (2 iterations, or 5 under
+/// `HIGH_PRECISION`).
 pub fn app_alt_from_topo_alt(
     topo_alt: f64,
     temp_e: f64,
@@ -227,6 +256,9 @@ pub fn app_alt_from_topo_alt(
     }
 }
 
+/// Computes the hour angle (in hours) at which an object of given
+/// declination reaches a target topocentric altitude, for an observer at
+/// the given latitude.
 pub fn hour_angle(topo_alt: f64, topo_decl: f64, lat: f64) -> f64 {
     let alti = topo_alt * DEGTORAD;
     let decli = topo_decl * DEGTORAD;
@@ -236,6 +268,8 @@ pub fn hour_angle(topo_alt: f64, topo_decl: f64, lat: f64) -> f64 {
     ha.acos() / DEGTORAD / 15.0
 }
 
+/// Computes the great-circle angular distance (radians) between two points
+/// given as (latitude, longitude) pairs in radians.
 pub fn distance_angle(lat_a: f64, long_a: f64, lat_b: f64, long_b: f64) -> f64 {
     let dlon = long_b - long_a;
     let dlat = lat_b - lat_a;
@@ -248,10 +282,14 @@ pub fn distance_angle(lat_a: f64, long_a: f64, lat_b: f64, long_b: f64) -> f64 {
     2.0 * corde.sqrt().asin()
 }
 
+/// Internal: computes the effective temperature at the observer's eye from
+/// surface temperature, eye height, and the atmospheric lapse rate.
 pub fn temp_e_from_temp_s(temp_s: f64, height_eye: f64, lapse: f64) -> f64 {
     temp_s - lapse * height_eye
 }
 
+/// Internal: computes the effective pressure at the observer's eye from
+/// surface temperature, surface pressure, and eye height.
 pub fn pres_e_from_pres_s(temp_s: f64, press: f64, height_eye: f64) -> f64 {
     press
         * (-9.80665 * 0.0289644 / (kelvin(temp_s) + 3.25 * height_eye / 1000.0) / 8.31441
@@ -265,12 +303,14 @@ fn sgn(x: f64) -> f64 {
 
 // ── Extinction layer (swehel.c §4) ─────────────────────────────────
 
+/// Internal: computes the water-vapor extinction coefficient.
 pub fn kw(height_eye: f64, temp_s: f64, rh: f64) -> f64 {
     let mut wt = 0.031;
     wt *= 0.94 * (rh / 100.0) * (temp_s / 15.0).exp() * (-height_eye / SCALE_H_WATER).exp();
     wt
 }
 
+/// Internal: computes the ozone extinction coefficient.
 pub fn koz(alt_s: f64, sunra: f64, lat: f64) -> f64 {
     let oz = 0.031;
     let lt = lat * DEGTORAD;
@@ -283,6 +323,7 @@ pub fn koz(alt_s: f64, sunra: f64, lat: f64) -> f64 {
     koz_ret * changeko
 }
 
+/// Internal: computes the Rayleigh (molecular) extinction coefficient.
 pub fn kr(alt_s: f64, height_eye: f64) -> f64 {
     let mut val = -alt_s - 12.0;
     val = val.clamp(0.0, 6.0);
@@ -291,6 +332,8 @@ pub fn kr(alt_s: f64, height_eye: f64) -> f64 {
     0.1066 * (-height_eye / SCALE_H_RAYLEIGH).exp() * (lambda / 0.55_f64).powf(-4.0)
 }
 
+/// Internal: computes the aerosol extinction coefficient, optionally derived
+/// from a supplied visual range `vr` (in km) instead of the empirical model.
 pub fn ka(alt_s: f64, sunra: f64, lat: f64, height_eye: f64, temp_s: f64, rh: f64, vr: f64) -> f64 {
     let sl = sgn(lat);
     let changeka = 1.0 - 0.166667 * mymin(6.0, mymax(-alt_s - 12.0, 0.0));
@@ -323,6 +366,10 @@ pub fn ka(alt_s: f64, sunra: f64, lat: f64, height_eye: f64, temp_s: f64, rh: f6
     kaact
 }
 
+/// Internal: computes the total atmospheric extinction coefficient by
+/// selecting/summing the aerosol (`ka`), water-vapor (`kw`), Rayleigh (`kr`),
+/// and ozone (`koz`) components per `ext_type` (0=aerosol, 1=water, 2=Rayleigh,
+/// 3=ozone, 4=all combined).
 pub fn kt(
     alt_s: f64,
     sunra: f64,
@@ -356,6 +403,8 @@ pub fn kt(
     kw_act + kr_act + koz_act + ka_act
 }
 
+/// Internal: computes the relative optical air mass for a given apparent
+/// altitude and surface pressure.
 pub fn airmass(app_alt_o: f64, press: f64) -> f64 {
     let mut zend = (90.0 - app_alt_o) * DEGTORAD;
     if zend > std::f64::consts::FRAC_PI_2 {
@@ -365,6 +414,8 @@ pub fn airmass(app_alt_o: f64, press: f64) -> f64 {
     press / 1013.0 * airm
 }
 
+/// Internal: computes the along-path column depth of an atmospheric layer of
+/// given scale height at a given zenith distance (radians), scaled by pressure.
 pub fn xext(scale_h: f64, zend: f64, press: f64) -> f64 {
     press
         / 1013.0
@@ -374,11 +425,18 @@ pub fn xext(scale_h: f64, zend: f64, press: f64) -> f64 {
                 * (-30.0 / (scale_h / 1000.0).sqrt() * zend.cos()).exp())
 }
 
+/// Internal: computes the airmass path length through a spherical-shell
+/// atmospheric layer of given scale height, using the Earth-radius geometry
+/// term instead of a flat-atmosphere approximation.
 pub fn xlay(scale_h: f64, zend: f64, press: f64) -> f64 {
     let a = zend.sin() / (1.0 + scale_h / RA);
     press / 1013.0 / (1.0 - a * a).sqrt()
 }
 
+/// Internal: computes the total magnitude correction due to atmospheric
+/// extinction along the line of sight to the object, combining Rayleigh,
+/// aerosol, ozone, and water-vapor path depths (`xext`/`xlay`) with their
+/// respective extinction coefficients.
 pub fn deltam(
     alt_o: f64,
     alt_s: f64,
@@ -410,6 +468,9 @@ pub fn deltam(
 
 // ── Optics & vision helpers (swehel.c §5) ──────────────────────────
 
+/// Internal: computes the critical visual acuity (minimum resolvable
+/// separation, degrees) at background brightness `b` for a viewer with
+/// Snellen fraction `sn`, choosing the scotopic or photopic model.
 pub fn cva(b: f64, sn: f64, helflag: HeliacalFlags) -> f64 {
     let mut is_scotopic = b < 1394.0;
     if helflag.contains(HeliacalFlags::VISLIM_PHOTOPIC) {
@@ -425,6 +486,8 @@ pub fn cva(b: f64, sn: f64, helflag: HeliacalFlags) -> f64 {
     }
 }
 
+/// Internal: computes the pupil diameter (mm) as a function of observer age
+/// and background brightness `b`.
 pub fn pupil_dia(age: f64, b: f64) -> f64 {
     (0.534
         - 0.00211 * age
@@ -432,6 +495,10 @@ pub fn pupil_dia(age: f64, b: f64) -> f64 {
         * 10.0
 }
 
+/// Internal: computes the optical-aid brightness/contrast correction factor
+/// (naked eye, binoculars, or telescope per `dobs`) used to scale either the
+/// limiting-magnitude term (`type_factor == 0`) or the background-brightness
+/// term (`type_factor != 0`).
 pub fn optic_factor(
     bback: f64,
     k_x: f64,
@@ -509,6 +576,8 @@ pub fn optic_factor(
 #[allow(clippy::approx_constant)]
 const LN10: f64 = 2.302585092994;
 
+/// Internal: computes the Moon's apparent visual magnitude at the given
+/// Earth-Moon distance and phase angle (degrees).
 pub fn moons_brightness(dist: f64, phasemoon: f64) -> f64 {
     -21.62
         + 5.0 * (dist / (RA / 1000.0)).ln() / LN10
@@ -516,6 +585,8 @@ pub fn moons_brightness(dist: f64, phasemoon: f64) -> f64 {
         + 0.000000004 * phasemoon.powi(4)
 }
 
+/// Internal: computes the Moon's phase angle (degrees) from the Moon's and
+/// Sun's topocentric altitude/azimuth.
 pub fn moon_phase(alt_m: f64, azi_m: f64, alt_s: f64, azi_s: f64) -> f64 {
     let moon_avg_par = 0.95;
     let alt_mi = (alt_m + moon_avg_par) * DEGTORAD;
@@ -530,6 +601,8 @@ pub fn moon_phase(alt_m: f64, azi_m: f64, alt_s: f64, azi_s: f64) -> f64 {
 }
 
 #[allow(clippy::approx_constant)]
+/// Internal: computes the natural night-sky background brightness (nL),
+/// including its slow 11-year (solar-cycle) modulation.
 pub fn bn(
     alt_o: f64,
     jdn_days_ut: f64,
@@ -568,6 +641,8 @@ pub fn bn(
     mymax(bnb, 0.0) * ERG2NL
 }
 
+/// Internal: computes the sky background brightness (nL) contributed by
+/// moonlight scattered near the line of sight to the object.
 pub fn bm(
     alt_o: f64,
     azi_o: f64,
@@ -614,6 +689,9 @@ pub fn bm(
     mymax(bm_val, 0.0) * ERG2NL
 }
 
+/// Internal: computes the twilight sky background brightness (nL)
+/// contributed by sunlight scattered near the line of sight, for Sun
+/// altitudes between civil/nautical twilight and day.
 pub fn btwi(
     alt_o: f64,
     azi_o: f64,
@@ -649,6 +727,8 @@ pub fn btwi(
     mymax(btwi_val, 0.0) * ERG2NL
 }
 
+/// Internal: computes the daytime sky background brightness (nL)
+/// contributed by sunlight scattered near the line of sight to the object.
 pub fn bday(
     alt_o: f64,
     azi_o: f64,
@@ -683,10 +763,15 @@ pub fn bday(
     mymax(bday_val, 0.0) * ERG2NL
 }
 
+/// Internal: clamps an artificial (city-light) sky-brightness contribution
+/// to be non-negative.
 pub fn bcity(value: f64) -> f64 {
     mymax(value, 0.0)
 }
 
+/// Internal: computes the total sky background brightness (nL) by combining
+/// the twilight/daytime, moonlight, city-light, and night-sky components
+/// (`btwi`/`bday`, `bm`, `bcity`, `bn`) applicable at the given Sun altitude.
 pub fn bsky(
     alt_o: f64,
     azi_o: f64,
@@ -766,11 +851,18 @@ fn topo_config(
     config
 }
 
+/// Internal: crude calendar approximation of the Sun's right ascension
+/// (degrees) for a given Julian day (UT), used only for extinction-model
+/// seasonal terms.
 pub fn sun_ra(jdn_days_ut: f64) -> f64 {
     let (_, imon, iday, _) = revjul(jdn_days_ut, CalendarType::Gregorian);
     normalize_degrees((imon as f64 + (iday as f64 - 1.0) / 30.4 - 3.69) * 30.0)
 }
 
+/// Internal: computes one of several angle values for `object_name` at
+/// `jd_ut` — selected via `angle` (0=apparent altitude, 1=azimuth, 2=right
+/// ascension, 3=ecliptic longitude, 4=apparent-refracted altitude,
+/// 5=declination, 6=ecliptic latitude, 7=geocentric altitude).
 #[allow(clippy::collapsible_else_if)]
 pub fn object_loc(
     eph: &Ephemeris,
@@ -845,6 +937,9 @@ pub fn object_loc(
     }
 }
 
+/// Internal: computes the object's raw azimuth, true altitude, apparent
+/// altitude, and the Cartesian unit vector of the apparent-altitude
+/// direction (matching C's `azalt_cart`, `dret[0..5]`).
 pub fn azalt_cart(
     eph: &Ephemeris,
     jd_ut: f64,
@@ -889,6 +984,8 @@ pub fn azalt_cart(
     Ok([xaz[0], xaz[1], xaz[2], cart[0], cart[1], cart[2]])
 }
 
+/// Internal: computes the apparent visual magnitude of a planet, the Moon,
+/// or a fixed star at the given Julian day (UT).
 pub fn magnitude(
     eph: &Ephemeris,
     jd_ut: f64,
@@ -920,6 +1017,10 @@ const SUN_RADIUS_M: f64 = 696000000.0;
 const MOON_RADIUS_M: f64 = 1737000.0;
 const LAT_THRESHOLD_FAST: f64 = 63.0;
 
+/// Internal: computes the rise or set Julian day (UT) of `ipl` using the
+/// fast direct-search algorithm (valid for `|latitude| < 63°`); see
+/// `my_rise_trans` for the dispatcher that falls back to the general
+/// rise/transit search at high latitudes.
 pub fn calc_rise_and_set(
     eph: &Ephemeris,
     tjd_start: f64,
@@ -1078,6 +1179,9 @@ pub fn calc_rise_and_set(
     Ok(tjdrise)
 }
 
+/// Internal: rise/set dispatcher for a planet or (via `starname`) a fixed
+/// star; uses the fast `calc_rise_and_set` path for recognized planets at
+/// `|latitude| < 63°`, otherwise falls back to the general rise/transit search.
 pub fn my_rise_trans(
     eph: &Ephemeris,
     tjd: f64,
@@ -1148,6 +1252,8 @@ pub fn my_rise_trans(
     }
 }
 
+/// Internal: resolves `object_name` to a body or star and computes its rise
+/// or set time (`rim == 0` forces disc-center timing).
 pub fn rise_set(
     eph: &Ephemeris,
     jdn_days_ut: f64,
@@ -1194,21 +1300,44 @@ pub fn rise_set(
 
 // ── VisLimMagn & swe_vis_limit_mag (c-ref-heliacal-vision.md §8) ──
 
+/// Output of `vis_limit_mag`: the visual limiting magnitude at the observer's
+/// location and time, alongside the geometry used to compute it. Port of
+/// `swe_vis_limit_mag`'s `dret[0..7]` output array (swehel.c).
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VisLimitResult {
+    /// Limiting visual magnitude the object would need to reach to be just
+    /// visible (from `vis_lim_magn`). C `dret[0]`.
     pub limiting_magnitude: f64,
+    /// Object's true (topocentric) altitude, degrees. C `dret[1]`.
     pub altitude_object: f64,
+    /// Object's azimuth, degrees. C `dret[2]`.
     pub azimuth_object: f64,
+    /// Sun's altitude, degrees (`-90` under `VISLIM_DARK`). C `dret[3]`.
     pub altitude_sun: f64,
+    /// Sun's azimuth, degrees (`0` under `VISLIM_DARK`). C `dret[4]`.
     pub azimuth_sun: f64,
+    /// Moon's altitude, degrees (`-90` if the object is the Moon, or under
+    /// `VISLIM_DARK`/`VISLIM_NOMOON`). C `dret[5]`.
     pub altitude_moon: f64,
+    /// Moon's azimuth, degrees (`0` under the same conditions as
+    /// `altitude_moon`). C `dret[6]`.
     pub azimuth_moon: f64,
+    /// Object's actual apparent visual magnitude (from `magnitude`). C `dret[7]`.
     pub magnitude_object: f64,
+    /// Scotopic/mixed vision-mode flags reported alongside the limiting
+    /// magnitude.
     pub vision: VisLimFlags,
+    /// `true` if the object is below the local horizon, in which case
+    /// `limiting_magnitude` is the `-100.0` sentinel and the other fields are
+    /// left at their default (zero) values.
     pub below_horizon: bool,
 }
 
+/// Computes the visual limiting magnitude and scotopic/mixed vision flags
+/// for an object at the given topocentric geometry, from the combined sky
+/// background brightness (`bsky`) and extinction (`deltam`). Port of
+/// `VisLimMagn` (swehel.c).
 #[allow(clippy::approx_constant, clippy::impossible_comparisons)]
 pub fn vis_lim_magn(
     dobs: &[f64; 6],
@@ -1275,6 +1404,10 @@ pub fn vis_lim_magn(
     (mag, scotopic_flag)
 }
 
+/// Computes the visual limiting magnitude for `object_name` at `tjd_ut` and
+/// the given geographic/atmospheric/observer parameters, including the
+/// object's, Sun's, and Moon's positions used in the computation. Port of
+/// `swe_vis_limit_mag` (swehel.c).
 pub fn vis_limit_mag(
     eph: &Ephemeris,
     tjd_ut: f64,
@@ -1789,40 +1922,78 @@ const MAX_TRY_HOURS: f64 = 4.0;
 const TIME_STEP_DEFAULT: f64 = 1.0;
 const LOCAL_MIN_STEP: f64 = 8.0;
 
+/// Detailed heliacal-phenomena report for an object at a specific instant.
+/// Port of `swe_heliacal_pheno_ut`'s 28-element `dret[]` output array
+/// (swehel.c:1862-2074).
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HeliacalPheno {
+    /// Object's topocentric altitude, degrees. C `dret[0]`.
     pub tc_altitude: f64,
+    /// Object's topocentric apparent (refracted) altitude, degrees. C `dret[1]`.
     pub tc_apparent_altitude: f64,
+    /// Object's geocentric altitude, degrees. C `dret[2]`.
     pub gc_altitude: f64,
+    /// Object's azimuth, degrees. C `dret[3]`.
     pub azimuth_object: f64,
+    /// Sun's topocentric altitude, degrees. C `dret[4]`.
     pub tc_sun_altitude: f64,
+    /// Sun's azimuth, degrees. C `dret[5]`.
     pub sun_azimuth: f64,
+    /// Actual topocentric arcus visionis (object altitude minus Sun
+    /// altitude), degrees. C `dret[6]`.
     pub tav_act: f64,
+    /// Actual (parallax-corrected) arcus visionis, degrees. C `dret[7]`.
     pub arcv_act: f64,
+    /// Actual azimuth difference between Sun and object, degrees. C `dret[8]`.
     pub daz_act: f64,
+    /// Actual longitude difference between Sun and object along the great
+    /// circle, degrees. C `dret[9]`.
     pub arcl_act: f64,
+    /// Extinction coefficient at the Sun's altitude. C `dret[10]`.
     pub kact: f64,
+    /// Smallest topocentric arcus visionis found in the visibility-window
+    /// search. C `dret[11]`.
     pub min_tav: f64,
+    /// First time (Julian day, UT) the object is possibly visible. C `dret[12]`.
     pub t_first_vr: f64,
+    /// Best (optimum) time (Julian day, UT) the object is visible. C `dret[13]`.
     pub t_best_vr: f64,
+    /// Last time (Julian day, UT) the object is possibly visible. C `dret[14]`.
     pub t_last_vr: f64,
+    /// Optimum time of visibility (Julian day, UT) per Yallop's criterion,
+    /// Moon only. C `dret[15]`.
     pub t_best_yallop: f64,
+    /// Crescent width of the Moon, Moon only. C `dret[16]`.
     pub w_moon: f64,
+    /// Yallop's q-test value, Moon only. C `dret[17]`.
     pub q_yallop: f64,
+    /// Yallop visibility-grade classification derived from `q_yallop`, Moon
+    /// only. C `dret[18]`.
     pub q_crit: f64,
+    /// Object's parallax, degrees. C `dret[19]`.
     pub par_o: f64,
+    /// Object's actual apparent visual magnitude. C `dret[20]`.
     pub magn_o: f64,
+    /// Object's rise/set time (Julian day, UT). C `dret[21]`.
     pub rise_o: f64,
+    /// Sun's rise/set time (Julian day, UT). C `dret[22]`.
     pub rise_s: f64,
+    /// Time lag between the object's and the Sun's rise/set, days. C `dret[23]`.
     pub lag: f64,
+    /// Duration of the visibility window, days. C `dret[24]`.
     pub t_vis_vr: f64,
+    /// Crescent length of the Moon, Moon only. C `dret[25]`.
     pub l_moon: f64,
+    /// Elongation of the object from the Sun, degrees. C `dret[26]`.
     pub elongation: f64,
+    /// Illuminated fraction of the object's disc, percent. C `dret[27]`.
     pub illumination: f64,
 }
 
 impl HeliacalPheno {
+    /// Flattens the fields into the 28-element array matching C's `dret[]`
+    /// layout, in field-declaration order.
     pub fn as_array(&self) -> [f64; 28] {
         [
             self.tc_altitude,
@@ -1859,6 +2030,9 @@ impl HeliacalPheno {
 
 // ── swe_heliacal_pheno_ut (swehel.c:1862-2074) ───────────────────
 
+/// Computes the full `HeliacalPheno` report for `object_name` at `tjd_ut`
+/// and the given event type (morning/evening first/last). Port of
+/// `swe_heliacal_pheno_ut` (swehel.c:1862-2074).
 pub fn heliacal_pheno_ut(
     eph: &Ephemeris,
     tjd_ut: f64,
@@ -2200,6 +2374,9 @@ const TCON: [f64; 18] = [
     2451568.0, 2451753.0, // Neptune
 ];
 
+/// Internal: finds the Julian day of the conjunction (or opposition, for
+/// acronychal events) between `ipl` and the Sun nearest after `tjd_start`,
+/// seeded from a lookup table (`TCON`) of known conjunction epochs.
 pub fn find_conjunct_sun(
     eph: &Ephemeris,
     tjd_start: f64,
@@ -2309,6 +2486,9 @@ fn get_asc_obl_diff(
     Ok(dsunpl)
 }
 
+/// Internal: finds the Julian day at which the oblique-ascension difference
+/// between `ipl` (or `starname`) and the Sun crosses zero for the given
+/// event type, via coarse forward search then bisection.
 pub fn get_asc_obl_with_sun(
     eph: &Ephemeris,
     tjd_start: f64,
@@ -2382,6 +2562,9 @@ pub fn get_asc_obl_with_sun(
 
 // §3: Day-level search
 
+/// Internal: searches day-by-day (then minute-by-minute) from `tjd` for the
+/// Julian day (UT) on which `object_name`'s heliacal event of `type_event`
+/// first occurs.
 pub fn get_heliacal_day(
     eph: &Ephemeris,
     tjd: f64,
@@ -2561,6 +2744,10 @@ pub fn get_heliacal_day(
     Err(Error::CError("heliacal event does not happen".into()))
 }
 
+/// Internal: searches from `tjd` for the Julian day (UT) of `object_name`'s
+/// acronychal (cosmical) rising or setting of `type_event`, by iterating
+/// rise/set plus the dark- and no-moon visibility-limit boundaries until
+/// they converge.
 pub fn get_acronychal_day(
     eph: &Ephemeris,
     tjd: f64,
@@ -2683,6 +2870,10 @@ pub fn get_acronychal_day(
 
 // §4: Visibility timing
 
+/// Internal: hill-climbs forward and backward from `tjd` to find the time of
+/// maximum visibility margin (limiting magnitude minus actual magnitude) for
+/// `object_name`; returns the optimum time and whether it is uncertain due
+/// to a scotopic/photopic transition.
 pub fn time_optimum_visibility(
     eph: &Ephemeris,
     tjd: f64,
@@ -2798,6 +2989,10 @@ pub fn time_optimum_visibility(
     Ok((result_tjd, false))
 }
 
+/// Internal: walks from `tjd` in direction `direct` to find the boundary
+/// time (written to `*tret`) beyond which `object_name` becomes invisible;
+/// returns whether the result is uncertain due to a scotopic/photopic
+/// transition.
 pub fn time_limit_invisible(
     eph: &Ephemeris,
     tjd: f64,
@@ -2862,6 +3057,11 @@ pub fn time_limit_invisible(
     Ok(false)
 }
 
+/// Internal: given a day already known to contain the heliacal event
+/// (`tday`), computes the `[start_visible, optimum, end_visible]` triple via
+/// `time_optimum_visibility` and `time_limit_invisible`, reordering the
+/// boundaries chronologically for evening events. Port of
+/// `get_heliacal_details` (swehel.c:3107-3161).
 pub fn get_heliacal_details(
     eph: &Ephemeris,
     tday: f64,

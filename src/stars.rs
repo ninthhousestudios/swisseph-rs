@@ -1,3 +1,6 @@
+//! Fixed-star catalog — loading, searching, and the 8 built-in ayanamsa
+//! reference stars.
+
 use std::collections::HashMap;
 use std::path::Path;
 

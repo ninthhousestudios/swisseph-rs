@@ -1,3 +1,6 @@
+//! Julian Day ↔ calendar conversion, delta-T dispatch, and UTC ↔ JD with
+//! leap-second handling.
+
 use crate::constants::{J1972, NLEAP_INIT};
 use crate::error::Error;
 use crate::types::{CalendarType, DeltaT, JdTt, JdUt1, UtcComponents, UtcToJd};

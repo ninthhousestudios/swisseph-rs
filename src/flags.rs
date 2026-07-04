@@ -1,3 +1,6 @@
+//! Bitflag structs for calculation options, eclipse classification, rise/set
+//! search, heliacal visibility, and degree-formatting control.
+
 use bitflags::bitflags;
 
 bitflags! {

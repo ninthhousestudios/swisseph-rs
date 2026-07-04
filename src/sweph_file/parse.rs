@@ -1,3 +1,7 @@
+//! `.se1` file header and per-planet metadata parsing.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::error::Error;
 
 use super::types::{

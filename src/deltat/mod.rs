@@ -1,3 +1,8 @@
+//! Delta-T (TT − UT1) model dispatcher.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
+/// Generated delta-T historical and tidal-acceleration tables.
 pub mod data;
 
 use crate::config::EphemerisConfig;
@@ -369,6 +374,9 @@ fn future_extrapolation(y: f64, tabend: f64, tabsiz: usize, model: DeltaTModel) 
 // Main dispatcher (swephlib.c:2545–2699)
 // ---------------------------------------------------------------------------
 
+/// Computes Delta-T (TT − UT1, in days) at Julian day `tjd` using the delta-T
+/// model and tidal-acceleration setting configured in `config`, dispatching
+/// across historical tables, polynomial fits, and future extrapolation by epoch.
 pub fn calc_deltat(tjd: f64, config: &EphemerisConfig) -> f64 {
     if let Some(dt) = config.delta_t_userdef {
         return dt;
