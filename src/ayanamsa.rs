@@ -306,6 +306,9 @@ pub(crate) const AYANAMSA: [AyaInit; 47] = [
 ];
 
 impl EphemerisConfig {
+    /// Configure the sidereal-mode ayanamsa: `sid_mode` selects a built-in ayanamsa index (bits
+    /// 0-7) plus [`SiderealBits`] modifiers (remaining bits); `sid_mode & 0xFF == 255` instead
+    /// uses a caller-supplied zero point (`t0`, `ayan_t0`). Port of `swe_set_sid_mode`.
     pub fn set_sidereal_mode(&mut self, mut sid_mode: i32, t0: f64, ayan_t0: f64) {
         if sid_mode < 0 {
             sid_mode = 0;

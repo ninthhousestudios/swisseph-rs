@@ -8,6 +8,7 @@ use crate::types::DegreeParts;
 // Angle normalization
 // ---------------------------------------------------------------------------
 
+/// Normalize an angle to `[0, 360)` degrees.
 pub fn normalize_degrees(x: f64) -> f64 {
     let mut y = x % 360.0;
     if y.abs() < 1e-13 {
@@ -19,6 +20,7 @@ pub fn normalize_degrees(x: f64) -> f64 {
     y
 }
 
+/// Normalize an angle to `[0, 2π)` radians.
 pub fn normalize_radians(x: f64) -> f64 {
     let mut y = x % TWOPI;
     if y.abs() < 1e-13 {
@@ -30,6 +32,8 @@ pub fn normalize_radians(x: f64) -> f64 {
     y
 }
 
+/// Reduce an angle (radians) into `[0, 2π)`, without the near-zero snapping of
+/// [`normalize_radians`].
 pub fn mod_2pi(x: f64) -> f64 {
     let mut y = x % TWOPI;
     if y < 0.0 {
@@ -38,6 +42,7 @@ pub fn mod_2pi(x: f64) -> f64 {
     y
 }
 
+/// Reduce a centisecond angle into `[0, 1_296_000)` (i.e. `[0, 360)` degrees in centiseconds).
 pub fn mods3600(x: f64) -> f64 {
     x - 1_296_000.0 * (x / 1_296_000.0).floor()
 }
@@ -46,15 +51,18 @@ pub fn mods3600(x: f64) -> f64 {
 // Angle differences
 // ---------------------------------------------------------------------------
 
+/// Difference `p1 - p2` normalized to `[0, 360)` degrees (unsigned).
 pub fn diff_degrees_norm(p1: f64, p2: f64) -> f64 {
     normalize_degrees(p1 - p2)
 }
 
+/// Signed difference `p1 - p2` in degrees, in `[-180, 180)`.
 pub fn diff_degrees(p1: f64, p2: f64) -> f64 {
     let dif = normalize_degrees(p1 - p2);
     if dif >= 180.0 { dif - 360.0 } else { dif }
 }
 
+/// Signed difference `p1 - p2` in radians, in `[-π, π)`.
 pub fn diff_radians(p1: f64, p2: f64) -> f64 {
     let dif = normalize_radians(p1 - p2);
     if dif >= PI { dif - TWOPI } else { dif }
@@ -64,11 +72,13 @@ pub fn diff_radians(p1: f64, p2: f64) -> f64 {
 // Midpoints
 // ---------------------------------------------------------------------------
 
+/// Midpoint of two angles (degrees), taking the shorter arc between them.
 pub fn midpoint_degrees(x1: f64, x0: f64) -> f64 {
     let d = diff_degrees(x1, x0);
     normalize_degrees(x0 + d / 2.0)
 }
 
+/// Midpoint of two angles (radians), taking the shorter arc between them.
 pub fn midpoint_radians(x1: f64, x0: f64) -> f64 {
     DEGTORAD * midpoint_degrees(x1 * RADTODEG, x0 * RADTODEG)
 }
@@ -77,6 +87,7 @@ pub fn midpoint_radians(x1: f64, x0: f64) -> f64 {
 // Centisecond angle functions
 // ---------------------------------------------------------------------------
 
+/// Normalize a centisecond angle to `[0, DEG360)`.
 pub fn csnorm(mut p: i32) -> i32 {
     if p < 0 {
         loop {
@@ -96,10 +107,12 @@ pub fn csnorm(mut p: i32) -> i32 {
     p
 }
 
+/// Difference `p1 - p2` normalized to `[0, DEG360)` centiseconds (unsigned).
 pub fn difcsn(p1: i32, p2: i32) -> i32 {
     csnorm(p1 - p2)
 }
 
+/// Signed difference `p1 - p2` in centiseconds, in `[-DEG180, DEG180)`.
 pub fn difcs2n(p1: i32, p2: i32) -> i32 {
     let dif = csnorm(p1 - p2);
     if dif >= DEG180 { dif - DEG360 } else { dif }
@@ -109,6 +122,7 @@ pub fn difcs2n(p1: i32, p2: i32) -> i32 {
 // Utility
 // ---------------------------------------------------------------------------
 
+/// Round a float to the nearest integer, rounding halves away from zero (C `d2l`).
 pub fn d2l(x: f64) -> i32 {
     if x >= 0.0 {
         (x + 0.5) as i32
@@ -121,6 +135,7 @@ pub fn d2l(x: f64) -> i32 {
 // Chebyshev evaluation (Broucke/Clenshaw, ACM algorithm 446)
 // ---------------------------------------------------------------------------
 
+/// Evaluate a Chebyshev series at `x` (Broucke/Clenshaw recurrence, ACM algorithm 446).
 pub fn chebyshev_eval(x: f64, coeffs: &[f64]) -> f64 {
     let x2 = x * 2.0;
     let mut br = 0.0;
@@ -134,6 +149,7 @@ pub fn chebyshev_eval(x: f64, coeffs: &[f64]) -> f64 {
     (br - brp2) * 0.5
 }
 
+/// Evaluate the derivative of a Chebyshev series at `x` (Broucke/Clenshaw recurrence).
 pub fn chebyshev_deriv(x: f64, coeffs: &[f64]) -> f64 {
     let ncf = coeffs.len();
     if ncf <= 1 {
@@ -187,12 +203,14 @@ pub fn dot_prod_unit(x: [f64; 3], y: [f64; 3]) -> f64 {
 // Coordinate transforms — basic
 // ---------------------------------------------------------------------------
 
+/// Rotate a Cartesian vector about the X axis by angle `eps` (radians).
 pub fn rotate_x(pos: [f64; 3], eps: f64) -> [f64; 3] {
     let sineps = eps.sin();
     let coseps = eps.cos();
     rotate_x_sincos(pos, sineps, coseps)
 }
 
+/// Rotate a Cartesian vector about the X axis, given precomputed `sin`/`cos` of the angle.
 pub fn rotate_x_sincos(pos: [f64; 3], sineps: f64, coseps: f64) -> [f64; 3] {
     [
         pos[0],
@@ -201,6 +219,8 @@ pub fn rotate_x_sincos(pos: [f64; 3], sineps: f64, coseps: f64) -> [f64; 3] {
     ]
 }
 
+/// Convert a Cartesian vector to polar `[longitude, latitude, distance]` (radians, radians,
+/// same unit as input).
 pub fn cartesian_to_polar(x: [f64; 3]) -> [f64; 3] {
     if x[0] == 0.0 && x[1] == 0.0 && x[2] == 0.0 {
         return [0.0; 3];
@@ -220,6 +240,7 @@ pub fn cartesian_to_polar(x: [f64; 3]) -> [f64; 3] {
     [lon, lat, dist]
 }
 
+/// Convert polar `[longitude, latitude, distance]` (radians, radians, any unit) to Cartesian.
 pub fn polar_to_cartesian(l: [f64; 3]) -> [f64; 3] {
     let cosl1 = l[1].cos();
     [
@@ -233,6 +254,8 @@ pub fn polar_to_cartesian(l: [f64; 3]) -> [f64; 3] {
 // Coordinate transforms — with speed (Jacobian velocity transform)
 // ---------------------------------------------------------------------------
 
+/// Convert Cartesian position+velocity `[x, y, z, vx, vy, vz]` to polar position+speed
+/// `[lon, lat, dist, dlon/dt, dlat/dt, ddist/dt]` (radians and radians/time).
 pub fn cartesian_to_polar_with_speed(x: [f64; 6]) -> [f64; 6] {
     if x[0] == 0.0 && x[1] == 0.0 && x[2] == 0.0 {
         let speed = (x[3] * x[3] + x[4] * x[4] + x[5] * x[5]).sqrt();
@@ -264,6 +287,8 @@ pub fn cartesian_to_polar_with_speed(x: [f64; 6]) -> [f64; 6] {
     [lon, lat, rxyz, speed_lon, speed_lat, xx5]
 }
 
+/// Convert polar position+speed `[lon, lat, dist, dlon/dt, dlat/dt, ddist/dt]` (radians,
+/// radians/time) to Cartesian position+velocity `[x, y, z, vx, vy, vz]`.
 pub fn polar_to_cartesian_with_speed(l: [f64; 6]) -> [f64; 6] {
     if l[3] == 0.0 && l[4] == 0.0 && l[5] == 0.0 {
         let pos = polar_to_cartesian([l[0], l[1], l[2]]);
@@ -292,6 +317,8 @@ pub fn polar_to_cartesian_with_speed(l: [f64; 6]) -> [f64; 6] {
 // Coordinate system conversion (ecliptic ↔ equatorial, degree-level wrappers)
 // ---------------------------------------------------------------------------
 
+/// Rotate a polar position `[longitude, latitude, distance]` (degrees, degrees, any unit)
+/// about the X axis by obliquity `eps` (degrees) — the ecliptic/equatorial coordinate swap.
 pub fn cotrans(xpo: [f64; 3], eps: f64) -> [f64; 3] {
     let e = eps * DEGTORAD;
     let x = [xpo[0] * DEGTORAD, xpo[1] * DEGTORAD, 1.0];
@@ -301,6 +328,9 @@ pub fn cotrans(xpo: [f64; 3], eps: f64) -> [f64; 3] {
     [result[0] * RADTODEG, result[1] * RADTODEG, xpo[2]]
 }
 
+/// Like [`cotrans`] but also rotates the speed components, given a polar position+speed
+/// `[lon, lat, dist, dlon/dt, dlat/dt, ddist/dt]` (degrees, degrees/day) and obliquity `eps`
+/// (degrees).
 pub fn cotrans_with_speed(xpo: [f64; 6], eps: f64) -> [f64; 6] {
     let e = eps * DEGTORAD;
     let x = [
@@ -329,6 +359,8 @@ pub fn cotrans_with_speed(xpo: [f64; 6], eps: f64) -> [f64; 6] {
 // Degree splitting
 // ---------------------------------------------------------------------------
 
+/// Split a decimal degree value into sign, degrees, minutes, seconds, and a fractional-second
+/// remainder, applying the rounding/zodiacal-sign options in `flags`. Port of `swe_split_deg`.
 pub fn split_degrees(mut ddeg: f64, flags: SplitDegFlags) -> DegreeParts {
     let mut sign = 1i32;
     if ddeg < 0.0 {
@@ -389,6 +421,7 @@ pub fn split_degrees(mut ddeg: f64, flags: SplitDegFlags) -> DegreeParts {
     }
 }
 
+/// Evaluate a polynomial at `x` via Horner's method, with `coeffs` ordered lowest-degree first.
 pub fn poly_eval(coeffs: &[f64], x: f64) -> f64 {
     coeffs.iter().rev().fold(0.0, |acc, &c| acc * x + c)
 }
@@ -453,8 +486,12 @@ pub fn armc_to_mc(armc_deg: f64, eps_deg: f64) -> f64 {
 // Owen 1990 shared utilities
 // ---------------------------------------------------------------------------
 
+/// Owen 1990 Chebyshev-interval reference epochs (Julian Days, TT), 5 forty-Julian-century
+/// intervals centered so `jd` always falls within one.
 pub const OWEN_T0S: [f64; 5] = [-3392455.5, -470455.5, 2451544.5, 5373544.5, 8295544.5];
 
+/// Select the Owen 1990 Chebyshev interval containing `jd`: returns `(t0, icof)`, the interval's
+/// reference epoch and index into [`OWEN_T0S`].
 pub fn owen_t0_icof(jd: f64) -> (f64, usize) {
     let mut t0 = OWEN_T0S[0];
     let mut icof = 0;
@@ -467,6 +504,9 @@ pub fn owen_t0_icof(jd: f64) -> (f64, usize) {
     (t0, icof)
 }
 
+/// Owen 1990 Chebyshev basis polynomials `T_0..T_9` evaluated at `jd`'s normalized interval
+/// position. Returns `(icof, k)`: the interval index (into the model coefficient tables) and
+/// the 10 basis values.
 pub fn owen_chebyshev_basis(jd: f64) -> (usize, [f64; 10]) {
     let (t0, icof) = owen_t0_icof(jd);
     let x = (jd - t0) / 36525.0 / 40.0;

@@ -79,6 +79,9 @@ pub fn ldp_peps(jd: f64) -> f64 {
 // model can be requested for the short-term window (guarded by t.abs() bound) or
 // as the long-term default, producing adjacent branches with identical bodies
 // but distinct conditions. Collapsing them would obscure the C correspondence.
+/// Precess a Cartesian equatorial position between J2000 and date `jd` (TT) in place,
+/// selecting a precession model (Vondrák 2011, IAU 1976/2000/2006, Owen 1990, etc.) from
+/// `models`/`flags`. Port of C `swi_precess`.
 #[allow(clippy::if_same_then_else)]
 pub fn precess(
     pos: &mut [f64; 3],

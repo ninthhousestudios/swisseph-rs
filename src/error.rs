@@ -18,11 +18,30 @@ pub enum Error {
     /// The integer does not map to a known [`CalendarType`](crate::types::CalendarType).
     InvalidCalendarType(i32),
     /// The year/month/day combination is not a valid calendar date.
-    InvalidDate { year: i32, month: i32, day: f64 },
+    InvalidDate {
+        /// Calendar year.
+        year: i32,
+        /// Calendar month (1-12).
+        month: i32,
+        /// Day of month (fractional, may include a time-of-day component).
+        day: f64,
+    },
     /// The requested body is not available from the configured ephemeris source.
-    EphemerisNotAvailable { body: Body, source: EphemerisSource },
+    EphemerisNotAvailable {
+        /// The body that was requested.
+        body: Body,
+        /// The ephemeris source it was requested from.
+        source: EphemerisSource,
+    },
     /// The Julian Day (TT) falls outside the loaded ephemeris file's time range.
-    BeyondEphemerisLimits { jd_tt: f64, start: f64, end: f64 },
+    BeyondEphemerisLimits {
+        /// The requested Julian Day, TT.
+        jd_tt: f64,
+        /// Start of the available range (Julian Day, TT).
+        start: f64,
+        /// End of the available range (Julian Day, TT).
+        end: f64,
+    },
     /// An ephemeris data file could not be found at the expected path.
     FileNotFound(PathBuf),
     /// An ephemeris data file is malformed or has an unexpected binary layout.
@@ -30,9 +49,23 @@ pub enum Error {
     /// The body is circumpolar at the given geographic latitude (never rises or never sets).
     CircumpolarBody,
     /// The hour/minute/second combination is not a valid time of day.
-    InvalidTime { hour: i32, minute: i32, second: f64 },
+    InvalidTime {
+        /// Hour of day (0-23).
+        hour: i32,
+        /// Minute of hour (0-59).
+        minute: i32,
+        /// Second of minute (fractional; may be up to 61 to allow for leap seconds).
+        second: f64,
+    },
     /// A leap second was requested on a date that has none in the IERS table.
-    InvalidLeapSecond { year: i32, month: i32, day: i32 },
+    InvalidLeapSecond {
+        /// Calendar year.
+        year: i32,
+        /// Calendar month (1-12).
+        month: i32,
+        /// Day of month.
+        day: i32,
+    },
     /// The ephemeris backend is compiled out or not yet implemented.
     UnsupportedEphemeris(EphemerisSource),
     /// The sidereal mode requires fixed-star data that is not yet available.

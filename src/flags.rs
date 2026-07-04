@@ -142,14 +142,17 @@ bitflags! {
         /// Occultation ends during the day (swephexp.h:330). Numerically identical bit to
         /// [`Self::PENUMBEND_VISIBLE`]; see [`Self::OCC_BEG_DAYLIGHT`].
         const OCC_END_DAYLIGHT  = 16384;
+        /// Search only one lunation/apparition instead of continuing until a match is found.
         const ONE_TRY           = 32768;
 
+        /// Mask for all solar eclipse type bits.
         const ALLTYPES_SOLAR = Self::CENTRAL.bits()
             | Self::NONCENTRAL.bits()
             | Self::TOTAL.bits()
             | Self::ANNULAR.bits()
             | Self::PARTIAL.bits()
             | Self::HYBRID.bits();
+        /// Mask for all lunar eclipse type bits.
         const ALLTYPES_LUNAR = Self::TOTAL.bits()
             | Self::PARTIAL.bits()
             | Self::PENUMBRAL.bits();

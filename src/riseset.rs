@@ -22,6 +22,7 @@ use crate::types::Body;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RiseSetResult {
+    /// Julian Day (UT) of the rise, set, or transit event.
     pub time: f64,
 }
 

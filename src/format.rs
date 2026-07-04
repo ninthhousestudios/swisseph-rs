@@ -1,3 +1,7 @@
+//! Degree/time string formatting (centisecond precision).
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 const DEG30: i64 = 30 * 360000;
 
 /// Round centiseconds to the nearest arcsecond (multiple of 100), with a

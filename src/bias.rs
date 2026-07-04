@@ -34,6 +34,9 @@ const BIAS_IAU2000: [[f64; 3]; 3] = [
     [ 0.0000000805621715,  0.0000000330604145,  0.9999999999999962],
 ];
 
+/// Apply the frame-bias rotation between the J2000 mean-equatorial frame and GCRS/ICRS to
+/// `pos` (`[x, y, z, vx, vy, vz]`) in place, per `models.bias` and `direction`. Also applies the
+/// JPL Horizons approximation correction when `JPLHOR_APPROX` is set. Port of C `swi_bias`.
 pub fn frame_bias(
     pos: &mut [f64; 6],
     jd: f64,

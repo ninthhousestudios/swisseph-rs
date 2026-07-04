@@ -84,6 +84,10 @@ pub struct Ephemeris {
 }
 
 impl Ephemeris {
+    /// Construct an `Ephemeris` from `config`, opening any configured ephemeris data files
+    /// (planet/moon/asteroid `.se1` or JPL) and loading the fixed-star and fictitious-planet
+    /// catalogs. Resolves `tidal_acceleration` from the opened file's DE number when not
+    /// explicitly set.
     pub fn new(mut config: EphemerisConfig) -> crate::Result<Self> {
         let user_tidal_acceleration = config.tidal_acceleration;
         let leap_seconds = Self::build_leap_seconds(&config)?;

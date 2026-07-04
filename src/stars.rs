@@ -4,30 +4,49 @@ use std::path::Path;
 use crate::constants::{DEGTORAD, KM_S_TO_AU_CTY};
 use crate::error::Error;
 
+/// A single fixed-star catalog record (one line of `sefstars.txt`), with angular quantities
+/// already converted to radians and proper motion/parallax/radial velocity to per-century units.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Star {
+    /// Traditional star name (e.g. "Sirius"), or empty for Bayer-only records.
     pub name: String,
+    /// Bayer/Flamsteed designation (e.g. "alfCMa").
     pub bayer: String,
+    /// Normalized search key used for catalog lookup (lowercased name, or `,`-prefixed Bayer).
     pub skey: String,
+    /// Reference epoch: `0.0` for ICRS, else a Julian-year epoch (e.g. `1950.0`, `2000.0`).
     pub epoch: f64,
+    /// Right ascension at epoch, radians.
     pub ra: f64,
+    /// Declination at epoch, radians.
     pub de: f64,
+    /// Proper motion in right ascension, radians/century (already divided by `cos(de)`).
     pub ramot: f64,
+    /// Proper motion in declination, radians/century.
     pub demot: f64,
+    /// Radial velocity, AU/century.
     pub radvel: f64,
+    /// Parallax, radians.
     pub parall: f64,
+    /// Visual magnitude.
     pub mag: f64,
 }
 
+/// In-memory fixed-star catalog, indexed for lookup by sequential number, Bayer designation,
+/// and traditional name.
 pub struct StarCatalog {
+    /// Records with a unique Bayer designation, sorted by `skey` (used for sequential-number
+    /// lookup and Bayer-designation search).
     pub bayer_records: Vec<Star>,
+    /// Records with a non-empty traditional name (used for name search).
     pub named_records: Vec<Star>,
     by_bayer: HashMap<String, usize>,
     by_name: HashMap<String, usize>,
 }
 
 impl StarCatalog {
+    /// An empty catalog (no records), returned when `sefstars.txt` is unavailable.
     pub fn empty() -> Self {
         StarCatalog {
             bayer_records: Vec::new(),
@@ -37,14 +56,18 @@ impl StarCatalog {
         }
     }
 
+    /// Number of unique Bayer-designated records in the catalog.
     pub fn n_real(&self) -> usize {
         self.bayer_records.len()
     }
 
+    /// Number of named records in the catalog.
     pub fn n_named(&self) -> usize {
         self.named_records.len()
     }
 
+    /// Look up a star by sequential number, Bayer designation (`,`-prefixed, optionally
+    /// wildcarded with a trailing `%`), or traditional name.
     pub fn search(&self, input: &str) -> Result<Star, Error> {
         let normalized = format_search_name(input)?;
 

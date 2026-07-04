@@ -6,11 +6,16 @@ use crate::types::Body;
 
 const CROSS_PRECISION: f64 = 1.0 / 3_600_000.0;
 
+/// Result of a Moon node-crossing search: the Julian Day and the Moon's ecliptic position at
+/// that instant.
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MoonCrossing {
+    /// Julian Day of the crossing (same time scale as the search, TT or UT).
     pub jd: f64,
+    /// Moon's ecliptic longitude at the crossing, degrees.
     pub longitude: f64,
+    /// Moon's ecliptic latitude at the crossing, degrees (near zero by construction).
     pub latitude: f64,
 }
 
@@ -18,6 +23,8 @@ pub struct MoonCrossing {
 // solcross / solcross_ut
 // ---------------------------------------------------------------------------
 
+/// Next Julian Day (TT) at or after `jd_et` at which the Sun's ecliptic longitude equals
+/// `x2cross` (degrees).
 pub fn solcross(eph: &Ephemeris, x2cross: f64, jd_et: f64, flags: CalcFlags) -> Result<f64, Error> {
     let flags = flags | CalcFlags::SPEED;
     let body = Body::Sun;
@@ -35,6 +42,8 @@ pub fn solcross(eph: &Ephemeris, x2cross: f64, jd_et: f64, flags: CalcFlags) -> 
     Ok(jd)
 }
 
+/// UT-based [`solcross`]: next Julian Day (UT) at which the Sun's ecliptic longitude equals
+/// `x2cross` (degrees).
 pub fn solcross_ut(
     eph: &Ephemeris,
     x2cross: f64,
@@ -61,6 +70,8 @@ pub fn solcross_ut(
 // mooncross / mooncross_ut
 // ---------------------------------------------------------------------------
 
+/// Next Julian Day (TT) at or after `jd_et` at which the Moon's ecliptic longitude equals
+/// `x2cross` (degrees).
 pub fn mooncross(
     eph: &Ephemeris,
     x2cross: f64,
@@ -83,6 +94,8 @@ pub fn mooncross(
     Ok(jd)
 }
 
+/// UT-based [`mooncross`]: next Julian Day (UT) at which the Moon's ecliptic longitude equals
+/// `x2cross` (degrees).
 pub fn mooncross_ut(
     eph: &Ephemeris,
     x2cross: f64,
@@ -109,6 +122,8 @@ pub fn mooncross_ut(
 // mooncross_node / mooncross_node_ut
 // ---------------------------------------------------------------------------
 
+/// Next Julian Day (TT) at or after `jd_et` at which the Moon crosses its (mean) orbital node
+/// (ecliptic latitude passes through zero).
 pub fn mooncross_node(
     eph: &Ephemeris,
     jd_et: f64,
@@ -140,6 +155,7 @@ pub fn mooncross_node(
     }
 }
 
+/// UT-based [`mooncross_node`]: next Julian Day (UT) at which the Moon crosses its orbital node.
 pub fn mooncross_node_ut(
     eph: &Ephemeris,
     jd_ut: f64,
@@ -189,6 +205,8 @@ fn reject_helio_body(body: Body) -> bool {
     )
 }
 
+/// Next Julian Day (TT) at which `body`'s heliocentric ecliptic longitude equals `x2cross`
+/// (degrees), starting from `jd_et`. `dir >= 0` searches forward in time, `dir < 0` backward.
 pub fn helio_cross(
     eph: &Ephemeris,
     body: Body,
@@ -225,6 +243,8 @@ pub fn helio_cross(
     Ok(jd)
 }
 
+/// UT-based [`helio_cross`]: next Julian Day (UT) at which `body`'s heliocentric ecliptic
+/// longitude equals `x2cross` (degrees).
 pub fn helio_cross_ut(
     eph: &Ephemeris,
     body: Body,

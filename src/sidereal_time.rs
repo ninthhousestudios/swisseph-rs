@@ -1,3 +1,7 @@
+//! Greenwich Apparent Sidereal Time and the Equation of the Equinoxes.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::config::EphemerisConfig;
 use crate::constants::*;
 use crate::deltat::calc_deltat;

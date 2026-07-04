@@ -15,7 +15,9 @@ use std::f64::consts::PI;
 /// Direction for [`refrac`] / [`refrac_extended`]. `SE_TRUE_TO_APP` / `SE_APP_TO_TRUE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefracDir {
+    /// Convert a true (geometric) altitude to an apparent (refracted) one.
     TrueToApp,
+    /// Convert an apparent (refracted) altitude to a true (geometric) one.
     AppToTrue,
 }
 
@@ -23,14 +25,18 @@ pub enum RefracDir {
 /// [`HorDir`] since C reuses the same two integers (0/1) with different meaning per function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AzAltDir {
+    /// Input coordinates are ecliptic (longitude/latitude).
     EclToHor,
+    /// Input coordinates are equatorial (right ascension/declination).
     EquToHor,
 }
 
 /// Output-coordinate direction for [`azalt_rev`]. `SE_HOR2ECL` / `SE_HOR2EQU`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HorDir {
+    /// Output coordinates as ecliptic (longitude/latitude).
     HorToEcl,
+    /// Output coordinates as equatorial (right ascension/declination).
     HorToEqu,
 }
 

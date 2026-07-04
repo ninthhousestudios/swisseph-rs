@@ -1,3 +1,7 @@
+//! Observer geocentric offset for topocentric calculations.
+//!
+//! Low-level internals; exposed for golden tests and advanced use.
+
 use crate::config::{EphemerisConfig, TopoPosition};
 use crate::constants::*;
 use crate::flags::CalcFlags;

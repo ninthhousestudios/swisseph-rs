@@ -26,6 +26,8 @@ const DCOR_EPS_JPL: [f64; 51] = [
 // can be requested for the short-term window (guarded by t.abs() bound) or as the
 // long-term default, producing adjacent branches with identical bodies but
 // distinct conditions. Collapsing them would obscure the C correspondence.
+/// Obliquity of the ecliptic at `jd` (TT), radians, selecting a model (Vondrák 2011, IAU
+/// 1976/2000/2006, Owen 1990, etc.) from `models`/`flags`. Port of C `swi_epsiln`.
 #[allow(clippy::if_same_then_else)]
 pub fn obliquity(jd: f64, flags: CalcFlags, models: &AstroModels) -> Epsilon {
     let t = (jd - J2000) / 36525.0;

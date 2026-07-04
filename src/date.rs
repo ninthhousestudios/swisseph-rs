@@ -2,6 +2,8 @@ use crate::constants::{J1972, NLEAP_INIT};
 use crate::error::Error;
 use crate::types::{CalendarType, DeltaT, JdTt, JdUt1, UtcComponents, UtcToJd};
 
+/// Built-in IERS leap-second table, as packed dates `YYYYMMDD` (the day the leap second is
+/// inserted at the end of).
 pub const LEAP_SECONDS: [i32; 27] = [
     19720630, 19721231, 19731231, 19741231, 19751231, 19761231, 19771231, 19781231, 19791231,
     19810630, 19820630, 19830630, 19850630, 19871231, 19891231, 19901231, 19920630, 19930630,
@@ -43,6 +45,7 @@ fn split_jd_to_utc(jd: f64, cal: CalendarType) -> UtcComponents {
 // julday / revjul
 // ---------------------------------------------------------------------------
 
+/// Convert a calendar date + hour (fractional, UT) to a Julian Day. Port of `swe_julday`.
 pub fn julday(year: i32, month: i32, day: i32, hour: f64, cal: CalendarType) -> f64 {
     let mut u = year as f64;
     if month < 3 {
@@ -68,6 +71,7 @@ pub fn julday(year: i32, month: i32, day: i32, hour: f64, cal: CalendarType) -> 
     jd
 }
 
+/// Convert a Julian Day to `(year, month, day, hour)`, `hour` fractional UT. Port of `swe_revjul`.
 pub fn revjul(jd: f64, cal: CalendarType) -> (i32, i32, i32, f64) {
     let mut u0 = jd + 32082.5;
     if cal == CalendarType::Gregorian {
@@ -94,6 +98,8 @@ pub fn revjul(jd: f64, cal: CalendarType) -> (i32, i32, i32, f64) {
 // date_conversion / day_of_week
 // ---------------------------------------------------------------------------
 
+/// Validate and convert a calendar date + hour to a Julian Day, rejecting dates that don't
+/// round-trip through [`julday`]/[`revjul`] (e.g. February 30). Port of `swe_date_conversion`.
 pub fn date_conversion(
     year: i32,
     month: i32,
@@ -114,6 +120,7 @@ pub fn date_conversion(
     }
 }
 
+/// Day of the week for `jd`: `0` = Monday .. `6` = Sunday. Port of `swe_day_of_week`.
 pub fn day_of_week(jd: f64) -> u8 {
     (((jd - 2433282.0 - 1.5).floor() as i64 % 7 + 7) % 7) as u8
 }
@@ -122,6 +129,8 @@ pub fn day_of_week(jd: f64) -> u8 {
 // utc_time_zone
 // ---------------------------------------------------------------------------
 
+/// Shift a UTC calendar date/time by a time-zone offset (hours, east positive), handling
+/// day rollover and preserving a leap-second flag. Port of `swe_utc_time_zone`.
 pub fn utc_time_zone(input: &UtcComponents, tz_offset: f64) -> UtcComponents {
     let have_leapsec = input.second >= 60.0;
     let sec = if have_leapsec {
@@ -168,6 +177,8 @@ pub fn utc_time_zone(input: &UtcComponents, tz_offset: f64) -> UtcComponents {
 // utc_to_jd
 // ---------------------------------------------------------------------------
 
+/// Convert UTC calendar date/time to Julian Day in both TT and UT1, accounting for leap seconds
+/// and (pre-1972) treating the input as UT1 directly. Port of `swe_utc_to_jd`.
 pub fn utc_to_jd(
     utc: &UtcComponents,
     cal: CalendarType,
@@ -252,6 +263,8 @@ pub fn utc_to_jd(
 // jdet_to_utc / jdut1_to_utc
 // ---------------------------------------------------------------------------
 
+/// Convert a Julian Day (TT) to UTC calendar date/time, counting accumulated leap seconds.
+/// Port of `swe_jdet_to_utc`.
 pub fn jdet_to_utc(
     jd_tt: JdTt,
     cal: CalendarType,
@@ -333,6 +346,7 @@ pub fn jdet_to_utc(
     }
 }
 
+/// Convert a Julian Day (UT1) to UTC calendar date/time. Port of `swe_jdut1_to_utc`.
 pub fn jdut1_to_utc(
     jd_ut: JdUt1,
     cal: CalendarType,

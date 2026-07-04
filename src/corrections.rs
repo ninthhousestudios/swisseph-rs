@@ -104,6 +104,9 @@ const EFF_ARR: [(f64, f64); 101] = [
     (0.000, 0.000000),
 ];
 
+/// Effective mass fraction of the Sun for gravitational light deflection, as a function of
+/// the impact-parameter ratio `r` (`sin(a)/sin(a_sun)`), interpolated from the `EFF_ARR` table.
+/// Port of C `meff`.
 pub fn meff(r: f64) -> f64 {
     if r <= 0.0 {
         return 0.0;
@@ -118,6 +121,9 @@ pub fn meff(r: f64) -> f64 {
     m0 + f * (m1 - m0)
 }
 
+/// Apply annual aberration of light to a geocentric position (and, if `has_speed`, speed) in
+/// place. `xx` is `[x, y, z, vx, vy, vz]` (AU, AU/day); `earth_vel` is Earth's barycentric
+/// velocity (AU/day). Port of C `swi_aberr_light`.
 pub fn aberr_light(xx: &mut [f64; 6], earth_vel: &[f64; 3], has_speed: bool) {
     let mut v = [0.0; 3];
     let mut v2 = 0.0;
@@ -211,6 +217,10 @@ fn deflect_position(u_in: &[f64; 3], earth_pos: &[f64; 3], planet_pos: &[f64; 3]
     }
 }
 
+/// Apply relativistic gravitational deflection of light by the Sun to a geocentric position
+/// (and, if `has_speed`, speed) in place. `xx` is `[x, y, z, vx, vy, vz]` (AU, AU/day);
+/// `earth_helio`/`planet_helio` are Earth's/the target body's heliocentric state. Port of C
+/// `swi_deflect_light`.
 pub fn deflect_light(
     xx: &mut [f64; 6],
     earth_helio: &[f64; 6],
