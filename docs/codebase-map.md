@@ -333,6 +333,19 @@ src/
 │                          `pub(crate)`) to `xobs`/`xobs_dt` when TOPOCTR is set — see
 │                          docs/c-ref-fixstar.md step 6. `calc_planet_star_topo` (this file) now
 │                          calls `fixstar2_with_config` instead of the geocentric-only `fixstar2`.
+├── fictitious.rs       — fictitious planets element layer (swisseph-rs/122, 1/2):
+│                          FictitiousCatalog (built-in 15-row Neely table + seorbel.txt
+│                          parser with check_t_terms polynomial-in-T evaluator);
+│                          load_fictitious_catalog (file path with built-in fallback,
+│                          same pattern as stars.rs load_catalog); resolve_elements
+│                          (T-term eval, degnorm→radians, mano epoch override);
+│                          kepler (Kepler equation solver: fixed-point e<0.4,
+│                          Newton e≥0.4, 1e-12 convergence); osc_el_plan
+│                          (elements→J2000-equatorial-barycentric 6-vector: Gaussian
+│                          PQR rotation, obliquity at tequ, precession to J2000,
+│                          xearth/xsun barycentric shift; FICT_GEO flag switches
+│                          dmot/K/anchor for geocentric bodies). No calc dispatch
+│                          yet — wiring into Ephemeris::calc is 2/2's job.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -594,6 +607,14 @@ tests/
 │                          retarded sun_bary matching Swiss bitwise). Epochs avoid sepl_18 file
 │                          boundary. JPL rows skip if ephe/de441.eph absent)
 │   ├── calc_topo.rs   — golden tests for SEFLG_TOPOCTR (170 cases across 3 sub-matrices, swisseph-rs/80: moshier — 90 cases, 3 observers × 5 bodies × 3 epochs incl. a SPEED3 file-boundary epoch × 2 flag shapes {speed, speed_noaberr}; sweph — 40 cases, 2 observers × 5 bodies × 2 epochs (incl. the sepl_18 SPEED3 file-boundary epoch, widened tolerance there per the documented C-state artifact) × 2 flag shapes; jpl — 40 cases, same shape as sweph; positions eps 1e-9/speeds eps 1e-7 except the sweph file-boundary widening and an OPEN-BUG widening for jpl epochs != J2000 (swisseph-rs/81 — JPL TOPOCTR diverges from C away from J2000, root cause unconfirmed) — TOPOCTR+SPEED+!NOABERR forces SPEED3 (calc.rs plaus_iflag) for the "speed" shape only; "speed_noaberr" exercises the non-SPEED3 analytic-speed path)
+│   ├── fictitious_elements.rs — golden tests for fictitious-planet element layer
+│                          (swisseph-rs/122): 114 cases (19 bodies ipl 40–58 × 6 epochs),
+│                          element resolution bitwise-exact (assert_f64_exact for all 8
+│                          fields: tjd0, tequ, mano, sema, ecce, parg, node, incl),
+│                          osc_el_plan output eps 1e-9 pos / 1e-7 vel; C harness includes
+│                          swemplan.c directly for read_elements_file/swi_osc_el_plan,
+│                          emits xearth/xsun so Rust test feeds identical Earth/Sun state;
+│                          bodies 55–58 without-file error case (unit test with builtin only)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
