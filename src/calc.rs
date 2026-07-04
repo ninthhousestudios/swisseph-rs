@@ -2469,7 +2469,7 @@ fn apparent_fictitious<P: PositionProvider>(
 
     // Observer: geocenter, topocenter, heliocenter, or barycenter (sweph.c:3396-3422)
     let offset = topo_offset(jd, flags, config, models);
-    let mut xobs = if flags.contains(CalcFlags::BARYCTR) {
+    let xobs = if flags.contains(CalcFlags::BARYCTR) {
         [0.0; 6]
     } else if flags.contains(CalcFlags::HELCTR) {
         pos.sun_bary

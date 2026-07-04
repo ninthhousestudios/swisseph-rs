@@ -231,12 +231,7 @@ pub fn hour_angle(topo_alt: f64, topo_decl: f64, lat: f64) -> f64 {
     let decli = topo_decl * DEGTORAD;
     let lati = lat * DEGTORAD;
     let mut ha = (alti.sin() - lati.sin() * decli.sin()) / lati.cos() / decli.cos();
-    if ha < -1.0 {
-        ha = -1.0;
-    }
-    if ha > 1.0 {
-        ha = 1.0;
-    }
+    ha = ha.clamp(-1.0, 1.0);
     ha.acos() / DEGTORAD / 15.0
 }
 
@@ -289,12 +284,7 @@ pub fn koz(alt_s: f64, sunra: f64, lat: f64) -> f64 {
 
 pub fn kr(alt_s: f64, height_eye: f64) -> f64 {
     let mut val = -alt_s - 12.0;
-    if val < 0.0 {
-        val = 0.0;
-    }
-    if val > 6.0 {
-        val = 6.0;
-    }
+    val = val.clamp(0.0, 6.0);
     let changek = 1.0 - 0.166667 * val;
     let lambda = 0.55 + (changek - 1.0) * 0.04;
     0.1066 * (-height_eye / SCALE_H_RAYLEIGH).exp() * (lambda / 0.55_f64).powf(-4.0)
@@ -322,12 +312,7 @@ pub fn ka(alt_s: f64, sunra: f64, lat: f64, height_eye: f64, temp_s: f64, rh: f6
     } else {
         // SIMULATE_VICTORVB is always active — clamp RH
         let mut rh_clamped = rh;
-        if rh_clamped <= 0.00000001 {
-            rh_clamped = 0.00000001;
-        }
-        if rh_clamped >= 99.99999999 {
-            rh_clamped = 99.99999999;
-        }
+        rh_clamped = rh_clamped.clamp(0.00000001, 99.99999999);
         let base = 0.1
             * (-height_eye / SCALE_H_AEROSOL).exp()
             * (1.0 - 0.32 / (rh_clamped / 100.0).ln()).powf(1.33)
@@ -2348,7 +2333,7 @@ pub fn get_asc_obl_with_sun(
     while dsunpl_save == -999999999.0
         || (dsunpl.abs() + dsunpl_save.abs() > 180.0)
         || (retro && !(dsunpl_save < 0.0 && dsunpl >= 0.0))
-        || (!retro && !(dsunpl_save >= 0.0 && dsunpl < 0.0))
+        || !(retro || dsunpl_save >= 0.0 && dsunpl < 0.0)
     {
         dsunpl_save = dsunpl;
         tjd += 10.0;
