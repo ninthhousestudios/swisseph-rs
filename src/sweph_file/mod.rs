@@ -135,13 +135,29 @@ pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error> {
 pub fn open_planet_moon_file(dir: &Path, raw_id: i32) -> Result<SwissEphFile, Error> {
     let primary = dir.join("sat").join(format!("sepm{raw_id}.se1"));
     match SwissEphFile::open(&primary) {
-        Ok(f) => return Ok(f),
+        Ok(f) => {
+            if f.planet_data(raw_id).is_none() {
+                return Err(Error::FileFormat(format!(
+                    "sepm file does not contain body {raw_id}: {}",
+                    primary.display()
+                )));
+            }
+            return Ok(f);
+        }
         Err(Error::FileNotFound(_)) => {}
         Err(e) => return Err(e),
     }
     let flat = dir.join(format!("sepm{raw_id}.se1"));
     match SwissEphFile::open(&flat) {
-        Ok(f) => Ok(f),
+        Ok(f) => {
+            if f.planet_data(raw_id).is_none() {
+                return Err(Error::FileFormat(format!(
+                    "sepm file does not contain body {raw_id}: {}",
+                    flat.display()
+                )));
+            }
+            Ok(f)
+        }
         Err(Error::FileNotFound(_)) => Err(Error::FileNotFound(primary)),
         Err(e) => Err(e),
     }

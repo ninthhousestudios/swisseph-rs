@@ -50,6 +50,7 @@ pub struct Ephemeris {
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
     main_asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
     asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
+    #[expect(dead_code, reason = "used by calc dispatch in swisseph-rs/126")]
     planet_moon_files: Vec<crate::sweph_file::SwissEphFile>,
     jpl_file: Option<crate::jpl::JplFile>,
     stars: crate::stars::StarCatalog,
