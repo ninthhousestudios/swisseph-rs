@@ -114,7 +114,7 @@ pub(crate) fn normalize_center_body(
     // Clause (i): planet ipl <= SE_PLUTO + CENTER_BODY → synthesize COB number
     if flags.contains(CalcFlags::CENTER_BODY) {
         let raw = body.to_raw_id();
-        if raw >= 0 && raw <= 9 {
+        if (0..=9).contains(&raw) {
             moon_raw = Some(raw * 100 + 9099);
         }
     }
@@ -142,13 +142,12 @@ fn normalize_center_body_cancel(
     // Clause (iii): parent <= SE_MARS && suffix == 99 → cancel
     if flags.contains(CalcFlags::CENTER_BODY) {
         let raw = body.to_raw_id();
-        if raw >= 0 && raw <= 4 {
-            if let Some(mr) = moon_raw {
-                if mr % 100 == 99 {
-                    flags -= CalcFlags::CENTER_BODY;
-                    return (body, None, flags);
-                }
-            }
+        if (0..=4).contains(&raw)
+            && let Some(mr) = moon_raw
+            && mr % 100 == 99
+        {
+            flags -= CalcFlags::CENTER_BODY;
+            return (body, None, flags);
         }
     }
     (body, moon_raw, flags)

@@ -206,11 +206,13 @@ pub(crate) fn nod_aps(
         other => other,
     };
 
-    // A.1 — reject the node/apsis point bodies themselves and reserved ids.
+    // A.1 — reject the node/apsis point bodies themselves, reserved ids, and
+    // plmoon bodies. C rejects the entire [SE_NPLANETS, SE_AST_OFFSET] range
+    // (swecl.c:5138-5141); PlanetMoon raw ids (9000-9999) fall squarely in it.
     let raw = ipl.to_raw_id();
     if matches!(
         ipl,
-        Body::MeanNode | Body::TrueNode | Body::MeanApogee | Body::OscuApogee
+        Body::MeanNode | Body::TrueNode | Body::MeanApogee | Body::OscuApogee | Body::PlanetMoon(_)
     ) || raw < 0
     {
         return Err(Error::InvalidBody(raw));

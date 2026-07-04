@@ -2979,10 +2979,10 @@ impl Ephemeris {
             _ => return format!("{}: not found (asteroid)", mpc),
         };
 
-        if name.starts_with('?') || (name.len() > 1 && name.as_bytes()[1].is_ascii_digit()) {
-            if let Some(override_name) = self.seasnam_lookup(mpc) {
-                return override_name;
-            }
+        if (name.starts_with('?') || (name.len() > 1 && name.as_bytes()[1].is_ascii_digit()))
+            && let Some(override_name) = self.seasnam_lookup(mpc)
+        {
+            return override_name;
         }
         name.to_string()
     }
