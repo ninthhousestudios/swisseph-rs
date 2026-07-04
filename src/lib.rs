@@ -18,6 +18,7 @@ pub mod fictitious;
 pub mod format;
 pub mod heliacal;
 pub mod houses;
+#[cfg(feature = "jpl")]
 pub mod jpl;
 pub mod math;
 pub mod moshier;
@@ -30,6 +31,7 @@ pub mod precession;
 pub mod riseset;
 pub mod sidereal_time;
 pub mod stars;
+#[cfg(feature = "swisseph-files")]
 pub mod sweph_file;
 pub mod topocentric;
 

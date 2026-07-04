@@ -136,6 +136,7 @@ fn saros_lookup(tjd_ut: f64, table: &[(i32, f64)]) -> (f64, f64) {
 /// (swecl.c:640-886, §3.6). `geopos[2..9]` are documented in C as "not implemented so far" and
 /// `dcore[7..9]` are always zero there; both are omitted from this struct.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EclipseWhere {
     /// Geographic longitude of the point of greatest eclipse, degrees east positive.
     pub central_longitude: f64,
@@ -391,6 +392,7 @@ pub(crate) fn sol_eclipse_where(
 /// this with `eclipse_where`'s geocentric shadow geometry fill it from `EclipseWhere::
 /// core_diameter_km` (`dcore[0]`), same as C's `swe_sol_eclipse_how` (§4.11 step 6).
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EclipseHow {
     /// Magnitude: fraction of the eclipsed body's diameter covered by the Moon (IMCCE convention).
     pub magnitude: f64,
@@ -686,6 +688,7 @@ pub(crate) fn sol_eclipse_how(
 /// (swecl.c:1185-1515, §5.8). `tret[8]`/`tret[9]` (annular-total transition times) are not
 /// implemented upstream and always `0.0` in C -- omitted here.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SolarEclipseGlobal {
     /// Time (UT) of maximum eclipse: geocentric minimum Sun-Moon angular separation. `tret[0]`.
     pub time_maximum: f64,
@@ -1076,6 +1079,7 @@ pub(crate) fn sol_eclipse_when_glob(
 /// `eclipse_when_loc` (swecl.c:2019-2410, §6). **Index semantics differ from
 /// [`SolarEclipseGlobal`]'s `tret[]`** (§6.3) -- do not conflate the two.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SolarEclipseLocal {
     /// Time (UT) of maximum eclipse as seen from this location -- re-anchored to sunrise/sunset
     /// if the true geocentric maximum wasn't visible here. `tret[0]`.
@@ -1733,6 +1737,7 @@ fn lun_contact_dc(n: u32, core: &LunarEclipseCore) -> f64 {
 /// is likewise omitted -- callers needing exact `attr[]` index parity should reuse
 /// `umbral_magnitude` for both `attr[0]` and `attr[8]`.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LunarEclipseHow {
     /// `attr[0]`/`attr[8]` -- umbral magnitude.
     pub umbral_magnitude: f64,
@@ -1837,6 +1842,7 @@ pub(crate) fn swe_lun_eclipse_how(
 /// ref doc §4). `tret[1]` is unused for lunar eclipses (index-parity padding with the solar
 /// `tret[]` layout) and omitted here.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LunarEclipseGlobal {
     /// Time (UT) of maximum eclipse: minimum selenocentric Sun/Earth-shadow angular separation.
     /// `tret[0]`.
@@ -2097,6 +2103,7 @@ pub(crate) fn lun_eclipse_when(
 /// (swecl.c:3644-3739, ref doc §5). `tret[]` index semantics match [`LunarEclipseGlobal`]'s (not
 /// [`SolarEclipseLocal`]'s different layout) plus two new slots for moonrise/moonset.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LunarEclipseLocal {
     /// Time (UT) of maximum eclipse as visible from this location -- re-anchored to
     /// moonrise/moonset if the true geocentric maximum wasn't visible here. `tret[0]`.
@@ -2345,6 +2352,7 @@ pub(crate) fn lun_occult_where(
 /// search never produces `ANNULAR`/`HYBRID` for `ipl != Body::Sun` (rejected/stripped from
 /// `ifltype` up front -- see [`lun_occult_when_glob`]).
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OccultGlobal {
     /// Time (UT) of maximum occultation: geocentric minimum Moon-body angular separation.
     /// `tret[0]`.
@@ -2708,6 +2716,7 @@ pub(crate) fn lun_occult_when_glob(
 /// `time_first_contact`/`time_fourth_contact` are aliased from `time_second_contact`/
 /// `time_third_contact` rather than independently refined (§3 step 9).
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OccultLocal {
     /// Time (UT) of maximum occultation as seen from this location. `tret[0]`.
     pub time_maximum: f64,

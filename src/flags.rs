@@ -2,6 +2,7 @@ use bitflags::bitflags;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct CalcFlags: u32 {
         const JPLEPH        = 1;
         const SWIEPH        = 2;
@@ -32,6 +33,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct SiderealBits: u32 {
         const ECL_T0         = 256;
         const SSY_PLANE      = 512;
@@ -44,6 +46,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct NodeBits: u32 {
         const MEAN     = 1;
         const OSCU     = 2;
@@ -54,6 +57,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct EclipseFlags: u32 {
         const CENTRAL           = 1;
         const NONCENTRAL        = 2;
@@ -94,6 +98,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct RiseSetFlags: u32 {
         const RISE              = 1;
         const SET               = 2;
@@ -117,6 +122,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct SplitDegFlags: u32 {
         const ROUND_SEC  = 1;
         const ROUND_MIN  = 2;
@@ -130,6 +136,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct HeliacalFlags: u32 {
         const LONG_SEARCH     = 128;
         const HIGH_PRECISION  = 256;
@@ -155,6 +162,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct VisLimFlags: u32 {
         const SCOTOPIC = 1;
         const MIXED    = 2;

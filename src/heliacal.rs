@@ -14,6 +14,7 @@ use crate::types::{Body, CalendarType};
 // ── Heliacal event types ───────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum HeliacalEventType {
     MorningFirst = 1,
@@ -1194,6 +1195,7 @@ pub fn rise_set(
 // ── VisLimMagn & swe_vis_limit_mag (c-ref-heliacal-vision.md §8) ──
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VisLimitResult {
     pub limiting_magnitude: f64,
     pub altitude_object: f64,
@@ -1477,6 +1479,7 @@ pub fn topo_arcus_visionis(
 /// Output of `heliacal_angle`: the optimal object altitude, arcus visionis,
 /// and implied Sun altitude for first/last visibility.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HeliacalAngleResult {
     /// Object's altitude at the optimum (degrees).
     pub optimal_altitude: f64,
@@ -1787,6 +1790,7 @@ const TIME_STEP_DEFAULT: f64 = 1.0;
 const LOCAL_MIN_STEP: f64 = 8.0;
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HeliacalPheno {
     pub tc_altitude: f64,
     pub tc_apparent_altitude: f64,
@@ -2929,6 +2933,7 @@ pub fn get_heliacal_details(
 /// Output of `heliacal_ut`: the three Julian-day (UT) instants bracketing
 /// a heliacal event.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HeliacalEvent {
     /// Beginning of visibility (or, for arc_vis path, the single event instant).
     pub start_visible: f64,

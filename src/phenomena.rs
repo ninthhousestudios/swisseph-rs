@@ -63,6 +63,7 @@ const MAG_ELEM: [[f64; 4]; 21] = [
 
 /// Output of [`pheno`] — `attr[0..5]` of C's `swe_pheno` (swecl.c:3744-3750).
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Phenomena {
     /// Phase angle (Sun-planet-Earth), degrees. `attr[0]`.
     pub phase_angle: f64,

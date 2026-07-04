@@ -52,6 +52,7 @@ const MOON_SEMA_REF_M: f64 = 383397772.5;
 /// Osculating (Keplerian) orbital elements — the 17 `dret` slots of
 /// `swe_get_orbital_elements` (swecl.c:5949-5965), one named field each.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OrbitalElements {
     /// `dret[0]` — semimajor axis (AU).
     pub semi_major_axis: f64,

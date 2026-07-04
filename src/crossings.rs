@@ -6,6 +6,8 @@ use crate::types::Body;
 
 const CROSS_PRECISION: f64 = 1.0 / 3_600_000.0;
 
+#[derive(Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MoonCrossing {
     pub jd: f64,
     pub longitude: f64,

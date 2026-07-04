@@ -2,16 +2,34 @@
 name = "swisseph"
 version = "0.1.0"
 edition = "2024"
+description = "Pure-Rust port of the Swiss Ephemeris astronomical calculation library"
+license = "AGPL-3.0-only"
+keywords = ["astronomy", "ephemeris", "astrology", "swisseph"]
+categories = ["science"]
+
+[features]
+default = ["swisseph-files", "jpl"]
+swisseph-files = ["dep:memmap2"]
+jpl = ["dep:memmap2"]
+serde = ["dep:serde", "bitflags/serde"]
+star-tools = ["dep:clap", "dep:ureq"]
 
 [dependencies]
 bitflags = "2"
-clap = { version = "4", features = ["derive"] }
-memmap2 = "0.9"
-ureq = "3"
+clap = { version = "4", features = ["derive"], optional = true }
+memmap2 = { version = "0.9", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+ureq = { version = "3", optional = true }
 
 [[bin]]
 name = "make-swe-stars"
 path = "src/bin/make_swe_stars.rs"
+required-features = ["star-tools"]
+
+[[test]]
+name = "golden"
+path = "tests/golden/main.rs"
+required-features = ["swisseph-files", "jpl"]
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

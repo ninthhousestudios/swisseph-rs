@@ -5,6 +5,7 @@ use crate::constants::{DEGTORAD, KM_S_TO_AU_CTY};
 use crate::error::Error;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Star {
     pub name: String,
     pub bayer: String,

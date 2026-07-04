@@ -1,11 +1,27 @@
 use std::fs;
 
-use crate::calc::{JplProvider, PositionProvider, SwephPositions, SwephProvider};
+#[cfg(feature = "jpl")]
+use crate::calc::JplProvider;
+#[cfg(any(feature = "swisseph-files", feature = "jpl"))]
+use crate::calc::PositionProvider;
+#[cfg(any(feature = "swisseph-files", feature = "jpl"))]
+use crate::calc::SwephPositions;
+#[cfg(feature = "swisseph-files")]
+use crate::calc::SwephProvider;
 use crate::config::EphemerisConfig;
 use crate::date::LEAP_SECONDS;
 use crate::error::Error;
 use crate::flags::{CalcFlags, EclipseFlags, SiderealBits};
 use crate::types::{Body, DeltaT, EphemerisSource, JdUt1};
+
+#[cfg(not(feature = "swisseph-files"))]
+#[allow(dead_code)]
+pub(crate) struct AsteroidMetaStub {
+    pub h: f64,
+    pub g: f64,
+    pub diameter_km: f64,
+    pub name: String,
+}
 
 /// Three raw geocentric moon samples for the osculating node/apogee, plus the
 /// `istart`, backend-specific central-difference interval, and backend used.
@@ -17,6 +33,7 @@ type OscMoonSamples = ([[f64; 6]; 3], usize, f64, EphemerisSource);
 /// `earth_bary`/`earth_helio` fields rather than `planet_bary` (which, for the
 /// `query = Body::Sun` dummy call `nodaps_osc_body_j2000` makes for Earth, is
 /// the Sun's own position, not Earth's — see `docs/c-ref-nodaps.md` §A.4.1).
+#[cfg(any(feature = "swisseph-files", feature = "jpl"))]
 fn nodaps_osc_frame(pos: &SwephPositions, ipli: Body, want_bary: bool) -> [f64; 6] {
     if ipli == Body::Earth {
         if want_bary {
@@ -46,11 +63,17 @@ pub struct Ephemeris {
     /// ephemeris source than the configured one (e.g. MOSEPH on a Swiss config).
     user_tidal_acceleration: Option<f64>,
     leap_seconds: Vec<i32>,
+    #[cfg(feature = "swisseph-files")]
     planet_files: Vec<crate::sweph_file::SwissEphFile>,
+    #[cfg(feature = "swisseph-files")]
     moon_files: Vec<crate::sweph_file::SwissEphFile>,
+    #[cfg(feature = "swisseph-files")]
     main_asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
+    #[cfg(feature = "swisseph-files")]
     asteroid_files: Vec<crate::sweph_file::SwissEphFile>,
+    #[cfg(feature = "swisseph-files")]
     planet_moon_files: Vec<crate::sweph_file::SwissEphFile>,
+    #[cfg(feature = "jpl")]
     jpl_file: Option<crate::jpl::JplFile>,
     stars: crate::stars::StarCatalog,
     fictitious_catalog: crate::fictitious::FictitiousCatalog,
@@ -60,7 +83,11 @@ impl Ephemeris {
     pub fn new(mut config: EphemerisConfig) -> crate::Result<Self> {
         let user_tidal_acceleration = config.tidal_acceleration;
         let leap_seconds = Self::build_leap_seconds(&config)?;
+
+        #[cfg(feature = "jpl")]
         let mut jpl_file: Option<crate::jpl::JplFile> = None;
+
+        #[cfg(feature = "swisseph-files")]
         let (planet_files, moon_files) = match config.ephemeris_source {
             EphemerisSource::Swiss => {
                 let dir = config.ephe_path.as_ref().ok_or_else(|| {
@@ -75,6 +102,7 @@ impl Ephemeris {
                 }
                 (planet, moon)
             }
+            #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let dir = config
                     .ephe_path
@@ -85,11 +113,42 @@ impl Ephemeris {
                 jpl_file = Some(crate::jpl::JplFile::open(&path)?);
                 (Vec::new(), Vec::new())
             }
+            #[cfg(not(feature = "jpl"))]
+            EphemerisSource::Jpl => return Err(Error::UnsupportedEphemeris(EphemerisSource::Jpl)),
             EphemerisSource::Moshier => (Vec::new(), Vec::new()),
         };
 
+        #[cfg(all(not(feature = "swisseph-files"), feature = "jpl"))]
+        match config.ephemeris_source {
+            EphemerisSource::Swiss => {
+                return Err(Error::UnsupportedEphemeris(EphemerisSource::Swiss));
+            }
+            EphemerisSource::Jpl => {
+                let dir = config
+                    .ephe_path
+                    .as_ref()
+                    .ok_or_else(|| Error::FileFormat("ephe_path required for Jpl".to_string()))?;
+                let filename = config.jpl_filename.as_deref().unwrap_or("de441.eph");
+                let path = dir.join(filename);
+                jpl_file = Some(crate::jpl::JplFile::open(&path)?);
+            }
+            EphemerisSource::Moshier => {}
+        }
+
+        #[cfg(not(any(feature = "swisseph-files", feature = "jpl")))]
+        match config.ephemeris_source {
+            EphemerisSource::Swiss => {
+                return Err(Error::UnsupportedEphemeris(EphemerisSource::Swiss));
+            }
+            EphemerisSource::Jpl => {
+                return Err(Error::UnsupportedEphemeris(EphemerisSource::Jpl));
+            }
+            EphemerisSource::Moshier => {}
+        }
+
         // Asteroid files load when ephe_path is set, regardless of ephemeris source
         // (C reads asteroids from .se1 even under MOSEPH/JPLEPH — c-ref-asteroid.md §1.4).
+        #[cfg(feature = "swisseph-files")]
         let (main_asteroid_files, asteroid_files) = if let Some(dir) = config.ephe_path.as_ref() {
             let main_ast = match crate::sweph_file::open_ephemeris_files(dir, "seas") {
                 Ok(files) => files,
@@ -119,6 +178,7 @@ impl Ephemeris {
 
         // Planet-moon files load when ephe_path is set, regardless of ephemeris source
         // (the moon/COB offset always comes from the sepm file regardless of epheflag).
+        #[cfg(feature = "swisseph-files")]
         let planet_moon_files = if let Some(dir) = config.ephe_path.as_ref() {
             if !config.planet_moon_numbers.is_empty() {
                 let mut nums = config.planet_moon_numbers.clone();
@@ -152,8 +212,14 @@ impl Ephemeris {
         // `is_tid_acc_manual` short-circuit).
         if config.tidal_acceleration.is_none() {
             let denum = match config.ephemeris_source {
+                #[cfg(feature = "swisseph-files")]
                 EphemerisSource::Swiss => moon_files.first().map(|f| f.header().denum),
+                #[cfg(not(feature = "swisseph-files"))]
+                EphemerisSource::Swiss => None,
+                #[cfg(feature = "jpl")]
                 EphemerisSource::Jpl => jpl_file.as_ref().map(|f| f.header().denum),
+                #[cfg(not(feature = "jpl"))]
+                EphemerisSource::Jpl => None,
                 EphemerisSource::Moshier => None,
             };
             if let Some(denum) = denum {
@@ -167,11 +233,17 @@ impl Ephemeris {
             config,
             user_tidal_acceleration,
             leap_seconds,
+            #[cfg(feature = "swisseph-files")]
             planet_files,
+            #[cfg(feature = "swisseph-files")]
             moon_files,
+            #[cfg(feature = "swisseph-files")]
             main_asteroid_files,
+            #[cfg(feature = "swisseph-files")]
             asteroid_files,
+            #[cfg(feature = "swisseph-files")]
             planet_moon_files,
+            #[cfg(feature = "jpl")]
             jpl_file,
             stars,
             fictitious_catalog,
@@ -217,20 +289,22 @@ impl Ephemeris {
     fn clamp_source(&self, requested: EphemerisSource) -> EphemerisSource {
         match requested {
             EphemerisSource::Jpl => {
+                #[cfg(feature = "jpl")]
                 if self.jpl_file.is_some() {
-                    EphemerisSource::Jpl
-                } else if !self.planet_files.is_empty() {
-                    EphemerisSource::Swiss
-                } else {
-                    EphemerisSource::Moshier
+                    return EphemerisSource::Jpl;
                 }
+                #[cfg(feature = "swisseph-files")]
+                if !self.planet_files.is_empty() {
+                    return EphemerisSource::Swiss;
+                }
+                EphemerisSource::Moshier
             }
             EphemerisSource::Swiss => {
+                #[cfg(feature = "swisseph-files")]
                 if !self.planet_files.is_empty() {
-                    EphemerisSource::Swiss
-                } else {
-                    EphemerisSource::Moshier
+                    return EphemerisSource::Swiss;
                 }
+                EphemerisSource::Moshier
             }
             EphemerisSource::Moshier => EphemerisSource::Moshier,
         }
@@ -244,6 +318,7 @@ impl Ephemeris {
     /// Returns `None` for non-`Asteroid` bodies (main asteroids Chiron..Vesta deliberately
     /// return `None` — C never populates the globals from seas files for those; their
     /// magnitude/diameter data live in `MAG_ELEM` / `PLANETARY_DIAMETERS`).
+    #[cfg(feature = "swisseph-files")]
     pub(crate) fn asteroid_meta(&self, body: Body) -> Option<&crate::sweph_file::AsteroidMeta> {
         let n = match body {
             Body::Asteroid(id) => id.mpc_number(),
@@ -254,6 +329,11 @@ impl Ephemeris {
             .iter()
             .find(|f| f.planets().first().is_some_and(|p| p.body_id == target_id))
             .and_then(|f| f.header().asteroid.as_ref())
+    }
+
+    #[cfg(not(feature = "swisseph-files"))]
+    pub(crate) fn asteroid_meta(&self, _body: Body) -> Option<&AsteroidMetaStub> {
+        None
     }
 
     /// Compute planetary position.
@@ -1009,6 +1089,10 @@ impl Ephemeris {
     /// Barycentric J2000-equatorial state of `body` at epoch `t`, plus Earth and
     /// Sun barycentric states (always populated by the provider regardless of the
     /// queried body). Swiss/JPL only — Moshier is rejected before reaching here.
+    #[cfg_attr(
+        not(any(feature = "swisseph-files", feature = "jpl")),
+        allow(unused_variables)
+    )]
     fn pctr_bary_state(&self, t: f64, body: Body) -> Result<([f64; 6], [f64; 6], [f64; 6]), Error> {
         let eps_j2000 = crate::obliquity::obliquity(
             crate::constants::J2000,
@@ -1020,6 +1104,7 @@ impl Ephemeris {
             EphemerisSource::Moshier => Err(Error::CError(
                 "barycentric Moshier positions are not supported".to_string(),
             )),
+            #[cfg(feature = "swisseph-files")]
             EphemerisSource::Swiss => {
                 let provider = SwephProvider {
                     planet_files: &self.planet_files,
@@ -1027,15 +1112,21 @@ impl Ephemeris {
                 };
                 self.pctr_bary_from_provider(&provider, t, body, &eps_j2000)
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            EphemerisSource::Swiss => unreachable!(),
+            #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let provider = JplProvider {
                     file: self.jpl_file.as_ref().unwrap(),
                 };
                 self.pctr_bary_from_provider(&provider, t, body, &eps_j2000)
             }
+            #[cfg(not(feature = "jpl"))]
+            EphemerisSource::Jpl => unreachable!(),
         }
     }
 
+    #[cfg(any(feature = "swisseph-files", feature = "jpl"))]
     fn pctr_bary_from_provider<P: crate::calc::PositionProvider>(
         &self,
         provider: &P,
@@ -1103,6 +1194,7 @@ impl Ephemeris {
                     topo,
                 })
             }
+            #[cfg(feature = "swisseph-files")]
             EphemerisSource::Swiss => {
                 let provider = SwephProvider {
                     planet_files: &self.planet_files,
@@ -1115,6 +1207,9 @@ impl Ephemeris {
                     topo,
                 })
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            EphemerisSource::Swiss => unreachable!(),
+            #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let provider = JplProvider {
                     file: self.jpl_file.as_ref().unwrap(),
@@ -1126,6 +1221,8 @@ impl Ephemeris {
                     topo,
                 })
             }
+            #[cfg(not(feature = "jpl"))]
+            EphemerisSource::Jpl => unreachable!(),
         }
     }
 
@@ -1174,6 +1271,7 @@ impl Ephemeris {
                     crate::moshier::backend::compute_pipeline(t, ipli, &eps_j2000)?.planet_helio
                 }
             }
+            #[cfg(feature = "swisseph-files")]
             EphemerisSource::Swiss => {
                 let provider = SwephProvider {
                     planet_files: &self.planet_files,
@@ -1183,6 +1281,9 @@ impl Ephemeris {
                 let pos = provider.positions(query, t, true)?;
                 nodaps_osc_frame(&pos, ipli, want_bary)
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            EphemerisSource::Swiss => unreachable!(),
+            #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let provider = JplProvider {
                     file: self.jpl_file.as_ref().unwrap(),
@@ -1191,6 +1292,8 @@ impl Ephemeris {
                 let pos = provider.positions(query, t, true)?;
                 nodaps_osc_frame(&pos, ipli, want_bary)
             }
+            #[cfg(not(feature = "jpl"))]
+            EphemerisSource::Jpl => unreachable!(),
         };
 
         if ipli == Body::Earth {
@@ -1559,6 +1662,7 @@ impl Ephemeris {
         config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6], CalcFlags), Error> {
         let body = crate::calc::normalize_asteroid_aliases(body);
+        #[cfg_attr(not(feature = "swisseph-files"), allow(unused_variables))]
         let (body, moon_raw, flags) = crate::calc::normalize_center_body(body, flags);
         let models = &config.astro_models;
 
@@ -1630,6 +1734,7 @@ impl Ephemeris {
                 crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
             let catalog = &self.fictitious_catalog;
             return match config.ephemeris_source {
+                #[cfg(feature = "swisseph-files")]
                 EphemerisSource::Swiss => {
                     match crate::calc::calc_fictitious_sweph(
                         jd_tt,
@@ -1661,6 +1766,9 @@ impl Ephemeris {
                         Err(e) => Err(e),
                     }
                 }
+                #[cfg(not(feature = "swisseph-files"))]
+                EphemerisSource::Swiss => unreachable!(),
+                #[cfg(feature = "jpl")]
                 EphemerisSource::Jpl => {
                     let jpl = self.jpl_file.as_ref().ok_or(Error::EphemerisNotAvailable {
                         body,
@@ -1671,6 +1779,8 @@ impl Ephemeris {
                     )?;
                     Ok((xr, x2000, flags))
                 }
+                #[cfg(not(feature = "jpl"))]
+                EphemerisSource::Jpl => unreachable!(),
                 EphemerisSource::Moshier => {
                     if flags.contains(CalcFlags::BARYCTR) {
                         return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
@@ -1717,7 +1827,9 @@ impl Ephemeris {
         // C's main_planet only opens the moon file when ipli >= SE_MARS (4) &&
         // ipli <= SE_PLUTO (9). For parents Sun..Venus with CENTER_BODY set but
         // suffix != 99, the flag survives inertly and the ordinary planet path runs.
+        #[cfg_attr(not(feature = "swisseph-files"), allow(unused_variables))]
         let parent_raw = body.to_raw_id();
+        #[cfg(feature = "swisseph-files")]
         if let Some(moon_id) = moon_raw.filter(|_| (4..=9).contains(&parent_raw)) {
             let (moon_file, parent) = self.planet_moon_file_for(body, moon_id, jd_tt)?;
             return match config.ephemeris_source {
@@ -1737,6 +1849,7 @@ impl Ephemeris {
                     )?;
                     Ok((xr, x2000, flags))
                 }
+                #[cfg(feature = "jpl")]
                 EphemerisSource::Jpl => {
                     let jpl = self.jpl_file.as_ref().ok_or(Error::EphemerisNotAvailable {
                         body,
@@ -1748,6 +1861,8 @@ impl Ephemeris {
                     )?;
                     Ok((xr, x2000, flags))
                 }
+                #[cfg(not(feature = "jpl"))]
+                EphemerisSource::Jpl => unreachable!(),
                 EphemerisSource::Moshier => {
                     if flags.contains(CalcFlags::BARYCTR) {
                         return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
@@ -1761,6 +1876,7 @@ impl Ephemeris {
         }
 
         match config.ephemeris_source {
+            #[cfg(feature = "swisseph-files")]
             EphemerisSource::Swiss => {
                 match self.calc_body_sweph(jd_tt, body, &eps_j2000, flags, models, config) {
                     Ok((xr, x2000)) => Ok((xr, x2000, flags)),
@@ -1779,11 +1895,16 @@ impl Ephemeris {
                     Err(e) => Err(e),
                 }
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            EphemerisSource::Swiss => unreachable!(),
+            #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let (xr, x2000) =
                     self.calc_body_jpl(jd_tt, body, &eps_j2000, flags, models, config)?;
                 Ok((xr, x2000, flags))
             }
+            #[cfg(not(feature = "jpl"))]
+            EphemerisSource::Jpl => unreachable!(),
             EphemerisSource::Moshier => {
                 let (xr, x2000) =
                     self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models, config)?;
@@ -1792,6 +1913,7 @@ impl Ephemeris {
         }
     }
 
+    #[cfg(feature = "swisseph-files")]
     fn planet_moon_file_for(
         &self,
         body: Body,
@@ -1808,6 +1930,7 @@ impl Ephemeris {
         Ok((file, parent))
     }
 
+    #[cfg(feature = "swisseph-files")]
     fn asteroid_file_for(
         &self,
         body: Body,
@@ -1865,6 +1988,7 @@ impl Ephemeris {
             | Body::Pluto => {
                 crate::calc::calc_planet(jd_tt, body, eps_j2000, flags, config, models)
             }
+            #[cfg(feature = "swisseph-files")]
             Body::Chiron
             | Body::Pholus
             | Body::Ceres
@@ -1877,6 +2001,17 @@ impl Ephemeris {
                     jd_tt, body, f, id, eps_j2000, flags, config, models,
                 )
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            Body::Chiron
+            | Body::Pholus
+            | Body::Ceres
+            | Body::Pallas
+            | Body::Juno
+            | Body::Vesta
+            | Body::Asteroid(_) => Err(Error::EphemerisNotAvailable {
+                body,
+                source: EphemerisSource::Moshier,
+            }),
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Moshier,
@@ -1884,6 +2019,7 @@ impl Ephemeris {
         }
     }
 
+    #[cfg(feature = "swisseph-files")]
     fn calc_body_sweph(
         &self,
         jd_tt: f64,
@@ -1956,6 +2092,7 @@ impl Ephemeris {
         }
     }
 
+    #[cfg(feature = "jpl")]
     fn calc_body_jpl(
         &self,
         jd_tt: f64,
@@ -1981,6 +2118,7 @@ impl Ephemeris {
             | Body::Pluto => {
                 crate::calc::calc_planet_jpl(jd_tt, body, file, eps_j2000, flags, config, models)
             }
+            #[cfg(feature = "swisseph-files")]
             Body::Chiron
             | Body::Pholus
             | Body::Ceres
@@ -1993,6 +2131,17 @@ impl Ephemeris {
                     jd_tt, body, f, id, file, eps_j2000, flags, config, models,
                 )
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            Body::Chiron
+            | Body::Pholus
+            | Body::Ceres
+            | Body::Pallas
+            | Body::Juno
+            | Body::Vesta
+            | Body::Asteroid(_) => Err(Error::EphemerisNotAvailable {
+                body,
+                source: EphemerisSource::Jpl,
+            }),
             _ => Err(Error::EphemerisNotAvailable {
                 body,
                 source: EphemerisSource::Jpl,
@@ -2010,10 +2159,16 @@ impl Ephemeris {
     ) -> Result<[f64; 6], Error> {
         match source {
             EphemerisSource::Moshier => crate::calc::raw_osc_moon_moshier(t, eps_j2000),
+            #[cfg(feature = "swisseph-files")]
             EphemerisSource::Swiss => crate::calc::raw_osc_moon_sweph(&self.moon_files, t),
+            #[cfg(not(feature = "swisseph-files"))]
+            EphemerisSource::Swiss => unreachable!(),
+            #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 crate::calc::raw_osc_moon_jpl(self.jpl_file.as_ref().unwrap(), t)
             }
+            #[cfg(not(feature = "jpl"))]
+            EphemerisSource::Jpl => unreachable!(),
         }
     }
 
@@ -2072,6 +2227,7 @@ impl Ephemeris {
             crate::obliquity::obliquity(crate::constants::J2000, CalcFlags::empty(), models);
 
         match config.ephemeris_source {
+            #[cfg(feature = "swisseph-files")]
             EphemerisSource::Swiss => {
                 let si = crate::constants::NODE_CALC_INTV;
                 match self.fetch_osc_samples(
@@ -2098,6 +2254,9 @@ impl Ephemeris {
                     Err(e) => Err(e),
                 }
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            EphemerisSource::Swiss => unreachable!(),
+            #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let si = crate::constants::NODE_CALC_INTV;
                 let s = self.fetch_osc_samples(
@@ -2110,6 +2269,8 @@ impl Ephemeris {
                 )?;
                 Ok((s, istart, si, EphemerisSource::Jpl))
             }
+            #[cfg(not(feature = "jpl"))]
+            EphemerisSource::Jpl => unreachable!(),
             EphemerisSource::Moshier => {
                 let si = crate::constants::NODE_CALC_INTV_MOSH;
                 let s = self.fetch_osc_samples(
@@ -2339,10 +2500,16 @@ impl Ephemeris {
         config: &EphemerisConfig,
     ) -> Result<[f64; 6], Error> {
         match config.ephemeris_source {
+            #[cfg(feature = "swisseph-files")]
             crate::types::EphemerisSource::Swiss => {
                 self.calc_fixstar_sweph(star, jd, flags, config)
             }
+            #[cfg(not(feature = "swisseph-files"))]
+            crate::types::EphemerisSource::Swiss => unreachable!(),
+            #[cfg(feature = "jpl")]
             crate::types::EphemerisSource::Jpl => self.calc_fixstar_jpl(star, jd, flags, config),
+            #[cfg(not(feature = "jpl"))]
+            crate::types::EphemerisSource::Jpl => unreachable!(),
             crate::types::EphemerisSource::Moshier => {
                 self.calc_fixstar_moshier(star, jd, flags, config)
             }
@@ -2387,6 +2554,7 @@ impl Ephemeris {
     }
 
     /// SWIEPH backend: barycentric Earth for parallax/aberration, sun_bary for deflection.
+    #[cfg(feature = "swisseph-files")]
     fn calc_fixstar_sweph(
         &self,
         star: &crate::stars::Star,
@@ -2447,6 +2615,7 @@ impl Ephemeris {
     }
 
     /// JPL backend: barycentric Earth for parallax/aberration, sun_bary for deflection.
+    #[cfg(feature = "jpl")]
     fn calc_fixstar_jpl(
         &self,
         star: &crate::stars::Star,
@@ -2987,12 +3156,20 @@ impl Ephemeris {
         name.to_string()
     }
 
+    #[cfg(feature = "swisseph-files")]
     fn try_asteroid_name_from_file(&self, mpc: i32) -> Option<String> {
         let dir = self.config.ephe_path.as_ref()?;
         match crate::sweph_file::open_asteroid_file(dir, mpc) {
             Ok(f) => f.header().asteroid.as_ref().map(|a| a.name.clone()),
             Err(_) => None,
         }
+    }
+
+    /// Without `swisseph-files`, asteroid names (which live in .se1 file headers)
+    /// are never available.
+    #[cfg(not(feature = "swisseph-files"))]
+    fn try_asteroid_name_from_file(&self, _mpc: i32) -> Option<String> {
+        None
     }
 
     fn seasnam_lookup(&self, mpc: i32) -> Option<String> {
@@ -3043,6 +3220,8 @@ impl DeltaT for Ephemeris {
     }
 }
 
+#[derive(Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CalcResult {
     pub data: [f64; 6],
     pub flags_used: CalcFlags,

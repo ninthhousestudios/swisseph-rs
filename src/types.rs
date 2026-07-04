@@ -7,6 +7,7 @@ use crate::constants;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FictitiousId(i32);
 
 impl FictitiousId {
@@ -24,6 +25,7 @@ impl FictitiousId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AsteroidId(i32);
 
 impl AsteroidId {
@@ -41,6 +43,7 @@ impl AsteroidId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PlanetMoonId(i32);
 
 impl PlanetMoonId {
@@ -62,6 +65,7 @@ impl PlanetMoonId {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Body {
     Sun,
     Moon,
@@ -245,6 +249,7 @@ impl TryFrom<i32> for FictitiousBody {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HouseSystem {
     Equal,
     Alcabitius,
@@ -375,6 +380,7 @@ impl TryFrom<u8> for HouseSystem {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum CalendarType {
     Julian = 0,
@@ -398,6 +404,7 @@ impl TryFrom<i32> for CalendarType {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum SiderealMode {
     FaganBradley = 0,
@@ -568,6 +575,7 @@ impl TryFrom<i32> for SiderealMode {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EphemerisSource {
     Jpl,
     Swiss,
@@ -579,6 +587,7 @@ pub enum EphemerisSource {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum PrecessionModel {
     IAU1976 = 1,
@@ -595,6 +604,7 @@ pub enum PrecessionModel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum NutationModel {
     IAU1980 = 1,
@@ -605,6 +615,7 @@ pub enum NutationModel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum DeltaTModel {
     StephensonMorrison1984 = 1,
@@ -615,6 +626,7 @@ pub enum DeltaTModel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum SiderealTimeModel {
     IAU1976 = 1,
@@ -624,6 +636,7 @@ pub enum SiderealTimeModel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum BiasModel {
     None = 1,
@@ -632,12 +645,14 @@ pub enum BiasModel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum JplHorMode {
     LongAgreement = 1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum JplHoraMode {
     V1 = 1,
@@ -646,6 +661,7 @@ pub enum JplHoraMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AstroModels {
     pub delta_t: DeltaTModel,
     pub prec_longterm: PrecessionModel,
@@ -733,6 +749,7 @@ impl_jd_ops!(JdUt1);
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UtcComponents {
     pub year: i32,
     pub month: i32,
@@ -761,6 +778,7 @@ pub trait DeltaT {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DegreeParts {
     pub degrees: i32,
     pub minutes: i32,

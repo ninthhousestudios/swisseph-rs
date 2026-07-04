@@ -8,6 +8,7 @@ use crate::flags::SiderealBits;
 use crate::types::{AstroModels, EphemerisSource, SiderealMode};
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TopoPosition {
     pub longitude: f64,
     pub latitude: f64,
@@ -16,6 +17,7 @@ pub struct TopoPosition {
 
 /// `set_sidereal_mode` is implemented in `ayanamsa.rs`, next to the `AYANAMSA` table it resolves.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EphemerisConfig {
     pub ephemeris_source: EphemerisSource,
     pub ephe_path: Option<PathBuf>,

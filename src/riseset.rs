@@ -20,6 +20,7 @@ use crate::types::Body;
 /// Result of a rise/set/transit search: a single Julian Day, UT. Port of C's `tret[0]`
 /// (`swe_rise_trans_true_hor` only ever fills a single time slot for this family of events).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RiseSetResult {
     pub time: f64,
 }

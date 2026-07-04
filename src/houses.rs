@@ -54,6 +54,7 @@ fn acosd(x: f64) -> f64 {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AscMc {
     pub ascendant: f64,
     pub mc: f64,
@@ -81,11 +82,66 @@ impl AscMc {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HouseResult {
+    #[cfg_attr(feature = "serde", serde(with = "serde_37_array"))]
     pub cusps: [f64; 37],
+    #[cfg_attr(feature = "serde", serde(with = "serde_37_array"))]
     pub cusp_speeds: [f64; 37],
     pub ascmc: AscMc,
     pub ascmc_speeds: AscMc,
+}
+
+/// `serde`'s built-in array impls only cover lengths 0..=32 (`serde_core::ser::impls`), so
+/// `[f64; 37]` (cusps 1..=36 plus the unused index-0 slot, matching C's `cusp[37]`) needs a
+/// manual tuple-of-37 encoding here.
+#[cfg(feature = "serde")]
+mod serde_37_array {
+    use serde::de::{Error as DeError, SeqAccess, Visitor};
+    use serde::ser::SerializeTuple;
+    use serde::{Deserializer, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S>(arr: &[f64; 37], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut tup = serializer.serialize_tuple(37)?;
+        for v in arr {
+            tup.serialize_element(v)?;
+        }
+        tup.end()
+    }
+
+    struct ArrayVisitor;
+
+    impl<'de> Visitor<'de> for ArrayVisitor {
+        type Value = [f64; 37];
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "an array of 37 f64 values")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut arr = [0.0f64; 37];
+            for (i, slot) in arr.iter_mut().enumerate() {
+                *slot = seq
+                    .next_element()?
+                    .ok_or_else(|| DeError::invalid_length(i, &self))?;
+            }
+            Ok(arr)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[f64; 37], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_tuple(37, ArrayVisitor)
+    }
 }
 
 // ---------------------------------------------------------------------------

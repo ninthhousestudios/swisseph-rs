@@ -38,6 +38,7 @@ bitflags! {
     /// Method selector for [`Ephemeris::nod_aps`](crate::Ephemeris::nod_aps),
     /// mirroring C's `SE_NODBIT_*` (swephexp.h:291-294). Combine bits with `|`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct NodApsMethod: u32 {
         /// Mean nodes/apsides (VSOP mean elements). Also the behaviour when the
         /// method is empty.
@@ -56,6 +57,7 @@ bitflags! {
 /// `[lon, lat, dist, dlon, dlat, ddist]` (or equatorial / cartesian per the
 /// request flags), matching C's `xnasc`/`xndsc`/`xperi`/`xaphe`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NodesApsides {
     /// Ascending node.
     pub ascending: [f64; 6],

@@ -13,7 +13,9 @@ use crate::moshier::backend::{
 use crate::nutation::nutation;
 use crate::obliquity::obliquity;
 use crate::precession::{ldp_peps, precess};
+#[cfg(feature = "swisseph-files")]
 use crate::sweph_file::types::SEI_MOON;
+#[cfg(feature = "swisseph-files")]
 use crate::sweph_file::{
     SEI_FLG_HELIO, SEI_SUNBARY, SwissEphFile, body_file_id, evaluate_body, find_file_for_jd,
 };
@@ -1387,6 +1389,7 @@ pub(crate) fn raw_osc_moon_moshier(t: f64, eps_j2000: &Epsilon) -> Result<[f64; 
 }
 
 /// Raw geocentric equatorial-J2000 (pre-bias) Swiss-ephemeris moon (pos+vel) at `t`.
+#[cfg(feature = "swisseph-files")]
 pub(crate) fn raw_osc_moon_sweph(moon_files: &[SwissEphFile], t: f64) -> Result<[f64; 6], Error> {
     SwephProvider {
         planet_files: &[],
@@ -1396,6 +1399,7 @@ pub(crate) fn raw_osc_moon_sweph(moon_files: &[SwissEphFile], t: f64) -> Result<
 }
 
 /// Raw geocentric equatorial-J2000 (pre-bias) JPL moon (pos+vel) at `t`.
+#[cfg(feature = "jpl")]
 pub(crate) fn raw_osc_moon_jpl(file: &crate::jpl::JplFile, t: f64) -> Result<[f64; 6], Error> {
     JplProvider { file }.moon_geo(t, true)
 }
@@ -1426,6 +1430,10 @@ pub fn apply_sidereal_default(xreturn: &mut [f64; 24], daya: [f64; 2], has_speed
 // SwissEph (.se1) backend
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(
+    not(any(feature = "swisseph-files", feature = "jpl")),
+    allow(dead_code)
+)]
 pub(crate) struct SwephPositions {
     pub(crate) planet_bary: [f64; 6],
     pub(crate) earth_bary: [f64; 6],
@@ -1433,6 +1441,7 @@ pub(crate) struct SwephPositions {
     pub(crate) sun_bary: [f64; 6],
 }
 
+#[cfg(feature = "swisseph-files")]
 pub(crate) fn sweph_positions(
     planet_file: &SwissEphFile,
     moon_file: &SwissEphFile,
@@ -1478,6 +1487,10 @@ pub(crate) fn sweph_positions(
     })
 }
 
+#[cfg_attr(
+    not(any(feature = "swisseph-files", feature = "jpl")),
+    allow(dead_code)
+)]
 pub(crate) trait PositionProvider {
     /// Barycentric equatorial-J2000 positions of `body`, Earth, and Sun at `jd`.
     fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error>;
@@ -1491,6 +1504,7 @@ pub(crate) trait PositionProvider {
     }
 }
 
+#[cfg(feature = "swisseph-files")]
 pub(crate) struct SwephProvider<'a> {
     pub(crate) planet_files: &'a [SwissEphFile],
     pub(crate) moon_files: &'a [SwissEphFile],
@@ -1499,6 +1513,7 @@ pub(crate) struct SwephProvider<'a> {
 /// Days of slop allowed past a file's per-body coverage before declaring a jd
 /// out of range. Larger than the maximum one-way light-time in the solar system
 /// (Pluto ~0.23 d) but far smaller than a file's century-scale span.
+#[cfg(feature = "swisseph-files")]
 const BOUNDARY_SLOP: f64 = 0.3;
 
 /// Select the `.se1` file for `(body_id, jd)`. Falls back to the nearest covering
@@ -1510,6 +1525,7 @@ const BOUNDARY_SLOP: f64 = 0.3;
 /// the absolute earliest ephemeris boundary, C extrapolates the cached segment
 /// rather than erroring. Genuine out-of-range epochs (more than a light-time off)
 /// still return `None`, preserving the `BeyondEphemerisLimits` contract.
+#[cfg(feature = "swisseph-files")]
 pub(crate) fn find_file_or_nearest(
     files: &[SwissEphFile],
     body_id: i32,
@@ -1537,6 +1553,7 @@ pub(crate) fn find_file_or_nearest(
     best.map(|(f, _)| f)
 }
 
+#[cfg(feature = "swisseph-files")]
 impl<'a> PositionProvider for SwephProvider<'a> {
     fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
         let body_id = body_file_id(body).ok_or(Error::EphemerisNotAvailable {
@@ -1573,6 +1590,10 @@ impl<'a> PositionProvider for SwephProvider<'a> {
     }
 }
 
+#[cfg_attr(
+    not(any(feature = "swisseph-files", feature = "jpl")),
+    allow(dead_code)
+)]
 fn apparent_planet<P: PositionProvider>(
     p: &P,
     jd: f64,
@@ -1768,6 +1789,10 @@ fn apparent_planet<P: PositionProvider>(
     ))
 }
 
+#[cfg_attr(
+    not(any(feature = "swisseph-files", feature = "jpl")),
+    allow(dead_code)
+)]
 fn apparent_sun<P: PositionProvider>(
     p: &P,
     jd: f64,
@@ -1895,6 +1920,10 @@ fn apparent_sun<P: PositionProvider>(
     ))
 }
 
+#[cfg_attr(
+    not(any(feature = "swisseph-files", feature = "jpl")),
+    allow(dead_code)
+)]
 fn apparent_moon<P: PositionProvider>(
     p: &P,
     jd: f64,
@@ -2034,6 +2063,7 @@ fn apparent_moon<P: PositionProvider>(
 // JPL DE backend
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "jpl")]
 fn body_to_jpl_index(body: Body) -> Option<i32> {
     use crate::jpl::{
         J_EARTH, J_JUPITER, J_MARS, J_MERCURY, J_MOON, J_NEPTUNE, J_PLUTO, J_SATURN, J_SUN,
@@ -2055,10 +2085,12 @@ fn body_to_jpl_index(body: Body) -> Option<i32> {
     }
 }
 
+#[cfg(feature = "jpl")]
 pub(crate) struct JplProvider<'a> {
     pub(crate) file: &'a crate::jpl::JplFile,
 }
 
+#[cfg(feature = "jpl")]
 impl<'a> PositionProvider for JplProvider<'a> {
     fn positions(&self, body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
         use crate::jpl::{J_EARTH, J_SBARY, J_SUN, jpl_pleph};
@@ -2091,6 +2123,7 @@ impl<'a> PositionProvider for JplProvider<'a> {
     }
 }
 
+#[cfg(feature = "jpl")]
 pub fn calc_planet_jpl(
     jd: f64,
     body: Body,
@@ -2104,6 +2137,7 @@ pub fn calc_planet_jpl(
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
 
+#[cfg(feature = "jpl")]
 pub fn calc_sun_jpl(
     jd: f64,
     file: &crate::jpl::JplFile,
@@ -2116,6 +2150,7 @@ pub fn calc_sun_jpl(
     apparent_sun(&p, jd, flags, config, models, is_earth)
 }
 
+#[cfg(feature = "jpl")]
 pub fn calc_moon_jpl(
     jd: f64,
     file: &crate::jpl::JplFile,
@@ -2127,6 +2162,7 @@ pub fn calc_moon_jpl(
     apparent_moon(&p, jd, flags, config, models)
 }
 
+#[cfg(feature = "swisseph-files")]
 #[allow(clippy::too_many_arguments)]
 pub fn calc_planet_sweph(
     jd: f64,
@@ -2145,6 +2181,7 @@ pub fn calc_planet_sweph(
     apparent_planet(&p, jd, body, _eps_j2000, flags, config, models)
 }
 
+#[cfg(feature = "swisseph-files")]
 pub fn calc_sun_sweph(
     jd: f64,
     planet_files: &[SwissEphFile],
@@ -2161,6 +2198,7 @@ pub fn calc_sun_sweph(
     apparent_sun(&p, jd, flags, config, models, is_earth)
 }
 
+#[cfg(feature = "swisseph-files")]
 pub fn calc_moon_sweph(
     jd: f64,
     planet_files: &[SwissEphFile],
@@ -2353,6 +2391,7 @@ pub(crate) fn pctr_pipeline(
 // Asteroid calc pipeline
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "swisseph-files")]
 pub(crate) struct AsteroidProvider<'a, P: PositionProvider> {
     inner: &'a P,
     ast_file: &'a SwissEphFile,
@@ -2361,6 +2400,7 @@ pub(crate) struct AsteroidProvider<'a, P: PositionProvider> {
     source: EphemerisSource,
 }
 
+#[cfg(feature = "swisseph-files")]
 impl<'a, P: PositionProvider> PositionProvider for AsteroidProvider<'a, P> {
     fn positions(&self, _body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
         let pos = self.inner.positions(Body::Sun, jd, need_speed)?;
@@ -2420,6 +2460,7 @@ impl<'a> PositionProvider for MoshierEarthProvider<'a> {
     }
 }
 
+#[cfg(feature = "swisseph-files")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_asteroid_sweph(
     jd: f64,
@@ -2447,6 +2488,7 @@ pub(crate) fn calc_asteroid_sweph(
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
 
+#[cfg(all(feature = "swisseph-files", feature = "jpl"))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_asteroid_jpl(
     jd: f64,
@@ -2470,6 +2512,7 @@ pub(crate) fn calc_asteroid_jpl(
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
 
+#[cfg(feature = "swisseph-files")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_asteroid_moshier(
     jd: f64,
@@ -2496,6 +2539,7 @@ pub(crate) fn calc_asteroid_moshier(
 // Planet-moon calc pipeline — ports calc_center_body (sweph.c:2445)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "swisseph-files")]
 pub(crate) struct PlanetMoonProvider<'a, P: PositionProvider> {
     inner: &'a P,
     moon_file: &'a SwissEphFile,
@@ -2503,6 +2547,7 @@ pub(crate) struct PlanetMoonProvider<'a, P: PositionProvider> {
     parent: Body,
 }
 
+#[cfg(feature = "swisseph-files")]
 impl<P: PositionProvider> PositionProvider for PlanetMoonProvider<'_, P> {
     fn positions(&self, _body: Body, jd: f64, need_speed: bool) -> Result<SwephPositions, Error> {
         let mut pos = self.inner.positions(self.parent, jd, need_speed)?;
@@ -2523,10 +2568,12 @@ impl<P: PositionProvider> PositionProvider for PlanetMoonProvider<'_, P> {
     }
 }
 
+#[cfg(feature = "swisseph-files")]
 pub(crate) struct MoshierPlanetProvider<'a> {
     pub(crate) eps_j2000: &'a Epsilon,
 }
 
+#[cfg(feature = "swisseph-files")]
 impl PositionProvider for MoshierPlanetProvider<'_> {
     fn positions(&self, body: Body, jd: f64, _need_speed: bool) -> Result<SwephPositions, Error> {
         let pp = compute_pipeline(jd, body, self.eps_j2000)?;
@@ -2544,6 +2591,7 @@ impl PositionProvider for MoshierPlanetProvider<'_> {
     }
 }
 
+#[cfg(feature = "swisseph-files")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_plmoon_sweph(
     jd: f64,
@@ -2571,6 +2619,7 @@ pub(crate) fn calc_plmoon_sweph(
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
 
+#[cfg(all(feature = "swisseph-files", feature = "jpl"))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_plmoon_jpl(
     jd: f64,
@@ -2594,6 +2643,7 @@ pub(crate) fn calc_plmoon_jpl(
     apparent_planet(&p, jd, body, eps_j2000, flags, config, models)
 }
 
+#[cfg(feature = "swisseph-files")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_plmoon_moshier(
     jd: f64,
@@ -2791,6 +2841,7 @@ fn apparent_fictitious<P: PositionProvider>(
     ))
 }
 
+#[cfg(feature = "swisseph-files")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_fictitious_sweph(
     jd: f64,
@@ -2811,6 +2862,7 @@ pub(crate) fn calc_fictitious_sweph(
     apparent_fictitious(&p, jd, catalog, ipl, flags, config, models)
 }
 
+#[cfg(feature = "jpl")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_fictitious_jpl(
     jd: f64,
