@@ -1735,24 +1735,27 @@ fn apparent_sun<P: PositionProvider>(
     // Light-time (sweph.c:3968-4030). The loop always uses niter=1 (0..=1 = 2
     // iterations). For HELCTR/BARYCTR Earth, re-evaluate Earth at retarded time;
     // for geocentric Sun, re-evaluate Sun at retarded time.
+    // C's Swiss path (sweplan) updates both xearth and xsun to retarded-time
+    // values; C's JPL path (swi_pleph) only updates xearth, leaving xsun at the
+    // original epoch — a C-internal backend inconsistency (~3e-8 AU). We use
+    // retarded sun_bary (matching Swiss exactly); JPL golden cases use a wider
+    // tolerance to accommodate the C inconsistency.
     if !flags.contains(CalcFlags::TRUEPOS) {
         for _ in 0..=1 {
             let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
             let dt = dist * AUNIT / CLIGHT / 86400.0;
             let pos_ret = p.positions(Body::Sun, jd - dt, true)?;
             if is_earth && is_hb {
-                // Re-evaluated Earth; use ORIGINAL-epoch sun_bary (pos.sun_bary).
                 if is_bary {
                     for (i, x) in xx.iter_mut().enumerate() {
                         *x = pos_ret.earth_bary[i] + offset[i];
                     }
                 } else {
                     for (i, x) in xx.iter_mut().enumerate() {
-                        *x = pos_ret.earth_bary[i] + offset[i] - pos.sun_bary[i];
+                        *x = pos_ret.earth_bary[i] + offset[i] - pos_ret.sun_bary[i];
                     }
                 }
             } else {
-                // Geocentric Sun: re-evaluate Sun position at retarded time.
                 for (i, x) in xx.iter_mut().enumerate() {
                     *x = -(xobs[i] - pos_ret.sun_bary[i]);
                 }

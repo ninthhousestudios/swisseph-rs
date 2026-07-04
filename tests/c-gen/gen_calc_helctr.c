@@ -50,16 +50,16 @@ static void restore_stdout(int saved) {
     close(saved);
 }
 
-/* Sun..Pluto + Moon (SE_SUN=0 .. SE_PLUTO=9; Moon=1 is included). */
+/* Sun..Pluto + Moon + Earth (SE_SUN=0 .. SE_PLUTO=9; Moon=1; Earth=14). */
 static int bodies[] = {
     SE_SUN, SE_MOON, SE_MERCURY, SE_VENUS, SE_MARS, SE_JUPITER,
-    SE_SATURN, SE_URANUS, SE_NEPTUNE, SE_PLUTO
+    SE_SATURN, SE_URANUS, SE_NEPTUNE, SE_PLUTO, SE_EARTH
 };
 static const char *body_names[] = {
     "Sun", "Moon", "Mercury", "Venus", "Mars", "Jupiter",
-    "Saturn", "Uranus", "Neptune", "Pluto"
+    "Saturn", "Uranus", "Neptune", "Pluto", "Earth"
 };
-#define NBODIES 10
+#define NBODIES 11
 
 static double epochs[] = {
     2451545.0,    /* J2000.0 */
@@ -75,9 +75,10 @@ struct flag_combo {
     const char *name;
 };
 
-/* Every combo carries SEFLG_HELCTR. plaus_iflag forces NOABERR|NOGDEFL for
- * heliocentric, so these differ only in output frame and whether speed is
- * requested. */
+/* Every combo carries SEFLG_HELCTR or SEFLG_BARYCTR. plaus_iflag forces
+ * NOABERR|NOGDEFL for both, so these differ only in output frame, center
+ * flag, and whether speed is requested. BARYCTR combos only produce valid
+ * output for SE_EARTH (other bodies error/skip). */
 static struct flag_combo flag_combos[] = {
     { SEFLG_HELCTR | SEFLG_SPEED,                                   "polar" },
     { SEFLG_HELCTR,                                                 "polar_nospeed" },
@@ -87,8 +88,12 @@ static struct flag_combo flag_combos[] = {
     { SEFLG_HELCTR | SEFLG_SPEED | SEFLG_EQUATORIAL,               "equatorial" },
     { SEFLG_HELCTR | SEFLG_SPEED | SEFLG_XYZ | SEFLG_J2000,        "xyz_j2000" },
     { SEFLG_HELCTR | SEFLG_SPEED | SEFLG_XYZ | SEFLG_EQUATORIAL,   "xyz_equatorial" },
+    { SEFLG_BARYCTR | SEFLG_SPEED,                                  "bary_polar" },
+    { SEFLG_BARYCTR | SEFLG_SPEED | SEFLG_XYZ,                      "bary_xyz" },
+    { SEFLG_BARYCTR | SEFLG_SPEED | SEFLG_J2000,                    "bary_j2000" },
+    { SEFLG_BARYCTR | SEFLG_SPEED | SEFLG_XYZ | SEFLG_J2000,       "bary_xyz_j2000" },
 };
-#define NFLAGS 8
+#define NFLAGS 12
 
 struct backend {
     int flag;
@@ -112,6 +117,10 @@ int main(void) {
             for (int ie = 0; ie < NEPOCHS; ie++) {
                 for (int ifl = 0; ifl < NFLAGS; ifl++) {
                     int flags = backends[be].flag | flag_combos[ifl].flag;
+                    /* BARYCTR combos only for SE_EARTH — Rust's calc_inner
+                     * rejects BARYCTR for everything else (swisseph-rs/96). */
+                    if ((flag_combos[ifl].flag & SEFLG_BARYCTR) && bodies[ib] != SE_EARTH)
+                        continue;
                     double xx[6];
                     memset(xx, 0, sizeof(xx));
                     /* Reset C library state before each call so file caching

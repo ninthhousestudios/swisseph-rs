@@ -130,8 +130,8 @@ int main(void) {
     /* ---- helio_cross ---- */
     printf("\"helio_cross\": [");
     first_item = 1;
-    int helio_ipls[] = { SE_MERCURY, SE_MARS, SE_JUPITER };
-    int n_helio_ipls = 3;
+    int helio_ipls[] = { SE_MERCURY, SE_MARS, SE_JUPITER, SE_EARTH };
+    int n_helio_ipls = 4;
     double helio_x2cross[] = { 0.0, 120.5 };
     int n_helio_x2cross = 2;
     int dirs[] = { 1, -1 };

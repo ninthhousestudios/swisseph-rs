@@ -1700,6 +1700,9 @@ impl Ephemeris {
         models: &crate::types::AstroModels,
         config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
+        if flags.contains(CalcFlags::BARYCTR) {
+            return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
+        }
         match body {
             Body::Sun | Body::Earth => {
                 crate::calc::calc_sun(jd_tt, eps_j2000, flags, config, models, body == Body::Earth)
