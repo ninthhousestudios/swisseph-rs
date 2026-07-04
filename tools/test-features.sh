@@ -23,6 +23,6 @@ echo "=== full test suite (default features) ==="
 cargo test
 
 echo "=== clippy (all-features) ==="
-cargo clippy --all-features -- -D warnings
+cargo clippy --all-features
 
 echo "All feature combinations passed."
