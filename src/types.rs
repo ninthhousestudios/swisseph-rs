@@ -327,6 +327,36 @@ impl HouseSystem {
             Self::APC => b'Y',
         }
     }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Equal => "equal",
+            Self::Alcabitius => "Alcabitius",
+            Self::Campanus => "Campanus",
+            Self::EqualMC => "equal (MC)",
+            Self::Carter => "Carter poli-equ.",
+            Self::Gauquelin => "Gauquelin sectors",
+            Self::Horizon => "horizon/azimut",
+            Self::Sunshine => "Sunshine",
+            Self::SunshineAlt => "Sunshine/alt.",
+            Self::SavardA => "Savard-A",
+            Self::Koch => "Koch",
+            Self::PullenSD => "Pullen SD",
+            Self::Morinus => "Morinus",
+            Self::EqualAries => "equal/1=Aries",
+            Self::Porphyry => "Porphyry",
+            Self::Placidus => "Placidus",
+            Self::PullenSR => "Pullen SR",
+            Self::Regiomontanus => "Regiomontanus",
+            Self::Sripati => "Sripati",
+            Self::PolichPage => "Polich/Page",
+            Self::KrusinskiPisaGoelzer => "Krusinski-Pisa-Goelzer",
+            Self::Vehlow => "equal/Vehlow",
+            Self::WholeSign => "equal/ whole sign",
+            Self::Meridian => "axial rotation system/Meridian houses",
+            Self::APC => "APC houses",
+        }
+    }
 }
 
 impl TryFrom<u8> for HouseSystem {
@@ -442,6 +472,61 @@ pub enum SiderealMode {
     KrishnamurtiVp291 = 45,
     LahiriIcrc = 46,
     User = 255,
+}
+
+impl SiderealMode {
+    pub fn name(self) -> Option<&'static str> {
+        match self {
+            Self::FaganBradley => Some("Fagan/Bradley"),
+            Self::Lahiri => Some("Lahiri"),
+            Self::DeLuce => Some("De Luce"),
+            Self::Raman => Some("Raman"),
+            Self::Ushashashi => Some("Usha/Shashi"),
+            Self::Krishnamurti => Some("Krishnamurti"),
+            Self::DjwhalKhul => Some("Djwhal Khul"),
+            Self::Yukteshwar => Some("Yukteshwar"),
+            Self::JnBhasin => Some("J.N. Bhasin"),
+            Self::BabylKugler1 => Some("Babylonian/Kugler 1"),
+            Self::BabylKugler2 => Some("Babylonian/Kugler 2"),
+            Self::BabylKugler3 => Some("Babylonian/Kugler 3"),
+            Self::BabylHuber => Some("Babylonian/Huber"),
+            Self::BabylEtpsc => Some("Babylonian/Eta Piscium"),
+            Self::Aldebaran15Tau => Some("Babylonian/Aldebaran = 15 Tau"),
+            Self::Hipparchos => Some("Hipparchos"),
+            Self::Sassanian => Some("Sassanian"),
+            Self::GalCent0Sag => Some("Galact. Center = 0 Sag"),
+            Self::J2000 => Some("J2000"),
+            Self::J1900 => Some("J1900"),
+            Self::B1950 => Some("B1950"),
+            Self::Suryasiddhanta => Some("Suryasiddhanta"),
+            Self::SuryasiddhantaMsun => Some("Suryasiddhanta, mean Sun"),
+            Self::Aryabhata => Some("Aryabhata"),
+            Self::AryabhataMsun => Some("Aryabhata, mean Sun"),
+            Self::SsRevati => Some("SS Revati"),
+            Self::SsCitra => Some("SS Citra"),
+            Self::TrueCitra => Some("True Citra"),
+            Self::TrueRevati => Some("True Revati"),
+            Self::TruePushya => Some("True Pushya (PVRN Rao)"),
+            Self::GalCentRgilbrand => Some("Galactic Center (Gil Brand)"),
+            Self::GalEquIau1958 => Some("Galactic Equator (IAU1958)"),
+            Self::GalEquTrue => Some("Galactic Equator"),
+            Self::GalEquMula => Some("Galactic Equator mid-Mula"),
+            Self::GalAlignMardyks => Some("Skydram (Mardyks)"),
+            Self::TrueMula => Some("True Mula (Chandra Hari)"),
+            Self::GalCentMulaWilhelm => Some("Dhruva/Gal.Center/Mula (Wilhelm)"),
+            Self::Aryabhata522 => Some("Aryabhata 522"),
+            Self::BabylBritton => Some("Babylonian/Britton"),
+            Self::TrueSheoran => Some("\"Vedic\"/Sheoran"),
+            Self::GalCentCochrane => Some("Cochrane (Gal.Center = 0 Cap)"),
+            Self::GalEquFiorenza => Some("Galactic Equator (Fiorenza)"),
+            Self::ValensMoon => Some("Vettius Valens"),
+            Self::Lahiri1940 => Some("Lahiri 1940"),
+            Self::LahiriVp285 => Some("Lahiri VP285"),
+            Self::KrishnamurtiVp291 => Some("Krishnamurti-Senthilathiban"),
+            Self::LahiriIcrc => Some("Lahiri ICRC"),
+            Self::User => None,
+        }
+    }
 }
 
 impl TryFrom<i32> for SiderealMode {

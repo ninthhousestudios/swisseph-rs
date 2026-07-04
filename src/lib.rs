@@ -15,6 +15,7 @@ pub mod date;
 pub mod deltat;
 pub mod eclipse;
 pub mod fictitious;
+pub mod format;
 pub mod heliacal;
 pub mod houses;
 pub mod jpl;

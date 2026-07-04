@@ -370,6 +370,9 @@ fn future_extrapolation(y: f64, tabend: f64, tabsiz: usize, model: DeltaTModel) 
 // ---------------------------------------------------------------------------
 
 pub fn calc_deltat(tjd: f64, config: &EphemerisConfig) -> f64 {
+    if let Some(dt) = config.delta_t_userdef {
+        return dt;
+    }
     let model = config.astro_models.delta_t;
     let tid_acc = resolve_tidal_acceleration(config);
     let y = 2000.0 + (tjd - J2000) / 365.25;

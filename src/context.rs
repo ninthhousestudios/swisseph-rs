@@ -2791,6 +2791,149 @@ impl Ephemeris {
         table.sort_unstable();
         Ok(table)
     }
+
+    // -----------------------------------------------------------------------
+    // Equation of time / LMT↔LAT (sweph.c:7387–7436)
+    // -----------------------------------------------------------------------
+
+    /// Equation of time: `E = LAT − LMT`, returned in **days**.
+    /// Port of `swe_time_equ` (sweph.c:7387–7413).
+    pub fn time_equ(&self, tjd_ut: f64) -> crate::Result<f64> {
+        let deltat_config = {
+            let mut c = self.config.clone();
+            c.tidal_acceleration = Some(crate::constants::TIDAL_DEFAULT);
+            c
+        };
+        let sidt = crate::sidereal_time::sidereal_time(tjd_ut, &deltat_config);
+        let t = tjd_ut + 0.5;
+        let dt_day = t - t.floor();
+        let sidt_deg = (sidt - dt_day * 24.0) * 15.0;
+        let result = self.calc_ut(tjd_ut, Body::Sun, CalcFlags::SPEED)?;
+        let sun_lon = result.data[0];
+        let mut dt = crate::math::normalize_degrees(sidt_deg - sun_lon - 180.0);
+        if dt > 180.0 {
+            dt -= 360.0;
+        }
+        dt *= 4.0;
+        Ok(dt / 1440.0)
+    }
+
+    /// Convert Local Mean Time to Local Apparent Time.
+    /// Port of `swe_lmt_to_lat` (sweph.c:7415–7423).
+    pub fn lmt_to_lat(&self, tjd_lmt: f64, geolon: f64) -> crate::Result<f64> {
+        let tjd_lmt0 = tjd_lmt - geolon / 360.0;
+        let e = self.time_equ(tjd_lmt0)?;
+        Ok(tjd_lmt + e)
+    }
+
+    /// Convert Local Apparent Time to Local Mean Time.
+    /// Port of `swe_lat_to_lmt` (sweph.c:7425–7436).
+    pub fn lat_to_lmt(&self, tjd_lat: f64, geolon: f64) -> crate::Result<f64> {
+        let tjd_lmt0 = tjd_lat - geolon / 360.0;
+        let mut e = self.time_equ(tjd_lmt0)?;
+        e = self.time_equ(tjd_lmt0 - e)?;
+        e = self.time_equ(tjd_lmt0 - e)?;
+        Ok(tjd_lat - e)
+    }
+
+    // -----------------------------------------------------------------------
+    // Body name lookup (sweph.c:6946–7125)
+    // -----------------------------------------------------------------------
+
+    /// Resolve a body ID to its display name. Port of `swe_get_planet_name`.
+    pub fn get_planet_name(&self, body: Body) -> String {
+        let body = crate::calc::normalize_asteroid_aliases(body);
+        match body {
+            Body::Sun => "Sun".into(),
+            Body::Moon => "Moon".into(),
+            Body::Mercury => "Mercury".into(),
+            Body::Venus => "Venus".into(),
+            Body::Mars => "Mars".into(),
+            Body::Jupiter => "Jupiter".into(),
+            Body::Saturn => "Saturn".into(),
+            Body::Uranus => "Uranus".into(),
+            Body::Neptune => "Neptune".into(),
+            Body::Pluto => "Pluto".into(),
+            Body::MeanNode => "mean Node".into(),
+            Body::TrueNode => "true Node".into(),
+            Body::MeanApogee => "mean Apogee".into(),
+            Body::OscuApogee => "osc. Apogee".into(),
+            Body::IntpApogee => "intp. Apogee".into(),
+            Body::IntpPerigee => "intp. Perigee".into(),
+            Body::Earth => "Earth".into(),
+            Body::Chiron => "Chiron".into(),
+            Body::Pholus => "Pholus".into(),
+            Body::Ceres => "Ceres".into(),
+            Body::Pallas => "Pallas".into(),
+            Body::Juno => "Juno".into(),
+            Body::Vesta => "Vesta".into(),
+            Body::EclipticNutation => "Ecl. Nut.".into(),
+            Body::Fictitious(id) => crate::fictitious::fictitious_name(
+                &self.fictitious_catalog,
+                (id.raw_id() - crate::constants::FICT_OFFSET) as usize,
+            ),
+            Body::Asteroid(id) => self.asteroid_name(id.mpc_number()),
+            Body::PlanetMoon(id) => format!("{}", id.encoded()),
+            Body::Comet(id) => format!("{}", id.number()),
+        }
+    }
+
+    fn asteroid_name(&self, mpc: i32) -> String {
+        let name_from_file = self.try_asteroid_name_from_file(mpc);
+        let name = match &name_from_file {
+            Some(n) if !n.is_empty() => n.as_str(),
+            _ => return format!("{}: not found (asteroid)", mpc),
+        };
+
+        if name.starts_with('?') || (name.len() > 1 && name.as_bytes()[1].is_ascii_digit()) {
+            if let Some(override_name) = self.seasnam_lookup(mpc) {
+                return override_name;
+            }
+        }
+        name.to_string()
+    }
+
+    fn try_asteroid_name_from_file(&self, mpc: i32) -> Option<String> {
+        let dir = self.config.ephe_path.as_ref()?;
+        match crate::sweph_file::open_asteroid_file(dir, mpc) {
+            Ok(f) => f.header().asteroid.as_ref().map(|a| a.name.clone()),
+            Err(_) => None,
+        }
+    }
+
+    fn seasnam_lookup(&self, mpc: i32) -> Option<String> {
+        let dir = self.config.ephe_path.as_ref()?;
+        let path = dir.join("seasnam.txt");
+        let contents = fs::read_to_string(&path).ok()?;
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let num_str: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if num_str.is_empty() {
+                continue;
+            }
+            let file_mpc: i32 = num_str.parse().ok()?;
+            if file_mpc != mpc {
+                continue;
+            }
+            let rest = &trimmed[num_str.len()..];
+            let name_part = rest.trim_start();
+            if name_part.is_empty() {
+                continue;
+            }
+            let name = name_part
+                .split(['#', '\r', '\n'])
+                .next()
+                .unwrap_or("")
+                .trim_end();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+        None
+    }
 }
 
 impl DeltaT for Ephemeris {
