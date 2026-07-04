@@ -1610,10 +1610,10 @@ impl Ephemeris {
             });
         }
 
-        // Heliocentric (SEFLG_HELCTR) is supported below (per-backend/-body branches in calc.rs);
-        // plaus_iflag has already forced NOABERR|NOGDEFL for it. Barycentric is still unported
-        // except for Earth (routed through the Sun pipeline, swisseph-rs/96).
-        if flags.contains(CalcFlags::BARYCTR) && body != Body::Earth {
+        // Barycentric Sun is not yet implemented — apparent_sun's frame construction only
+        // handles BARYCTR for Earth (is_earth=true). Planets/Moon BARYCTR handled below in
+        // apparent_planet/apparent_moon; Moshier rejects BARYCTR in calc_body_moshier.
+        if flags.contains(CalcFlags::BARYCTR) && body == Body::Sun {
             return Err(Error::UnsupportedFlags(flags & CalcFlags::BARYCTR));
         }
 

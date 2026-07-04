@@ -1568,6 +1568,27 @@ fn apparent_planet<P: PositionProvider>(
         return Ok(finish_helctr(xx, jd, flags, models));
     }
 
+    // Barycentric (Swiss/JPL): planet_bary directly, light-time retarded with niter=1.
+    // Structurally identical to HELCTR but without the sun_bary subtraction — C's
+    // app_pos_etc_plan gates the subtraction on HELCTR only (sweph.c:2516-2520, 2692-2696).
+    if flags.contains(CalcFlags::BARYCTR) {
+        let mut xx = pos.planet_bary;
+        if !flags.contains(CalcFlags::TRUEPOS) {
+            let xx0 = pos.planet_bary;
+            let mut dt = 0.0;
+            for _ in 0..=1 {
+                let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+                dt = dist * AUNIT / CLIGHT / 86400.0;
+                for i in 0..3 {
+                    xx[i] = xx0[i] - dt * xx0[i + 3];
+                }
+            }
+            let pos_ret = p.positions(body, jd - dt, true)?;
+            xx = pos_ret.planet_bary;
+        }
+        return Ok(finish_helctr(xx, jd, flags, models));
+    }
+
     // Observer: barycentric Earth, or Earth + topocentric offset (§1 "xobs
     // replaces the geocenter"), evaluated once at the current (un-retarded)
     // epoch. `xobs_helio` is the same offset applied to the heliocentric frame
@@ -1840,6 +1861,31 @@ fn apparent_moon<P: PositionProvider>(
             let moon_geo_ret = p.moon_geo(jd - dt, true)?;
             for i in 0..6 {
                 xx[i] = moon_geo_ret[i] + pos_ret.earth_bary[i] - pos.sun_bary[i];
+            }
+        }
+        return Ok(finish_helctr(xx, jd, flags, models));
+    }
+
+    // Barycentric Moon (Swiss/JPL): moon_geo + earth_bary. No sun_bary subtraction — C's
+    // app_pos_etc_moon sets xobs=0 for BARYCTR (sweph.c:4133-4137), so the "to correct
+    // center" step at sweph.c:4205 is a no-op. Single dt from |moon_bary|, same as HELCTR.
+    if flags.contains(CalcFlags::BARYCTR) {
+        let moon_geo = p.moon_geo(jd, true)?;
+        let mut moon_bary = [0.0; 6];
+        for i in 0..6 {
+            moon_bary[i] = moon_geo[i] + pos.earth_bary[i];
+        }
+        let mut xx = moon_bary;
+        if !flags.contains(CalcFlags::TRUEPOS) {
+            let dist = (moon_bary[0] * moon_bary[0]
+                + moon_bary[1] * moon_bary[1]
+                + moon_bary[2] * moon_bary[2])
+                .sqrt();
+            let dt = dist * AUNIT / CLIGHT / 86400.0;
+            let pos_ret = p.positions(Body::Earth, jd - dt, true)?;
+            let moon_geo_ret = p.moon_geo(jd - dt, true)?;
+            for i in 0..6 {
+                xx[i] = moon_geo_ret[i] + pos_ret.earth_bary[i];
             }
         }
         return Ok(finish_helctr(xx, jd, flags, models));

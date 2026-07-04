@@ -77,8 +77,9 @@ struct flag_combo {
 
 /* Every combo carries SEFLG_HELCTR or SEFLG_BARYCTR. plaus_iflag forces
  * NOABERR|NOGDEFL for both, so these differ only in output frame, center
- * flag, and whether speed is requested. BARYCTR combos only produce valid
- * output for SE_EARTH (other bodies error/skip). */
+ * flag, and whether speed is requested. BARYCTR works for planets + Moon +
+ * Earth on Swiss/JPL (Moshier rejects BARYCTR and is skipped via rc<0).
+ * Sun BARYCTR skipped — C's app_pos_etc_sun doesn't handle it cleanly. */
 static struct flag_combo flag_combos[] = {
     { SEFLG_HELCTR | SEFLG_SPEED,                                   "polar" },
     { SEFLG_HELCTR,                                                 "polar_nospeed" },
@@ -117,9 +118,9 @@ int main(void) {
             for (int ie = 0; ie < NEPOCHS; ie++) {
                 for (int ifl = 0; ifl < NFLAGS; ifl++) {
                     int flags = backends[be].flag | flag_combos[ifl].flag;
-                    /* BARYCTR combos only for SE_EARTH — Rust's calc_inner
-                     * rejects BARYCTR for everything else (swisseph-rs/96). */
-                    if ((flag_combos[ifl].flag & SEFLG_BARYCTR) && bodies[ib] != SE_EARTH)
+                    /* Skip BARYCTR for the Sun — apparent_sun's frame
+                     * construction doesn't handle BARYCTR Sun. */
+                    if ((flag_combos[ifl].flag & SEFLG_BARYCTR) && bodies[ib] == SE_SUN)
                         continue;
                     double xx[6];
                     memset(xx, 0, sizeof(xx));

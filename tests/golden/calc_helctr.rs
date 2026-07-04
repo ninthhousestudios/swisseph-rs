@@ -51,12 +51,13 @@ fn body_from_c_id(id: i32) -> Body {
 }
 
 /// Dedicated `SEFLG_HELCTR`/`SEFLG_BARYCTR` golden coverage for the calc pipeline
-/// (swisseph-rs/94, Earth added swisseph-rs/96).
+/// (swisseph-rs/94, Earth added swisseph-rs/96, planets+Moon BARYCTR swisseph-rs/129).
 ///
-/// Asserts `swe_calc(.., SEFLG_HELCTR, ..)` against C directly for Sun..Pluto + Moon + Earth
-/// across the polar and XYZ frames, with/without J2000/EQUATORIAL, with/without SPEED, over the
-/// Moshier / Swiss / JPL backends. BARYCTR Earth cases for Swiss/JPL (Moshier rejects BARYCTR).
-/// 1760 cases; JPL rows skipped if de441.eph is absent.
+/// Asserts `swe_calc(.., SEFLG_HELCTR|SEFLG_BARYCTR, ..)` against C directly for Sun..Pluto +
+/// Moon + Earth across the polar and XYZ frames, with/without J2000/EQUATORIAL, with/without
+/// SPEED, over the Moshier / Swiss / JPL backends. BARYCTR for all planets + Moon + Earth on
+/// Swiss/JPL (Moshier rejects BARYCTR; Sun BARYCTR not yet implemented).
+/// 1720 cases; JPL rows skipped if de441.eph is absent.
 ///
 /// Heliocentric Sun is the origin (Sun relative to itself) → all-zero output. Positions eps 1e-9;
 /// speed eps 1e-7.
@@ -88,8 +89,8 @@ fn golden_calc_helctr() {
 
     let cases = load();
     assert!(
-        cases.len() >= 1350,
-        "expected 1350+ cases, got {}",
+        cases.len() >= 1700,
+        "expected 1700+ cases, got {}",
         cases.len()
     );
 
