@@ -14,6 +14,7 @@ pub mod crossings;
 pub mod date;
 pub mod deltat;
 pub mod eclipse;
+pub mod fictitious;
 pub mod heliacal;
 pub mod houses;
 pub mod jpl;
