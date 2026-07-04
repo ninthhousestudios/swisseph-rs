@@ -78,7 +78,21 @@ src/
 │                          (seas files don't set SEI_FLG_HELIO, C checks slot index not flag);
 │                          MoshierEarthProvider returns Earth via Moshier + all-zero sun_bary
 │                          (fresh-process MOSEPH semantics); calc_asteroid_sweph/jpl/moshier
-│                          construct the provider stack and delegate to apparent_planet
+│                          construct the provider stack and delegate to apparent_planet.
+│                          Fictitious planet calc (swisseph-rs/123): apparent_fictitious
+│                          (ports C's app_pos_etc_plan_osc, sweph.c:3365 — structurally
+│                          distinct from apparent_planet: light-time loop keeps xx barycentric
+│                          with observer subtracted only for distance, geocentric conversion
+│                          after the loop; niter=1 always; speed refinement re-evaluates
+│                          osc_el_plan at t-dt; frame bias NOT applied — C omits swi_bias
+│                          for fictitious bodies; xobs/xobs2 kept separate for geocentric/
+│                          aberration-speed); calc_fictitious_sweph/jpl/moshier construct
+│                          the PositionProvider (SwephProvider/JplProvider/MoshierEarthProvider
+│                          for Earth/Sun only) and delegate to apparent_fictitious.
+│                          Body::Fictitious dispatch in calc_inner (context.rs) before the
+│                          backend match — bypasses calc_body_moshier's BARYCTR guard (C
+│                          allows BARYCTR for fictitious); Swiss→Moshier fallback on
+│                          BeyondEphemerisLimits mirrors the asteroid path
 ├── topocentric.rs      — get_observer: swi_get_observer port (NONUT-forced mean-frame path only, docs/c-ref-topocentric.md §3), geodetic→geocentric flattening + diurnal rotation + precession to J2000, returns observer position+velocity offset (AU/AU-day) from the geocenter
 ├── moshier/
 │   ├── mod.rs          — PlantTbl struct, PLANETS array re-export, element-count tests
@@ -333,9 +347,9 @@ src/
 │                          `pub(crate)`) to `xobs`/`xobs_dt` when TOPOCTR is set — see
 │                          docs/c-ref-fixstar.md step 6. `calc_planet_star_topo` (this file) now
 │                          calls `fixstar2_with_config` instead of the geocentric-only `fixstar2`.
-├── fictitious.rs       — fictitious planets element layer (swisseph-rs/122, 1/2):
-│                          FictitiousCatalog (built-in 15-row Neely table + seorbel.txt
-│                          parser with check_t_terms polynomial-in-T evaluator);
+├── fictitious.rs       — fictitious planets (swisseph-rs/122 element layer + swisseph-rs/123
+│                          calc dispatch): FictitiousCatalog (built-in 15-row Neely table +
+│                          seorbel.txt parser with check_t_terms polynomial-in-T evaluator);
 │                          load_fictitious_catalog (file path with built-in fallback,
 │                          same pattern as stars.rs load_catalog); resolve_elements
 │                          (T-term eval, degnorm→radians, mano epoch override);
@@ -344,8 +358,8 @@ src/
 │                          (elements→J2000-equatorial-barycentric 6-vector: Gaussian
 │                          PQR rotation, obliquity at tequ, precession to J2000,
 │                          xearth/xsun barycentric shift; FICT_GEO flag switches
-│                          dmot/K/anchor for geocentric bodies). No calc dispatch
-│                          yet — wiring into Ephemeris::calc is 2/2's job.
+│                          dmot/K/anchor for geocentric bodies). FictitiousCatalog field
+│                          on Ephemeris, loaded eagerly in Ephemeris::new.
 ├── ayanamsa.rs         — EMPTY stub
 ├── azalt.rs            — atmospheric refraction + horizontal coordinates: refrac (swe_refrac,
 │                          Meeus true<->apparent, sea-level/no-dip), refrac_extended (swe_refrac_
@@ -615,6 +629,14 @@ tests/
 │                          swemplan.c directly for read_elements_file/swi_osc_el_plan,
 │                          emits xearth/xsun so Rust test feeds identical Earth/Sun state;
 │                          bodies 55–58 without-file error case (unit test with builtin only)
+│   ├── fictitious.rs  — golden tests for fictitious planet calc dispatch (swisseph-rs/123):
+│                          288 cases (12 bodies {Cupido..Poseidon, Isis, Nibiru, Vulcan,
+│                          WhiteMoon} × 4 epochs {J2000, J1900, 2460600.5, 1600-Jan-1} ×
+│                          6 flag combos {MOSEPH×4 (speed/equatorial/xyz/nospeed),
+│                          MOSEPH|HELCTR, SWIEPH|SPEED}); positions eps 1e-9 (Moshier) /
+│                          5e-9 (Swiss), speeds eps 1e-7; exercises Nibiru high-eccentricity
+│                          Kepler, Vulcan/WhiteMoon T-term+JDATE+geocentric elements,
+│                          HELCTR observer-zeroing, Swiss→Moshier Earth/Sun sourcing
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
@@ -870,6 +892,8 @@ tests/
 │                          5 epochs × 10 flag combos; see tests/golden/asteroid.rs)
 │   ├── calc.json       — C-generated reference data for calc pipeline (swe_calc full pipeline)
 │   ├── corrections.json — C-generated reference data for corrections (meff, aberr_light, pipeline)
+│   ├── fictitious.json — C-generated reference data for fictitious planet swe_calc (288 cases:
+│                          12 bodies × 4 epochs × 6 flag combos; see tests/golden/fictitious.rs)
 │   ├── math.json       — C-generated reference data for math
 │   ├── date.json       — C-generated reference data for date
 │   ├── eclipse.json    — C-generated reference data for swe_sol_eclipse_where (sol_where key),
@@ -911,6 +935,9 @@ tests/
     │                       = 300 cases; swe_close+swe_set_ephe_path("ephe")+swe_set_topo per call;
     │                       no MOSEPH cases per decision 1; aborts on any swe_calc error)
     ├── gen_calc.c      — C harness to regenerate calc.json (full swe_calc pipeline, 14 bodies × 7 epochs × 12 flags, ECL_NUT cleanup)
+    ├── gen_fictitious.c — C harness to regenerate fictitious.json (swe_calc for ipl 40–56:
+    │                       12 bodies × 4 epochs × 6 flag combos = 288 cases; links libswe.a,
+    │                       swe_set_ephe_path for seorbel.txt; records retflag + xx[6])
     ├── gen_eclipse.c   — C harness to regenerate eclipse.json (swe_sol_eclipse_where: 3 known
     │                       central eclipses at their real maximum-eclipse UT instants + 1
     │                       no-eclipse epoch, one case with SEFLG_NONUT to confirm it's masked
