@@ -1740,6 +1740,22 @@ fn apparent_sun<P: PositionProvider>(
     let is_hb = flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR);
     let is_bary = flags.contains(CalcFlags::BARYCTR);
 
+    // Barycentric Sun (C's app_pos_etc_sbar, sweph.c:4254-4293): returns sun_bary directly.
+    // C handles this in a completely separate swecalc branch (sweph.c:733-815) because
+    // SEI_SUN == SEI_EARTH in C's internal indices — Rust doesn't have that aliasing.
+    // Single analytic light-time retardation (no loop, no re-eval), then finish_helctr.
+    if !is_earth && is_bary {
+        let mut xx = pos.sun_bary;
+        if !flags.contains(CalcFlags::TRUEPOS) {
+            let dist = (xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]).sqrt();
+            let dt = dist * AUNIT / CLIGHT / 86400.0;
+            for i in 0..3 {
+                xx[i] -= dt * xx[i + 3];
+            }
+        }
+        return Ok(finish_helctr(xx, jd, flags, models));
+    }
+
     // Frame construction (sweph.c:3944-3950):
     //   BARYCTR      → xx = xobs (earth_bary, the barycentric Earth directly)
     //   HELCTR       → xx = xobs - sun_bary (earth_bary - sun_bary = helio_earth)

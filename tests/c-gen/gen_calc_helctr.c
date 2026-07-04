@@ -118,10 +118,7 @@ int main(void) {
             for (int ie = 0; ie < NEPOCHS; ie++) {
                 for (int ifl = 0; ifl < NFLAGS; ifl++) {
                     int flags = backends[be].flag | flag_combos[ifl].flag;
-                    /* Skip BARYCTR for the Sun — apparent_sun's frame
-                     * construction doesn't handle BARYCTR Sun. */
-                    if ((flag_combos[ifl].flag & SEFLG_BARYCTR) && bodies[ib] == SE_SUN)
-                        continue;
+                    /* Moshier rejects BARYCTR (skipped via rc<0 below). */
                     double xx[6];
                     memset(xx, 0, sizeof(xx));
                     /* Reset C library state before each call so file caching

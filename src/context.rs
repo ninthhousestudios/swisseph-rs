@@ -1610,13 +1610,6 @@ impl Ephemeris {
             });
         }
 
-        // Barycentric Sun is not yet implemented — apparent_sun's frame construction only
-        // handles BARYCTR for Earth (is_earth=true). Planets/Moon BARYCTR handled below in
-        // apparent_planet/apparent_moon; Moshier rejects BARYCTR in calc_body_moshier.
-        if flags.contains(CalcFlags::BARYCTR) && body == Body::Sun {
-            return Err(Error::UnsupportedFlags(flags & CalcFlags::BARYCTR));
-        }
-
         // Heliocentric Sun is the origin (the Sun relative to itself) — C's swe_calc returns an
         // all-zero xx (position and speed) across every output frame, since the zero vector is
         // invariant under bias/precession/nutation and polar-converts to zeros. calc_sun has no
