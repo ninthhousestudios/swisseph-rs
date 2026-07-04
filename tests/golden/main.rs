@@ -32,6 +32,7 @@ mod obliquity_bias;
 mod orbit;
 mod pctr;
 mod pheno;
+mod plmoon;
 mod precession;
 mod riseset;
 mod se1_header;
