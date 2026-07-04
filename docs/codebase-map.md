@@ -39,7 +39,18 @@ src/
 │                          1600/1800 AD epochs (swisseph-rs/66)
 ├── calc.rs             — requested_source (swisseph-rs/112: extracts EPHMASK from CalcFlags with
 │                          C precedence MOSEPH > JPLEPH > SWIEPH, returns Option<EphemerisSource>);
-│                          calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut, extract_output, extract_ecl_nut, plaus_iflag, speed3_interval, denormalize_positions, calc_speed_3point: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline + SPEED3 helpers; apparent_planet/apparent_sun/apparent_moon (generic over PositionProvider, used by the sweph/JPL backends); topo_offset helper — computes the observer offset (zero vector when TOPOCTR isn't set) and threads it through both the Moshier pipeline (calc_planet/calc_sun/calc_moon, added to earth_helio directly) and the generic pipeline (added to earth_bary/earth_helio as `xobs`/`xobs_helio`) in place of the plain geocenter wherever it functions as "the observer" (light-time, parallax, aberration, deflection); SEFLG_HELCTR support (added for phenomena, swisseph-rs/83): finish_helctr (shared bias->precess/nutation->app_pos_rest tail) plus a HELCTR early-branch in each of calc_planet (Moshier, niter=0 analytic), apparent_planet (Swiss/JPL, niter=1 + re-eval; the light-time loop's initial dx is heliocentric but its extrapolation base xx0 is BARYCENTRIC, a literal sweph.c:2513-2594 quirk), calc_moon (Moshier) and apparent_moon (Swiss/JPL) — the Moon computes light-time dt ONCE from the heliocentric distance (no loop, sweph.c:4147-4152) and, for Swiss/JPL, re-evaluates moon_geo+earth_bary at t-dt minus the ORIGINAL-epoch sun_bary; plaus_iflag forces NOABERR|NOGDEFL for HELCTR so the heliocentric position is purely geometric+light-time. NOTE calc_sun/apparent_sun have NO HELCTR branch: heliocentric Sun is the origin (Sun vs itself) → all-zero, short-circuited in context.rs calc_inner alongside MeanNode/MeanApogee (swisseph-rs/94). BARYCTR still unimplemented (calc_inner returns UnsupportedFlags). Osculating lunar node/apogee (swisseph-rs/84, PNOC 3): plan_for_osc_elem (swi_plan_for_osc_elem port — rotates a raw pre-bias geocentric moon 6-vector into ecliptic-of-date via bias->precess->nutation matrix->ecliptic->ecliptic-nutation; ALWAYS precesses to date + uses obliquity-of-date because the SEFLG_J2000/SIDEREAL skips live inside the dead `#ifdef SID_TNODE_FROM_ECL_T0` — the ref doc's Part C pseudocode is WRONG on this, verified against sweph.c:5758; speed is a PURE rotation, precessed via `precess` not `precess_speed` and nutated with nutv=None); lunar_osc_elem (sweph.c:5168, D.2-D.4: node tangent-line direction + osculating-ellipse apogee computed together, node/apogee speeds via plain central difference over speed_intv — the D.2 quadratic node speed is dead code overwritten by D.3; osc_output_frame does the xreturn[24] assembly incl. the SEFLG_J2000 re-projection elif that precesses the of-date node/apogee to J2000, position via precess/speed via precess_speed, AND returns the x2000 J2000-equatorial vector the SEFLG_SIDEREAL ECL_T0/SSY_PLANE rigorous branches need — built by removing the full nutation matrix [nutate(..., backward=true)] from the equatorial-of-date vector + precessing to J2000, per sweph.c:5527-5540; calc_inner threads this x2000 to apply_sidereal so ECL_T0/SSY_PLANE no longer silently fall back to traditional ayanamsa subtraction, swisseph-rs/84 review fix); raw_osc_moon_moshier/sweph/jpl (per-backend raw geocentric-equ-J2000 pre-bias moon pos+vel, reusing compute()/SwephProvider::moon_geo/JplProvider::moon_geo). CRITICAL: the C MOSEPH branch (sweph.c:5336-5354) has NO light-time correction — only JPL/SWIEPH re-evaluate at t-dt; Moshier node/apogee speed carries a documented stateless artifact (< 4e-6 deg/day, see CLAUDE.md <stateless_tolerance> §3).
+│                          calc_planet, calc_sun, calc_moon, calc_mean_node, calc_mean_apogee, calc_ecl_nut, extract_output, extract_ecl_nut, plaus_iflag, speed3_interval, denormalize_positions, calc_speed_3point: light-time, retarded velocity, aberration, deflection pipeline + mean element pipeline + SPEED3 helpers; apparent_planet/apparent_sun/apparent_moon (generic over PositionProvider, used by the sweph/JPL backends); topo_offset helper — computes the observer offset (zero vector when TOPOCTR isn't set) and threads it through both the Moshier pipeline (calc_planet/calc_sun/calc_moon, added to earth_helio directly) and the generic pipeline (added to earth_bary/earth_helio as `xobs`/`xobs_helio`) in place of the plain geocenter wherever it functions as "the observer" (light-time, parallax, aberration, deflection); SEFLG_HELCTR support (added for phenomena, swisseph-rs/83): finish_helctr (shared bias->precess/nutation->app_pos_rest tail) plus a HELCTR early-branch in each of calc_planet (Moshier, niter=0 analytic), apparent_planet (Swiss/JPL, niter=1 + re-eval; the light-time loop's initial dx is heliocentric but its extrapolation base xx0 is BARYCENTRIC, a literal sweph.c:2513-2594 quirk), calc_moon (Moshier) and apparent_moon (Swiss/JPL) — the Moon computes light-time dt ONCE from the heliocentric distance (no loop, sweph.c:4147-4152) and, for Swiss/JPL, re-evaluates moon_geo+earth_bary at t-dt minus the ORIGINAL-epoch sun_bary; plaus_iflag forces NOABERR|NOGDEFL for HELCTR so the heliocentric position is purely geometric+light-time. calc_sun/apparent_sun now handle both Body::Sun and Body::Earth via
+│                          an `is_earth: bool` parameter (swisseph-rs/96): heliocentric Sun is the
+│                          origin → all-zero (short-circuited in calc_inner); heliocentric/barycentric
+│                          Earth threads through the Sun pipeline with conditional frame construction
+│                          (HELCTR: earth_bary - sun_bary; BARYCTR: earth_bary directly), a light-time
+│                          loop that re-evaluates Earth at t-dt (niter=1, 2 iterations, entering even
+│                          for Moshier via swi_moshplan re-eval), and a conditional sign flip (skipped
+│                          for HELCTR/BARYCTR). C's Swiss sweplan updates both xearth and xsun to
+│                          retarded-time values while JPL's swi_pleph only updates xearth — a C-internal
+│                          backend inconsistency (~5e-8 AU); Rust uses retarded sun_bary (matching Swiss
+│                          bitwise, JPL within 5e-6°). BARYCTR Earth supported for Swiss/JPL (Moshier
+│                          rejects BARYCTR globally); BARYCTR for other bodies still unimplemented. Osculating lunar node/apogee (swisseph-rs/84, PNOC 3): plan_for_osc_elem (swi_plan_for_osc_elem port — rotates a raw pre-bias geocentric moon 6-vector into ecliptic-of-date via bias->precess->nutation matrix->ecliptic->ecliptic-nutation; ALWAYS precesses to date + uses obliquity-of-date because the SEFLG_J2000/SIDEREAL skips live inside the dead `#ifdef SID_TNODE_FROM_ECL_T0` — the ref doc's Part C pseudocode is WRONG on this, verified against sweph.c:5758; speed is a PURE rotation, precessed via `precess` not `precess_speed` and nutated with nutv=None); lunar_osc_elem (sweph.c:5168, D.2-D.4: node tangent-line direction + osculating-ellipse apogee computed together, node/apogee speeds via plain central difference over speed_intv — the D.2 quadratic node speed is dead code overwritten by D.3; osc_output_frame does the xreturn[24] assembly incl. the SEFLG_J2000 re-projection elif that precesses the of-date node/apogee to J2000, position via precess/speed via precess_speed, AND returns the x2000 J2000-equatorial vector the SEFLG_SIDEREAL ECL_T0/SSY_PLANE rigorous branches need — built by removing the full nutation matrix [nutate(..., backward=true)] from the equatorial-of-date vector + precessing to J2000, per sweph.c:5527-5540; calc_inner threads this x2000 to apply_sidereal so ECL_T0/SSY_PLANE no longer silently fall back to traditional ayanamsa subtraction, swisseph-rs/84 review fix); raw_osc_moon_moshier/sweph/jpl (per-backend raw geocentric-equ-J2000 pre-bias moon pos+vel, reusing compute()/SwephProvider::moon_geo/JplProvider::moon_geo). CRITICAL: the C MOSEPH branch (sweph.c:5336-5354) has NO light-time correction — only JPL/SWIEPH re-evaluate at t-dt; Moshier node/apogee speed carries a documented stateless artifact (< 4e-6 deg/day, see CLAUDE.md <stateless_tolerance> §3).
 │                          Planetocentric positions (swisseph-rs/90, PNOC 9): pctr_light_time
 │                          (§3a-§3c light-time iteration with center as observer, returns retarded
 │                          epoch + dt + speed correction xxsp), pctr_pipeline (§4-§9: planetocentric
@@ -512,11 +523,10 @@ src/
 │                          SEFLG_ORBEL_AA is bit-aliased onto CalcFlags::TOPOCTR (mass-summation
 │                          method, NOT topocentric — the bit never reaches eph.calc). Goes through
 │                          Ephemeris::calc/context (app-uses-calc-not-backends:orbit), NOT backends.
-│                          KEY GAP: this codebase's `calc` has no heliocentric-Earth path (Earth is
-│                          the observer origin → calc(Earth)=[0;6]), so get_orbital_elements derives
-│                          heliocentric Earth as -(geocentric Sun) (exact under TRUEPOS/NONUT); and
-│                          `calc` has no BARYCTR support at all, so the r>6-AU barycentric branch is
-│                          unreachable (C-Moshier errors there too — verified). Ephemeris::
+│                          HELCTR Earth now uses calc(Earth, HELCTR) directly (swisseph-rs/96
+│                          removed the -(geocentric Sun) workaround). BARYCTR for planets still
+│                          unimplemented, so the r>6-AU barycentric branch is unreachable
+│                          (C-Moshier errors there too — verified). Ephemeris::
 │                          get_orbital_elements/orbit_max_min_true_distance in context.rs delegate.
 │                          OrbitalElements re-exported in lib.rs. PLMASS/IPL_TO_ELEM/
 │                          OSCU_BAR_DISTANCE_THRESHOLD_AU in constants.rs (shared with nodaps.rs).
@@ -528,7 +538,7 @@ src/
 │                          (Moon latitude zero-crossing: day-stepping bracket with fixed-reference
 │                          xlat comparison, then Newton refinement jd -= lat/lat_speed);
 │                          helio_cross/helio_cross_ut (heliocentric longitude crossing for any planet
-│                          except Sun/Moon/nodes/apsides, Chiron uses hardcoded 0.01971 mean-speed
+│                          including Earth (swisseph-rs/96) except Sun/Moon/nodes/apsides, Chiron uses hardcoded 0.01971 mean-speed
 │                          for initial estimate only, dir≥0 forward / dir<0 backward). All go through
 │                          Ephemeris::calc/calc_ut (app-uses-calc-not-backends:crossings), NOT backends.
 │                          Convergence threshold CROSS_PRECISION = 1 milliarcsecond (1/3600000°).
@@ -561,16 +571,17 @@ tests/
 │                          azalt/azalt_rev 8 cases each (2 tjd_ut × 2 geopos × 2 dir, via
 │                          Ephemeris::azalt/azalt_rev, eps 1e-7 — compounds sidtime/obliquity)
 │   ├── calc.rs        — golden tests for calc pipeline (1176 cases: 14 bodies × 7 epochs × 12 flag combos incl. SPEED3, no_speed)
-│   ├── calc_helctr.rs — dedicated SEFLG_HELCTR golden tests (swisseph-rs/94, 1200 cases: 3 backends
-│                          {moshier,sweph,jpl} × Sun..Pluto+Moon (10) × 5 epochs × 8 flag combos
-│                          {polar,xyz}×{plain,j2000,equatorial}×{speed,no_speed}, all carrying
-│                          HELCTR; one JSON with a "backend" field, gen_calc_helctr.c covers all
-│                          three). Gives HELCTR first-class coverage independent of pheno — pheno
-│                          never set SPEED on its HELCTR calls nor touched the JPL Moon. Heliocentric
-│                          Sun = all-zero (Sun vs itself), short-circuited in context.rs calc_inner
-│                          alongside the MeanNode/MeanApogee HELCTR-zeros branch (calc_sun has no
-│                          HELCTR path). Positions eps 1e-9, speed eps 1e-7. Epochs avoid the sepl_18
-│                          file boundary (2378496.5). JPL rows skip if ephe/de441.eph absent)
+│   ├── calc_helctr.rs — dedicated SEFLG_HELCTR/BARYCTR golden tests (swisseph-rs/94, Earth added
+│                          swisseph-rs/96, 1360 cases: 3 backends {moshier,sweph,jpl} ×
+│                          Sun..Pluto+Moon+Earth (11) × 5 epochs × 8 HELCTR flag combos + 4 BARYCTR
+│                          Earth-only combos; BARYCTR cases for Swiss/JPL only (Moshier rejects).
+│                          Heliocentric Sun = all-zero (origin), short-circuited in calc_inner.
+│                          Positions eps 1e-9, speed eps 1e-7; JPL Earth HELCTR widened to 5e-6/1e-5
+│                          for a C-internal backend inconsistency in the light-time loop's sun_bary
+│                          handling (Swiss sweplan updates both xearth+xsun to retarded time; JPL
+│                          swi_pleph only updates xearth, leaving xsun at original epoch — Rust uses
+│                          retarded sun_bary matching Swiss bitwise). Epochs avoid sepl_18 file
+│                          boundary. JPL rows skip if ephe/de441.eph absent)
 │   ├── calc_topo.rs   — golden tests for SEFLG_TOPOCTR (170 cases across 3 sub-matrices, swisseph-rs/80: moshier — 90 cases, 3 observers × 5 bodies × 3 epochs incl. a SPEED3 file-boundary epoch × 2 flag shapes {speed, speed_noaberr}; sweph — 40 cases, 2 observers × 5 bodies × 2 epochs (incl. the sepl_18 SPEED3 file-boundary epoch, widened tolerance there per the documented C-state artifact) × 2 flag shapes; jpl — 40 cases, same shape as sweph; positions eps 1e-9/speeds eps 1e-7 except the sweph file-boundary widening and an OPEN-BUG widening for jpl epochs != J2000 (swisseph-rs/81 — JPL TOPOCTR diverges from C away from J2000, root cause unconfirmed) — TOPOCTR+SPEED+!NOABERR forces SPEED3 (calc.rs plaus_iflag) for the "speed" shape only; "speed_noaberr" exercises the non-SPEED3 analytic-speed path)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
