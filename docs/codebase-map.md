@@ -491,7 +491,9 @@ src/
 │                          (swisseph-rs/86, PNOC 5) branches: NodApsMethod bitflags
 │                          (MEAN/OSCU/OSCU_BAR/FOPOINT), NodesApsides output (asc/desc/peri/aphe
 │                          [f64;6]), the 5 VSOP mean-equinox-of-date element tables
-│                          EL_NODE/PERI/INCL/ECCE/SEMA[8][4]; nod_aps (A.1 remap+reject, A.2 setup,
+│                          EL_NODE/PERI/INCL/ECCE/SEMA[8][4]; nod_aps (A.1 remap+reject
+│                          — PlanetMoon explicitly rejected per C's [SE_NPLANETS, SE_AST_OFFSET]
+│                          guard, swisseph-rs/127, A.2 setup,
 │                          dispatches to mean_branch or osculating_branch by A.3's eligibility gate);
 │                          mean_branch (A.3: Moon via calc::mean_lunar_elements else 4-term
 │                          polynomials + cotrans orbital->ecliptic + eccentric-anomaly node distance);
@@ -668,7 +670,16 @@ tests/
 │                          2e-4 pos / 1e-3 speed (parent-planet source difference);
 │                          retflag CENTER_BODY bit assertion; equivalence: planet+CENTER_BODY
 │                          bitwise-matches 9n99 direct call; cancellation: Sun..Mars+CENTER_BODY
-│                          equals plain planet (flag cleared)
+│                          equals plain planet (flag cleared).
+│                          swisseph-rs/127: MOSEPH golden (45 cases, 5 bodies × 3 epochs ×
+│                          3 MOSEPH flags, tolerances 5e-2 pos / 1e-4 speed — plmoon MOSEPH
+│                          routes through apparent_planet while C's Moshier path maps to the
+│                          structurally different calc_planet+calc_inner in Rust); quirk golden
+│                          (6 rows: 9099/9201/9499 normalization verified against C bitwise);
+│                          error-path tests (out-of-range, per-planet file limits, unlisted
+│                          moon ids, CENTER_BODY without configured COB); nod_aps PlanetMoon
+│                          rejection; pheno golden (9501/9599 MOSEPH, zero magnitude/diameter);
+│                          orbital-elements golden (9501, NaN for degenerate Kepler fields)
 │   ├── corrections.rs — golden tests for corrections (30 meff + 40 aberr + 15 pipeline)
 │   ├── math.rs         — golden tests for math module
 │   ├── date.rs         — golden tests for date module
@@ -938,6 +949,12 @@ tests/
 │                          this module needs now, final RSE arc task
 │   ├── pctr.json       — C-generated reference data for swe_calc_pctr (90 cases; see tests/golden/pctr.rs)
 │   ├── pheno.json      — C-generated reference data for swe_pheno (120 cases; see tests/golden/pheno.rs)
+│   ├── plmoon.json     — C-generated reference data for planetary moon swe_calc (690 cases;
+│   │                       see tests/golden/plmoon.rs, swisseph-rs/126)
+│   ├── plmoon_moseph.json — C-generated reference data for MOSEPH plmoon (swisseph-rs/127):
+│   │                       moseph key (45 MOSEPH calc cases), quirks key (6 §2 normalization
+│   │                       rows), pheno key (2 swe_pheno cases), orbit key (1 orbital-elements
+│   │                       case with null for NaN fields)
 │   ├── obliquity_bias.json — C-generated reference data for obliquity/bias
 │   ├── precession.json — C-generated reference data for precession
 │   ├── nutation.json   — C-generated reference data for nutation
@@ -1045,6 +1062,13 @@ tests/
     │                       6 pairs, planet_name 45 ipls, house_name 26, ayanamsa_name 48,
     │                       csroundsec/cs2timestr/cs2lonlatstr/cs2degstr 16 values each;
     │                       swe_set_ephe_path("../../ephe") for asteroid .se1 name access)
+    ├── gen_plmoon.c     — C harness to regenerate plmoon.json (690 cases: 11 full-matrix bodies
+    │                       × 5 epochs × 10 flags + 21 reduced-matrix × 5 epochs × SWIEPH|SPEED
+    │                       + 15 COB equivalence + 5 cancellation; swisseph-rs/126)
+    ├── gen_plmoon_moseph.c — SEPARATE BINARY (fresh-process, MOSEPH only) to regenerate
+    │                       plmoon_moseph.json (45 MOSEPH calc + 6 quirk + 2 pheno + 1 orbit;
+    │                       swisseph-rs/127). Never issues SWIEPH/JPLEPH calls — same global-state
+    │                       hazard as gen_asteroid_moseph.c
     └── gen_cross.c      — C harness to regenerate crossings.json (66 cases: solcross 18,
                             mooncross 18, mooncross_node 6, helio_cross 24, all SEFLG_MOSEPH)
 ```
