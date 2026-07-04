@@ -2572,22 +2572,19 @@ fn apparent_fictitious<P: PositionProvider>(
         xx[5] = 0.0;
     }
 
-    // Deflection (sweph.c:3515-3517)
+    // Deflection (sweph.c:3515-3517) — C's swi_deflect_light adds swed.topd.xobs
+    // to the Earth position when TOPOCTR (sweph.c:3758-3760).
     if !flags.contains(CalcFlags::TRUEPOS) && !flags.contains(CalcFlags::NOGDEFL) {
-        let earth_helio = [
-            pos.earth_bary[0] - pos.sun_bary[0],
-            pos.earth_bary[1] - pos.sun_bary[1],
-            pos.earth_bary[2] - pos.sun_bary[2],
-            pos.earth_bary[3] - pos.sun_bary[3],
-            pos.earth_bary[4] - pos.sun_bary[4],
-            pos.earth_bary[5] - pos.sun_bary[5],
-        ];
+        let mut xobs_helio = [0.0; 6];
+        for i in 0..6 {
+            xobs_helio[i] = pos.earth_bary[i] - pos.sun_bary[i] + offset[i];
+        }
         let mut planet_helio = [0.0; 6];
         for i in 0..3 {
-            planet_helio[i] = xx[i] + earth_helio[i];
+            planet_helio[i] = xx[i] + xobs_helio[i];
             planet_helio[i + 3] = pdp_x[i + 3];
         }
-        deflect_light(&mut xx, &earth_helio, &planet_helio, need_speed);
+        deflect_light(&mut xx, &xobs_helio, &planet_helio, need_speed);
     }
 
     // Aberration (sweph.c:3521-3531) — xobs is original epoch, xobs2 is t-dt

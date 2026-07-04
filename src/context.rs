@@ -1643,6 +1643,9 @@ impl Ephemeris {
                     Ok((xr, x2000, flags))
                 }
                 EphemerisSource::Moshier => {
+                    if flags.contains(CalcFlags::BARYCTR) {
+                        return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
+                    }
                     let (xr, x2000) = crate::calc::calc_fictitious_moshier(
                         jd_tt, body, catalog, ipl, &eps_j2000, flags, config, models,
                     )?;
