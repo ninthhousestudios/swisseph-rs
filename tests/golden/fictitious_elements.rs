@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 use swisseph::fictitious::{
-    FictitiousCatalog, kepler, load_fictitious_catalog, osc_el_plan, resolve_elements,
+    FictitiousCatalog, load_fictitious_catalog, osc_el_plan, resolve_elements,
 };
 use swisseph::types::AstroModels;
 

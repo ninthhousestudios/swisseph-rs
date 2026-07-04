@@ -396,15 +396,18 @@ fn golden_heliacal_pheno_ut() {
 
         let actual = result.as_array();
         for (slot, (expected, got)) in case.darr.iter().zip(actual.iter()).enumerate() {
-            let eps =
-                if slot >= 12 && slot <= 15 || slot == 21 || slot == 22 || slot == 23 || slot == 24
-                {
-                    // Time/duration slots (from rise/set searches or crossing/parabola fits)
-                    1e-5
-                } else {
-                    // Instantaneous geometry slots
-                    1e-7
-                };
+            let eps = if (12..=15).contains(&slot)
+                || slot == 21
+                || slot == 22
+                || slot == 23
+                || slot == 24
+            {
+                // Time/duration slots (from rise/set searches or crossing/parabola fits)
+                1e-5
+            } else {
+                // Instantaneous geometry slots
+                1e-7
+            };
             super::assert_f64_eps(
                 &format!(
                     "pheno case {i} ({}) slot {slot} ({}): obj={} jd={:.4}",
@@ -436,7 +439,7 @@ fn golden_heliacal_ut() {
             )
         });
 
-        let mut dgeo = case.geo;
+        let dgeo = case.geo;
         let mut datm = [1013.25, 15.0, 40.0, 40.0];
         let mut dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
 
