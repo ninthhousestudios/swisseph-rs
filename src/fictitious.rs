@@ -372,6 +372,9 @@ struct ParsedRow {
     incl: ElementExpr,
     name: String,
     is_geo: bool,
+    /// Built-in rows skip degnorm on angle columns — C's built-in path does
+    /// plain `value * DEGTORAD` without `swe_degnorm` (swemplan.c:720-730).
+    from_builtin: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +418,7 @@ impl FictitiousCatalog {
                 incl: ElementExpr::from_constant(r.incl),
                 name: r.name.to_string(),
                 is_geo: false,
+                from_builtin: true,
             })
             .collect();
         Self {
@@ -559,6 +563,7 @@ fn parse_orbel_file(contents: &str) -> Result<FictitiousCatalog, Error> {
             incl,
             name,
             is_geo,
+            from_builtin: false,
         });
     }
 
@@ -569,17 +574,19 @@ fn parse_orbel_file(contents: &str) -> Result<FictitiousCatalog, Error> {
 }
 
 /// Load fictitious-body catalog from `ephe_path/seorbel.txt`.
-/// Falls back to the built-in 15-row table if the file is absent.
-pub fn load_fictitious_catalog(ephe_path: Option<&Path>) -> FictitiousCatalog {
+/// Falls back to the built-in 15-row table only if the file is absent.
+/// A present but malformed file returns an error — matching C, which only
+/// falls back when the file cannot be opened (swemplan.c:707-713).
+pub fn load_fictitious_catalog(ephe_path: Option<&Path>) -> Result<FictitiousCatalog, Error> {
     let Some(dir) = ephe_path else {
-        return FictitiousCatalog::builtin();
+        return Ok(FictitiousCatalog::builtin());
     };
     let path = dir.join(FICTFILE);
     let contents = match std::fs::read_to_string(&path) {
         Ok(s) => s,
-        Err(_) => return FictitiousCatalog::builtin(),
+        Err(_) => return Ok(FictitiousCatalog::builtin()),
     };
-    parse_orbel_file(&contents).unwrap_or_else(|_| FictitiousCatalog::builtin())
+    parse_orbel_file(&contents)
 }
 
 // ---------------------------------------------------------------------------
@@ -625,7 +632,16 @@ pub fn resolve_elements(
     if row.mano.has_t_terms {
         tjd0 = tjd;
     }
-    let mano = normalize_degrees(mano_raw) * DEGTORAD;
+    // C's built-in path (swemplan.c:720-730) does plain `value * DEGTORAD`
+    // without swe_degnorm; the file path applies degnorm then DEGTORAD.
+    let to_rad = |val: f64| -> f64 {
+        if row.from_builtin {
+            val * DEGTORAD
+        } else {
+            normalize_degrees(val) * DEGTORAD
+        }
+    };
+    let mano = to_rad(mano_raw);
 
     // Semi-axis
     let sema = row.sema.eval(tt);
@@ -643,10 +659,10 @@ pub fn resolve_elements(
         )));
     }
 
-    // Angular elements: degnorm then to radians
-    let parg = normalize_degrees(row.parg.eval(tt)) * DEGTORAD;
-    let node = normalize_degrees(row.node.eval(tt)) * DEGTORAD;
-    let incl = normalize_degrees(row.incl.eval(tt)) * DEGTORAD;
+    // Angular elements
+    let parg = to_rad(row.parg.eval(tt));
+    let node = to_rad(row.node.eval(tt));
+    let incl = to_rad(row.incl.eval(tt));
 
     Ok(ResolvedElements {
         tjd0,

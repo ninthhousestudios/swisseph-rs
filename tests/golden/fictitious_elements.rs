@@ -61,7 +61,7 @@ fn golden_fictitious_elements() {
         eprintln!("Skipping: seorbel.txt not found at {}", path.display());
         return;
     }
-    let catalog = load_fictitious_catalog(Some(&path));
+    let catalog = load_fictitious_catalog(Some(&path)).unwrap();
     let models = AstroModels::default();
 
     let mut elem_pass = 0;
@@ -139,4 +139,18 @@ fn fictitious_bodies_55_58_need_file() {
             row + 40
         );
     }
+}
+
+/// Built-in path must NOT normalize angles — C does plain `value * DEGTORAD`
+/// without swe_degnorm (swemplan.c:720-730). Nibiru's node is -44.567° in the
+/// built-in table, which must produce a negative radian, not the normalized 315.433°.
+#[test]
+fn builtin_nibiru_negative_node() {
+    let catalog = FictitiousCatalog::builtin();
+    let elem = resolve_elements(&catalog, 9, 2451545.0).unwrap(); // row 9 = Nibiru
+    assert_eq!(elem.name, "Nibiru");
+    // C: -44.567 * DEGTORAD — negative value, no degnorm
+    let expected = -44.567_f64 * swisseph::constants::DEGTORAD;
+    super::assert_f64_exact("nibiru_builtin_node", expected, elem.node);
+    assert!(elem.node < 0.0, "built-in Nibiru node must be negative");
 }
