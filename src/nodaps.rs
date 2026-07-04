@@ -20,8 +20,8 @@ use bitflags::bitflags;
 
 use crate::calc::{app_pos_rest, extract_output, plan_for_osc_elem, precess_speed};
 use crate::constants::{
-    AUNIT, CLIGHT, DEGTORAD, EARTH_MOON_MRAT, GEOGCONST, HELGRAVCONST, IPL_TO_ELEM, J2000,
-    MOON_MEAN_DIST, MOON_MEAN_ECC, MOON_MEAN_INCL, NODE_CALC_INTV, NUT_SPEED_INTV,
+    AST_OFFSET, AUNIT, CLIGHT, DEGTORAD, EARTH_MOON_MRAT, GEOGCONST, HELGRAVCONST, IPL_TO_ELEM,
+    J2000, MOON_MEAN_DIST, MOON_MEAN_ECC, MOON_MEAN_INCL, NODE_CALC_INTV, NPLANETS, NUT_SPEED_INTV,
     OSCU_BAR_DISTANCE_THRESHOLD_AU, PLMASS,
 };
 use crate::context::Ephemeris;
@@ -207,13 +207,14 @@ pub(crate) fn nod_aps(
     };
 
     // A.1 — reject the node/apsis point bodies themselves, reserved ids, and
-    // plmoon bodies. C rejects the entire [SE_NPLANETS, SE_AST_OFFSET] range
-    // (swecl.c:5138-5141); PlanetMoon raw ids (9000-9999) fall squarely in it.
+    // the full [SE_NPLANETS, SE_AST_OFFSET] reserved range (swecl.c:5138-5141).
+    // This covers PlanetMoon (raw 9000-9999) and Fictitious (raw 40-58).
     let raw = ipl.to_raw_id();
     if matches!(
         ipl,
-        Body::MeanNode | Body::TrueNode | Body::MeanApogee | Body::OscuApogee | Body::PlanetMoon(_)
+        Body::MeanNode | Body::TrueNode | Body::MeanApogee | Body::OscuApogee
     ) || raw < 0
+        || (NPLANETS..=AST_OFFSET).contains(&raw)
     {
         return Err(Error::InvalidBody(raw));
     }

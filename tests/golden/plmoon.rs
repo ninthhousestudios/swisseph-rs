@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 use swisseph::{
-    Body, CalcFlags, Ephemeris, EphemerisConfig, EphemerisSource, NodApsMethod, TopoPosition,
+    Body, CalcFlags, Ephemeris, EphemerisConfig, EphemerisSource, Error, NodApsMethod, TopoPosition,
 };
 
 #[derive(Deserialize)]
@@ -454,10 +454,11 @@ fn plmoon_outside_time_range_errors() {
         .expect("plain Jupiter at 1050 AD should succeed");
 
     assert!(
-        format!("{err:?}").contains("NotAvailable")
-            || format!("{err:?}").contains("EphemerisNotAvailable")
-            || format!("{err:?}").contains("BeyondEphemerisLimits"),
-        "expected an ephemeris-not-available error, got: {err:?}"
+        matches!(
+            err,
+            Error::EphemerisNotAvailable { .. } | Error::BeyondEphemerisLimits { .. }
+        ),
+        "expected EphemerisNotAvailable or BeyondEphemerisLimits, got: {err:?}"
     );
 }
 
@@ -475,9 +476,17 @@ fn plmoon_phobos_outside_mars_range_errors() {
     // (2378491.5–2524599.5) but OUTSIDE the Mars-moon range (2415015.5–2469082.5).
     let body = Body::planet_moon(401).unwrap();
     let flags = CalcFlags::SWIEPH | CalcFlags::SPEED;
-    eph.calc(2380000.5, body, flags)
+    let err = eph
+        .calc(2380000.5, body, flags)
         .err()
         .expect("Phobos at 1804 AD should error (outside Mars-moon file range)");
+    assert!(
+        matches!(
+            err,
+            Error::EphemerisNotAvailable { .. } | Error::BeyondEphemerisLimits { .. }
+        ),
+        "expected EphemerisNotAvailable or BeyondEphemerisLimits, got: {err:?}"
+    );
 }
 
 #[test]
@@ -494,9 +503,14 @@ fn plmoon_unlisted_moon_id_errors() {
     // 9502 (Europa) not listed
     let body = Body::planet_moon(502).unwrap();
     let flags = CalcFlags::SWIEPH | CalcFlags::SPEED;
-    eph.calc(2451545.0, body, flags)
+    let err = eph
+        .calc(2451545.0, body, flags)
         .err()
         .expect("9502 not in planet_moon_numbers should error");
+    assert!(
+        matches!(err, Error::EphemerisNotAvailable { .. }),
+        "expected EphemerisNotAvailable, got: {err:?}"
+    );
 }
 
 #[test]
@@ -511,9 +525,14 @@ fn plmoon_center_body_on_unlisted_planet_errors() {
     .unwrap();
 
     let flags = CalcFlags::SWIEPH | CalcFlags::SPEED | CalcFlags::CENTER_BODY;
-    eph.calc(2451545.0, Body::Jupiter, flags)
+    let err = eph
+        .calc(2451545.0, Body::Jupiter, flags)
         .err()
         .expect("Jupiter+CENTER_BODY without 9599 in config should error");
+    assert!(
+        matches!(err, Error::EphemerisNotAvailable { .. }),
+        "expected EphemerisNotAvailable, got: {err:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -534,8 +553,28 @@ fn plmoon_nod_aps_rejected() {
         .nod_aps(2451545.0, body, flags, NodApsMethod::OSCU)
         .expect_err("nod_aps should reject PlanetMoon");
     assert!(
-        format!("{err:?}").contains("InvalidBody"),
-        "expected InvalidBody error, got: {err:?}"
+        matches!(err, Error::InvalidBody(9501)),
+        "expected InvalidBody(9501), got: {err:?}"
+    );
+}
+
+#[test]
+fn fictitious_nod_aps_rejected() {
+    let eph = Ephemeris::new(EphemerisConfig {
+        ephemeris_source: EphemerisSource::Moshier,
+        ..EphemerisConfig::default()
+    })
+    .unwrap();
+
+    // Fictitious body Cupido (raw id 40) falls in C's [SE_NPLANETS=23, SE_AST_OFFSET=10000] range.
+    let body = Body::Fictitious(swisseph::FictitiousId::new(40).unwrap());
+    let flags = CalcFlags::MOSEPH | CalcFlags::SPEED;
+    let err = eph
+        .nod_aps(2451545.0, body, flags, NodApsMethod::OSCU)
+        .expect_err("nod_aps should reject Fictitious bodies");
+    assert!(
+        matches!(err, Error::InvalidBody(40)),
+        "expected InvalidBody(40), got: {err:?}"
     );
 }
 
