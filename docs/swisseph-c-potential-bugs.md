@@ -388,3 +388,36 @@ uncapped solver) that it has evidently never been noticed upstream.
 **Our Rust code:** Not yet landed — the fictitious-planets port is tasks swisseph-rs/122–123.
 The port must reproduce the bug (use literal `1.0`, not `x.cbrt()`) for bit parity; mandated in
 `docs/c-ref-fictitious.md` §4 + Porting Notes and in the swisseph-rs/122 task description.
+
+## 11. app_pos_etc_sun light-time loop: Swiss vs JPL sun_bary inconsistency
+
+**Location:** `sweph.c`, `app_pos_etc_sun()` (lines 3968–4030)
+
+**What:** The HELCTR/BARYCTR Earth light-time loop re-evaluates Earth's position at
+the retarded time `t = teval - dt`. C's handling of the barycentric Sun position
+(`xsun`) differs between the Swiss and JPL backends:
+
+- **Swiss (SEFLG_SWIEPH):** `sweplan(t, SEI_EARTH, ..., xearth, NULL, xsun, NULL)`
+  returns both `xearth` and `xsun` at the retarded epoch. The subsequent heliocentric
+  subtraction `xx = xearth - xsun` uses retarded-time values for both.
+
+- **JPL (SEFLG_JPLEPH):** `swi_pleph(t, J_EARTH, J_SBARY, xearth)` only returns
+  `xearth` at the retarded epoch. `xsun` is a local variable captured from
+  `psdp->x` (the original-epoch sun_bary, line 3975) before the loop and is NOT
+  updated by the JPL call. The subtraction `xx = xearth - xsun` uses retarded
+  Earth but original-epoch Sun.
+
+**Impact:** ~5e-8 AU position difference (~3e-6° longitude at extreme epochs like
+1800 AD, ~1.3e-6° near J2000). The Sun moves ~1.6e-7 AU relative to the solar
+system barycenter over 500 seconds of light-time; the Swiss path captures this
+movement while the JPL path doesn't. Astronomically negligible.
+
+**Root cause:** `sweplan` is a batch function that evaluates multiple body slots in
+one call (the `xsun` output parameter is an incidental side product of reading the
+SUNBARY segment alongside EARTH). `swi_pleph` is a single-body call. The code
+wasn't designed for them to diverge — it's an implementation accident from the
+different call granularity.
+
+**Our Rust code:** Uses retarded sun_bary (matching the Swiss path bitwise). JPL
+Earth HELCTR golden cases carry a widened 5e-6° position / 1e-5°/day speed
+tolerance. Found during swisseph-rs/96.
