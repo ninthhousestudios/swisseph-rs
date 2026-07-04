@@ -111,7 +111,6 @@ pub const SIDT_LTERM_OFS1: f64 = 0.001385646 / 15.0;
 pub const NPLANETS: i32 = 23;
 pub const AST_OFFSET: i32 = 10000;
 pub const PLMOON_OFFSET: i32 = 9000;
-pub const COMET_OFFSET: i32 = 1000;
 pub const FICT_OFFSET: i32 = 40;
 pub const FICT_OFFSET_1: i32 = 39;
 pub const FICT_MAX: i32 = 999;

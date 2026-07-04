@@ -2968,7 +2968,7 @@ impl Ephemeris {
                 5145 => "Pholus".into(),
                 mpc => self.asteroid_name(mpc),
             },
-            Body::PlanetMoon(_) | Body::Comet(_) => format!("{}", body.to_raw_id()),
+            Body::PlanetMoon(_) => format!("{}", body.to_raw_id()),
         }
     }
 

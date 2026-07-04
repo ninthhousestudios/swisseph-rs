@@ -1109,7 +1109,7 @@ tests/
 
 | Type | Lines | Notes |
 |---|---|---|
-| `Body` | 82–111 | enum: Sun..Vesta + Fictitious/Asteroid/PlanetMoon/Comet |
+| `Body` | 66–95 | enum: Sun..Vesta + Fictitious/Asteroid/PlanetMoon |
 | `HouseSystem` | 272–298 | 22 house system variants |
 | `CalendarType` | 373–376 | Julian, Gregorian |
 | `SiderealMode` | 396–445 | 42 sidereal mode variants |

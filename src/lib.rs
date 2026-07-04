@@ -50,9 +50,9 @@ pub use phenomena::Phenomena;
 pub use riseset::RiseSetResult;
 pub use stars::{Star, StarCatalog};
 pub use types::{
-    AsteroidId, Body, CalendarType, CometId, DegreeParts, DeltaT, EphemerisSource, Epsilon,
-    FictitiousId, FrameTransform, HouseSystem, JdTt, JdUt1, Nutation, PlanetMoonId,
-    PrecessionDirection, SiderealMode, UtcComponents, UtcToJd,
+    AsteroidId, Body, CalendarType, DegreeParts, DeltaT, EphemerisSource, Epsilon, FictitiousId,
+    FrameTransform, HouseSystem, JdTt, JdUt1, Nutation, PlanetMoonId, PrecessionDirection,
+    SiderealMode, UtcComponents, UtcToJd,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;

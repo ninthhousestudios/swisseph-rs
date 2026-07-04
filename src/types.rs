@@ -57,23 +57,6 @@ impl PlanetMoonId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CometId(i32);
-
-impl CometId {
-    pub fn new(number: i32) -> crate::Result<Self> {
-        if (0..=7999).contains(&number) {
-            Ok(Self(number))
-        } else {
-            Err(crate::Error::InvalidBody(number))
-        }
-    }
-
-    pub fn number(self) -> i32 {
-        self.0
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Body
 // ---------------------------------------------------------------------------
@@ -106,7 +89,6 @@ pub enum Body {
     Fictitious(FictitiousId),
     Asteroid(AsteroidId),
     PlanetMoon(PlanetMoonId),
-    Comet(CometId),
     EclipticNutation,
 }
 
@@ -121,10 +103,6 @@ impl Body {
 
     pub fn planet_moon(encoded: i32) -> crate::Result<Self> {
         Ok(Self::PlanetMoon(PlanetMoonId::new(encoded)?))
-    }
-
-    pub fn comet(number: i32) -> crate::Result<Self> {
-        Ok(Self::Comet(CometId::new(number)?))
     }
 
     pub fn to_raw_id(self) -> i32 {
@@ -155,7 +133,6 @@ impl Body {
             Self::Fictitious(id) => id.raw_id(),
             Self::Asteroid(id) => constants::AST_OFFSET + id.mpc_number(),
             Self::PlanetMoon(id) => constants::PLMOON_OFFSET + id.encoded(),
-            Self::Comet(id) => constants::COMET_OFFSET + id.number(),
             Self::EclipticNutation => -1,
         }
     }
@@ -191,7 +168,6 @@ impl TryFrom<i32> for Body {
             21 => Ok(Self::IntpApogee),
             22 => Ok(Self::IntpPerigee),
             40..=999 => Ok(Self::Fictitious(FictitiousId(v))),
-            1000..=8999 => Ok(Self::Comet(CometId(v - constants::COMET_OFFSET))),
             9000..=9999 => Ok(Self::PlanetMoon(PlanetMoonId(v - constants::PLMOON_OFFSET))),
             n if n >= constants::AST_OFFSET => {
                 Ok(Self::Asteroid(AsteroidId(n - constants::AST_OFFSET)))
@@ -849,14 +825,6 @@ mod tests {
     }
 
     #[test]
-    fn comet_id_valid_range() {
-        assert!(CometId::new(0).is_ok());
-        assert!(CometId::new(7999).is_ok());
-        assert!(CometId::new(8000).is_err());
-        assert!(CometId::new(-1).is_err());
-    }
-
-    #[test]
     fn body_constructors_validate() {
         assert!(Body::fictitious(40).is_ok());
         assert!(Body::fictitious(23).is_err());
@@ -864,8 +832,6 @@ mod tests {
         assert!(Body::asteroid(-10000).is_err());
         assert!(Body::planet_moon(0).is_ok());
         assert!(Body::planet_moon(1000).is_err());
-        assert!(Body::comet(0).is_ok());
-        assert!(Body::comet(8000).is_err());
     }
 
     #[test]
@@ -881,9 +847,7 @@ mod tests {
 
     #[test]
     fn body_try_from_roundtrip() {
-        for raw in [
-            40, 58, 500, 999, 1000, 5000, 8999, 9000, 9500, 9999, 10000, 20000,
-        ] {
+        for raw in [40, 58, 500, 999, 9000, 9500, 9999, 10000, 20000] {
             let body = Body::try_from(raw).unwrap();
             assert_eq!(body.to_raw_id(), raw);
         }
@@ -894,5 +858,12 @@ mod tests {
         for raw in [23, 24, 30, 39] {
             assert!(Body::try_from(raw).is_err());
         }
+    }
+
+    #[test]
+    fn body_try_from_comet_range_rejected() {
+        assert!(Body::try_from(1000).is_err());
+        assert!(Body::try_from(5000).is_err());
+        assert!(Body::try_from(8999).is_err());
     }
 }
