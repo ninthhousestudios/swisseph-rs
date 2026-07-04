@@ -25,7 +25,7 @@ static double epss[] = { 23.4392911 };
 static char equal_family_systems[] = { 'A', 'D', 'N', 'V', 'W' };
 #define N_EQUAL_FAMILY (sizeof(equal_family_systems) / sizeof(equal_family_systems[0]))
 
-static char quad_arith_systems[] = { 'O', 'S', 'X', 'M', 'F' };
+static char quad_arith_systems[] = { 'O', 'S', 'X', 'M', 'F', 'B' };
 #define N_QUAD_ARITH (sizeof(quad_arith_systems) / sizeof(quad_arith_systems[0]))
 
 static char great_circle_systems[] = { 'R', 'C', 'T', 'H', 'J' };

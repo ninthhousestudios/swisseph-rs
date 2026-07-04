@@ -393,10 +393,9 @@ is a no-op pass-through when speeds weren't requested at all.
 
 **(e) NEITHER analytical NOR finite-difference — left at zero (or stale pre-switch value)** —
 this is a genuine quirk of the C source that golden tests must replicate bit-exactly:
-- `'B'` (Alcabitius): the case body never touches `cusp_speed` and never sets `do_interpol`.
-  Result: `cusp_speed[1]=ac_speed`, `cusp_speed[10]=mc_speed` (pre-switch defaults, untouched),
-  mirrored by the post-switch block into `cusp_speed[4]=mc_speed`, `cusp_speed[7]=ac_speed`;
-  **`cusp_speed[2,3,5,6,8,9,11,12] = 0`** always.
+- `'B'` (Alcabitius): the case body never touches `cusp_speed` analytically but DOES set
+  `do_interpol = do_hspeed` (swehouse.c:1621), so cusp speeds are computed via the
+  driver-level finite-difference path when speeds are requested.
 - `'N'` (Equal/1=Aries) and `'W'` (Whole Sign): neither sets `cusp_speed` nor `do_interpol`,
   even though `cusp[1]` (and for `'N'`, every cusp) is reassigned to a value unrelated to `ac`.
   Result: `cusp_speed[1]=ac_speed` (stale — semantically wrong, since whole-sign cusps are a step

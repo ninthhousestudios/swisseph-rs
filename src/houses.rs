@@ -810,6 +810,24 @@ fn calc_h(
             cusps[12] = normalize_degrees(mc + s4 * 1.5);
             do_interpol = do_speed;
         }
+        HouseSystem::Alcabitius => {
+            // B — Alcabitius semiarc (swehouse.c:1581-1622)
+            if diff_degrees(ac, mc) < 0.0 {
+                ac = normalize_degrees(ac + 180.0);
+                cusps[1] = ac;
+            }
+            let dek = asind(sind(ac) * sine);
+            let r = (-tanfi * tand(dek)).clamp(-1.0, 1.0);
+            let sda = acosd(r);
+            let sna = 180.0 - sda;
+            let sd3 = sda / 3.0;
+            let sn3 = sna / 3.0;
+            cusps[11] = asc1(normalize_degrees(th + sd3), 0.0, sine, cose);
+            cusps[12] = asc1(normalize_degrees(th + 2.0 * sd3), 0.0, sine, cose);
+            cusps[2] = asc1(normalize_degrees(th + 180.0 - 2.0 * sn3), 0.0, sine, cose);
+            cusps[3] = asc1(normalize_degrees(th + 180.0 - sn3), 0.0, sine, cose);
+            do_interpol = do_speed;
+        }
         HouseSystem::Meridian => {
             // X — Meridian / axial rotation (swehouse.c:1485-1516)
             let mut a = th;
@@ -1392,11 +1410,6 @@ fn calc_h(
                     do_speed,
                 );
             }
-        }
-        _ => {
-            return Err(Error::CError(format!(
-                "house system {hsys:?} not yet implemented"
-            )));
         }
     }
 

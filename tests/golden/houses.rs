@@ -223,8 +223,8 @@ fn quad_arith() {
     let data = load();
     assert_eq!(
         data.quad_arith.len(),
-        150,
-        "expected 150 golden cases (5 systems x 6 armc x 5 geolat x 1 eps)"
+        180,
+        "expected 180 golden cases (6 systems x 6 armc x 5 geolat x 1 eps)"
     );
     for (i, c) in data.quad_arith.iter().enumerate() {
         let hsys = parse_hsys(&c.hsys);
@@ -232,7 +232,7 @@ fn quad_arith() {
             .unwrap_or_else(|e| panic!("case {i} ({}): houses_armc failed: {e}", c.hsys));
 
         // Porphyry cusp speeds are analytical (linear quadrant-rate interpolation);
-        // S/X/M/F use the driver-level finite-difference path, which is not
+        // S/X/M/F/B use the driver-level finite-difference path, which is not
         // bitwise-exact against C's central difference.
         let speed_eps = if c.hsys == "O" { 1e-9 } else { 1e-7 };
 

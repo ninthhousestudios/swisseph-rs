@@ -157,7 +157,6 @@ Every method carries a `#[doc(alias = "swe_...")]` attribute, so
 | `swe_get_current_file_data` | Stateful / not applicable to this design |
 | `swe_get_library_path` | Stateful / not applicable |
 | `swe_fixstar` (v1 API) | Deprecated upstream; v2 (`fixstar2`) is ported |
-| Alcabitius house system (`calc_h`) | `house_pos` branch implemented; cusp computation pending |
 
 ## Examples
 
