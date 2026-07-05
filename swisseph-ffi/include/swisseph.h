@@ -934,8 +934,8 @@ int32_t swisseph_lun_occult_when_loc(const SweEphemeris *handle,
 //
 // # Parameters
 // - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 readable `f64` values
-// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 readable `f64` values
-// - `dobs`: `[age, Snellen_ratio, optic_type (0=eye/1=bino/2=tele), aperture, magnification, 0]` — 6 readable `f64` values
+// - `datm`: `[pressure (hPa), temperature (°C), rel. humidity (%), extinction_coeff]` — 4 readable `f64` values
+// - `dobs`: `[age, Snellen_ratio, optic_type (0=eye/1=bino/2=tele), magnification, aperture_mm, transmission]` — 6 readable `f64` values
 // - `object_name`: NUL-terminated UTF-8 (planet name or star designation)
 // - `event_type`: `HeliacalEventType` (1=MorningFirst, 2=EveningLast, 3=EveningFirst,
 //   4=MorningLast, 5=AcronymchalRising, 6=AcronymchalSetting)
@@ -969,8 +969,8 @@ int32_t swisseph_heliacal_ut(const SweEphemeris *handle,
 //
 // # Parameters
 // - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
-// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
-// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), rel. humidity (%), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, magnification, aperture_mm, transmission]` — 6 `f64`
 // - `object_name`: NUL-terminated UTF-8
 // - `event_type`: `HeliacalEventType` (1–6)
 // - `helflag`: combined ephemeris-source + heliacal flags
@@ -1011,8 +1011,8 @@ int32_t swisseph_heliacal_pheno_ut(const SweEphemeris *handle,
 //
 // # Parameters
 // - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
-// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
-// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), rel. humidity (%), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, magnification, aperture_mm, transmission]` — 6 `f64`
 // - `object_name`: NUL-terminated UTF-8
 // - `helflag`: combined ephemeris-source + heliacal flags
 // - `dret`: out-param, pointer to 8 `f64` slots:
@@ -1020,8 +1020,9 @@ int32_t swisseph_heliacal_pheno_ut(const SweEphemeris *handle,
 //   `[3]`=altitude_sun, `[4]`=azimuth_sun, `[5]`=altitude_moon,
 //   `[6]`=azimuth_moon, `[7]`=magnitude_object.
 //
-// Returns the vision-mode flags (positive: 0=photopic, 1=scotopic, 2=mixed) on success,
-// negative error code on failure — mirroring C's return convention.
+// Returns the vision-mode flags (non-negative: 0=photopic, 1=scotopic, 2=mixed) on success,
+// `-2` when the object is below the horizon (`dret[0]` = −100), or a negative error code
+// on failure — mirroring C's `swe_vis_limit_mag` return convention.
 //
 // # Safety
 // - `handle` must be valid, non-NULL.
@@ -1045,8 +1046,8 @@ int32_t swisseph_vis_limit_mag(const SweEphemeris *handle,
 //
 // # Parameters
 // - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
-// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
-// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), rel. humidity (%), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, magnification, aperture_mm, transmission]` — 6 `f64`
 // - `helflag`: combined ephemeris-source + heliacal flags
 // - `mag`: object's visual magnitude
 // - `azi_obj`: object's azimuth (degrees)
@@ -1085,8 +1086,8 @@ int32_t swisseph_heliacal_angle(const SweEphemeris *handle,
 //
 // # Parameters
 // - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
-// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
-// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), rel. humidity (%), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, magnification, aperture_mm, transmission]` — 6 `f64`
 // - `helflag`: combined ephemeris-source + heliacal flags
 // - `mag`: object's visual magnitude
 // - `azi_obj`: object's azimuth (degrees)

@@ -42,11 +42,11 @@ fn assert_eps(a: f64, b: f64, eps: f64, label: &str) {
 #[test]
 fn vis_limit_mag_venus() {
     let eph = make_eph();
-    let tjd_ut = 2452275.5;
+    let tjd_ut = 2453371.0; // Venus above horizon at this epoch
     let dgeo = [31.25, 30.1, 30.0];
     let mut datm = [1013.25, 15.0, 40.0, 40.0];
     let mut dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
-    let epheflag = CalcFlags::empty();
+    let epheflag = CalcFlags::MOSEPH;
     let helflag = HeliacalFlags::empty();
 
     let lib_result = eph
@@ -100,6 +100,38 @@ fn vis_limit_mag_venus() {
         1e-15,
         "magnitude_object",
     );
+
+    unsafe { swisseph_ffi::swisseph_free(handle) };
+}
+
+#[test]
+fn vis_limit_mag_below_horizon() {
+    let handle = unsafe { default_handle() };
+    let dgeo = [31.25, 30.1, 30.0];
+    let datm = [1013.25, 15.0, 40.0, 40.0];
+    let dobs = [36.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    let name = CString::new("venus").unwrap();
+    let mut dret = [0.0f64; 8];
+    let mut err_buf = [0u8; 256];
+
+    // 2453371.5 — Venus below horizon at this epoch per golden data (C retval=-2)
+    let ret = unsafe {
+        swisseph_ffi::heliacal::swisseph_vis_limit_mag(
+            handle,
+            2453371.5,
+            dgeo.as_ptr(),
+            datm.as_ptr(),
+            dobs.as_ptr(),
+            name.as_ptr(),
+            0,
+            dret.as_mut_ptr(),
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        )
+    };
+
+    assert_eq!(ret, -2, "below-horizon should return -2, got {ret}");
+    assert_eq!(dret[0], -100.0, "limiting_magnitude sentinel");
 
     unsafe { swisseph_ffi::swisseph_free(handle) };
 }
