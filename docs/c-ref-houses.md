@@ -365,8 +365,9 @@ cusp_speed[12] = ac_speed + q1_speed / 3 * 2;
 
 **(d) Finite-difference (central difference at the `swe_houses_armc_ex2` driver level)** — the
 house system sets `hsp->do_interpol = hsp->do_hspeed;` inside its `switch` case (NOT inside
-`CalcH`'s shared code) for: `'I'`/`'i'` (Sunshine, both), `'L'` (Pullen SD), `'Q'` (Pullen SR),
-`'S'` (Sripati), `'X'` (Meridian), `'M'` (Morinus), `'F'` (Carter), `'Y'` (APC). For these,
+`CalcH`'s shared code) for: `'B'` (Alcabitius), `'I'`/`'i'` (Sunshine, both), `'L'` (Pullen SD),
+`'Q'` (Pullen SR), `'S'` (Sripati), `'X'` (Meridian), `'M'` (Morinus), `'F'` (Carter), `'Y'`
+(APC). For these,
 `CalcH` itself does NOT compute `cusp_speed` (leaves it zeroed); instead `swe_houses_armc_ex2`
 (swehouse.c:697–723), after seeing `h.do_interpol == TRUE`, makes **two additional full `CalcH`
 calls**:
@@ -393,9 +394,6 @@ is a no-op pass-through when speeds weren't requested at all.
 
 **(e) NEITHER analytical NOR finite-difference — left at zero (or stale pre-switch value)** —
 this is a genuine quirk of the C source that golden tests must replicate bit-exactly:
-- `'B'` (Alcabitius): the case body never touches `cusp_speed` analytically but DOES set
-  `do_interpol = do_hspeed` (swehouse.c:1621), so cusp speeds are computed via the
-  driver-level finite-difference path when speeds are requested.
 - `'N'` (Equal/1=Aries) and `'W'` (Whole Sign): neither sets `cusp_speed` nor `do_interpol`,
   even though `cusp[1]` (and for `'N'`, every cusp) is reassigned to a value unrelated to `ac`.
   Result: `cusp_speed[1]=ac_speed` (stale — semantically wrong, since whole-sign cusps are a step
@@ -717,7 +715,7 @@ cusp[11] = Asc1(degnorm(th + sd3),       0, sine, cose)
 cusp[12] = Asc1(degnorm(th + 2*sd3),     0, sine, cose)
 cusp[2]  = Asc1(degnorm(th + 180 - 2*sn3), 0, sine, cose)
 cusp[3]  = Asc1(degnorm(th + 180 - sn3),   0, sine, cose)
-do_interpol — NOT set; cusp_speed left untouched — see §4.2(e)
+do_interpol = do_hspeed (swehouse.c:1621) — cusp speeds via driver finite-difference
 ```
 Pole height is always **0** here — the RA offsets are projected onto the ecliptic along the
 declination circle, not a latitude-dependent great circle.

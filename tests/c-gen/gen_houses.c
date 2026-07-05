@@ -204,6 +204,45 @@ int main(void) {
             }
         }
     }
+    /* Alcabitius near-polar supplement: exercise the r-clamp boundary (|r| → 1). */
+    {
+        double polar_lats[] = { 78.0, -78.0 };
+        int np = sizeof(polar_lats) / sizeof(polar_lats[0]);
+        int ip;
+        for (ia = 0; ia < N_ARMC; ia++) {
+            for (ip = 0; ip < np; ip++) {
+                for (ie = 0; ie < N_EPS; ie++) {
+                    double armc = armcs[ia];
+                    double geolat = polar_lats[ip];
+                    double eps = epss[ie];
+                    int retc, i;
+
+                    memset(cusp, 0, sizeof(cusp));
+                    memset(cusp_speed, 0, sizeof(cusp_speed));
+                    memset(ascmc, 0, sizeof(ascmc));
+                    memset(ascmc_speed, 0, sizeof(ascmc_speed));
+                    serr[0] = '\0';
+
+                    retc = swe_houses_armc_ex2(armc, geolat, eps, 'B', cusp, ascmc,
+                                                cusp_speed, ascmc_speed, serr);
+                    (void)retc;
+
+                    if (!first) printf(",\n");
+                    first = 0;
+                    printf("    {\"hsys\": \"B\", \"armc\": %.20e, \"geolat\": %.20e, \"eps\": %.20e, "
+                           "\"cusps\": [", armc, geolat, eps);
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp[i], (i < 12) ? ", " : "");
+                    }
+                    printf("], \"cusp_speed\": [");
+                    for (i = 1; i <= 12; i++) {
+                        printf("%.20e%s", cusp_speed[i], (i < 12) ? ", " : "");
+                    }
+                    printf("]}");
+                }
+            }
+        }
+    }
     printf("\n  ],\n");
 
     /* --- great_circle: cusps[1..12] + speeds for R/C/T/H/J --- */

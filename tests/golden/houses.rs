@@ -223,8 +223,8 @@ fn quad_arith() {
     let data = load();
     assert_eq!(
         data.quad_arith.len(),
-        180,
-        "expected 180 golden cases (6 systems x 6 armc x 5 geolat x 1 eps)"
+        192,
+        "expected 192 golden cases (6 systems x 6 armc x 5 geolat + 12 Alcabitius near-polar)"
     );
     for (i, c) in data.quad_arith.iter().enumerate() {
         let hsys = parse_hsys(&c.hsys);
