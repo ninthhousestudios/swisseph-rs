@@ -930,6 +930,196 @@ int32_t swisseph_lun_occult_when_loc(const SweEphemeris *handle,
                                      char *err_buf,
                                      uintptr_t err_cap);
 
+// Find the next heliacal event for `object_name` after `tjd_start` (UT1).
+//
+// # Parameters
+// - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 readable `f64` values
+// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 readable `f64` values
+// - `dobs`: `[age, Snellen_ratio, optic_type (0=eye/1=bino/2=tele), aperture, magnification, 0]` — 6 readable `f64` values
+// - `object_name`: NUL-terminated UTF-8 (planet name or star designation)
+// - `event_type`: `HeliacalEventType` (1=MorningFirst, 2=EveningLast, 3=EveningFirst,
+//   4=MorningLast, 5=AcronymchalRising, 6=AcronymchalSetting)
+// - `helflag`: combined flag: bits 0–2 = ephemeris source (1=JPL, 2=Swiss, 4=Moshier),
+//   bits 7+ = `SE_HELFLAG_*` heliacal flags
+// - `dret`: out-param, pointer to 50 `f64` slots. `dret[0]`=start_visible,
+//   `dret[1]`=optimum_visibility, `dret[2]`=end_visible, `dret[3..49]`=0.
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `dgeo` must point to 3 readable `f64` values.
+// - `datm` must point to 4 readable `f64` values.
+// - `dobs` must point to 6 readable `f64` values.
+// - `object_name` must be a valid NUL-terminated UTF-8 string.
+// - `dret` must point to at least 50 writable `f64` slots.
+int32_t swisseph_heliacal_ut(const SweEphemeris *handle,
+                             double tjd_start,
+                             const double *dgeo,
+                             const double *datm,
+                             const double *dobs,
+                             const char *object_name,
+                             int32_t event_type,
+                             int32_t helflag,
+                             double *dret,
+                             char *err_buf,
+                             uintptr_t err_cap);
+
+// Detailed heliacal-phenomena report at `tjd_ut` (UT1).
+//
+// # Parameters
+// - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `object_name`: NUL-terminated UTF-8
+// - `event_type`: `HeliacalEventType` (1–6)
+// - `helflag`: combined ephemeris-source + heliacal flags
+// - `darr`: out-param, pointer to 50 `f64` slots. `darr[0..27]` receive the 28
+//   `HeliacalPheno` fields in C's `dret[]` slot order:
+//   `[0]`=topo_altitude, `[1]`=topo_apparent_altitude, `[2]`=geo_altitude,
+//   `[3]`=azimuth_object, `[4]`=topo_sun_altitude, `[5]`=sun_azimuth,
+//   `[6]`=TAV_actual, `[7]`=arcv_actual, `[8]`=DAZ_actual, `[9]`=arcl_actual,
+//   `[10]`=extinction_coeff, `[11]`=min_TAV, `[12]`=t_first_visible,
+//   `[13]`=t_best_visible, `[14]`=t_last_visible, `[15]`=t_best_yallop,
+//   `[16]`=crescent_width, `[17]`=q_yallop, `[18]`=q_criterion,
+//   `[19]`=parallax, `[20]`=magnitude, `[21]`=rise_object, `[22]`=rise_sun,
+//   `[23]`=lag, `[24]`=visibility_duration, `[25]`=crescent_length,
+//   `[26]`=elongation, `[27]`=illumination. `darr[28..49]`=0.
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `dgeo` must point to 3 readable `f64` values.
+// - `datm` must point to 4 readable `f64` values.
+// - `dobs` must point to 6 readable `f64` values.
+// - `object_name` must be a valid NUL-terminated UTF-8 string.
+// - `darr` must point to at least 50 writable `f64` slots.
+int32_t swisseph_heliacal_pheno_ut(const SweEphemeris *handle,
+                                   double tjd_ut,
+                                   const double *dgeo,
+                                   const double *datm,
+                                   const double *dobs,
+                                   const char *object_name,
+                                   int32_t event_type,
+                                   int32_t helflag,
+                                   double *darr,
+                                   char *err_buf,
+                                   uintptr_t err_cap);
+
+// Visual limiting magnitude at `tjd_ut` (UT1).
+//
+// # Parameters
+// - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `object_name`: NUL-terminated UTF-8
+// - `helflag`: combined ephemeris-source + heliacal flags
+// - `dret`: out-param, pointer to 8 `f64` slots:
+//   `[0]`=limiting_magnitude, `[1]`=altitude_object, `[2]`=azimuth_object,
+//   `[3]`=altitude_sun, `[4]`=azimuth_sun, `[5]`=altitude_moon,
+//   `[6]`=azimuth_moon, `[7]`=magnitude_object.
+//
+// Returns the vision-mode flags (positive: 0=photopic, 1=scotopic, 2=mixed) on success,
+// negative error code on failure — mirroring C's return convention.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `dgeo` must point to 3 readable `f64` values.
+// - `datm` must point to 4 readable `f64` values.
+// - `dobs` must point to 6 readable `f64` values.
+// - `object_name` must be a valid NUL-terminated UTF-8 string.
+// - `dret` must point to at least 8 writable `f64` slots.
+int32_t swisseph_vis_limit_mag(const SweEphemeris *handle,
+                               double tjd_ut,
+                               const double *dgeo,
+                               const double *datm,
+                               const double *dobs,
+                               const char *object_name,
+                               int32_t helflag,
+                               double *dret,
+                               char *err_buf,
+                               uintptr_t err_cap);
+
+// Heliacal angle (optimal altitude / arcus visionis) at `tjd_ut` (UT1).
+//
+// # Parameters
+// - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `helflag`: combined ephemeris-source + heliacal flags
+// - `mag`: object's visual magnitude
+// - `azi_obj`: object's azimuth (degrees)
+// - `azi_sun`: Sun's azimuth (degrees)
+// - `azi_moon`: Moon's azimuth (degrees)
+// - `alt_moon`: Moon's altitude (degrees)
+// - `dret`: out-param, pointer to 3 `f64` slots:
+//   `[0]`=optimal_altitude, `[1]`=arcus_visionis, `[2]`=sun_altitude_diff.
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `dgeo` must point to 3 readable `f64` values.
+// - `datm` must point to 4 readable `f64` values.
+// - `dobs` must point to 6 readable `f64` values.
+// - `dret` must point to at least 3 writable `f64` slots.
+int32_t swisseph_heliacal_angle(const SweEphemeris *handle,
+                                double tjd_ut,
+                                const double *dgeo,
+                                const double *datm,
+                                const double *dobs,
+                                int32_t helflag,
+                                double mag,
+                                double azi_obj,
+                                double azi_sun,
+                                double azi_moon,
+                                double alt_moon,
+                                double *dret,
+                                char *err_buf,
+                                uintptr_t err_cap);
+
+// Topocentric arcus visionis at `tjd_ut` (UT1), degrees.
+//
+// All geometry is caller-supplied. Angles in degrees.
+//
+// # Parameters
+// - `dgeo`: `[longitude (°E+), latitude (°N+), altitude (m)]` — 3 `f64`
+// - `datm`: `[pressure (hPa), temperature (°C), humidity (0–1), extinction_coeff]` — 4 `f64`
+// - `dobs`: `[age, Snellen, optic_type, aperture, magnification, 0]` — 6 `f64`
+// - `helflag`: combined ephemeris-source + heliacal flags
+// - `mag`: object's visual magnitude
+// - `azi_obj`: object's azimuth (degrees)
+// - `alt_obj`: object's altitude (degrees)
+// - `azi_sun`: Sun's azimuth (degrees)
+// - `azi_moon`: Moon's azimuth (degrees)
+// - `alt_moon`: Moon's altitude (degrees)
+// - `dret`: out-param, pointer to a writable `f64` receiving the arcus visionis (degrees)
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `dgeo` must point to 3 readable `f64` values.
+// - `datm` must point to 4 readable `f64` values.
+// - `dobs` must point to 6 readable `f64` values.
+// - `dret` must point to a writable `f64`.
+int32_t swisseph_topo_arcus_visionis(const SweEphemeris *handle,
+                                     double tjd_ut,
+                                     const double *dgeo,
+                                     const double *datm,
+                                     const double *dobs,
+                                     int32_t helflag,
+                                     double mag,
+                                     double azi_obj,
+                                     double alt_obj,
+                                     double azi_sun,
+                                     double azi_moon,
+                                     double alt_moon,
+                                     double *dret,
+                                     char *err_buf,
+                                     uintptr_t err_cap);
+
 // Compute tropical house cusps and angular points at `tjd_ut` (UT1).
 //
 // # Parameters

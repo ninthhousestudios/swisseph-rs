@@ -2,6 +2,7 @@ pub mod config;
 pub mod date;
 pub mod eclipse;
 pub mod error;
+pub mod heliacal;
 pub mod houses;
 pub mod pheno;
 pub mod util;
