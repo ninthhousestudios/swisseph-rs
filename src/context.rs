@@ -3189,6 +3189,117 @@ impl Ephemeris {
     }
 
     // -----------------------------------------------------------------------
+    // Ephemeris file introspection (stateless swe_get_current_file_data)
+    // -----------------------------------------------------------------------
+
+    /// Return metadata about the ephemeris file that would serve a calculation at
+    /// the given Julian Day for the specified file kind.
+    ///
+    /// This is the stateless equivalent of C's `swe_get_current_file_data(ifno)`.
+    /// C reports whichever file was used by the *last* `swe_calc` call (global
+    /// state). Here, `jd` selects the file explicitly — the same selection logic
+    /// that `calc` uses internally.
+    ///
+    /// Returns `None` when:
+    /// - The ephemeris source is Moshier (no files)
+    /// - No file covers the given `jd`
+    /// - `kind` is `Asteroid` or `PlanetMoon` (stateless: no "last-used" concept)
+    #[doc(alias = "swe_get_current_file_data")]
+    pub fn file_data(
+        &self,
+        kind: crate::types::FileDataKind,
+        jd: f64,
+    ) -> Option<crate::types::FileData> {
+        use crate::types::FileDataKind;
+
+        match kind {
+            FileDataKind::Planet => self.file_data_planet(jd),
+            FileDataKind::Moon => self.file_data_sweph(&self.sweph_moon_files(), jd),
+            FileDataKind::MainAsteroid => {
+                self.file_data_sweph(&self.sweph_main_asteroid_files(), jd)
+            }
+            FileDataKind::Asteroid | FileDataKind::PlanetMoon => None,
+        }
+    }
+
+    fn file_data_planet(&self, jd: f64) -> Option<crate::types::FileData> {
+        #[cfg(feature = "jpl")]
+        if self.config.ephemeris_source == EphemerisSource::Jpl {
+            if let Some(ref jf) = self.jpl_file {
+                let h = jf.header();
+                if jd >= h.ss[0] && jd <= h.ss[1] {
+                    return Some(crate::types::FileData {
+                        path: jf.path().to_path_buf(),
+                        start_jd: h.ss[0],
+                        end_jd: h.ss[1],
+                        denum: h.denum,
+                    });
+                }
+            }
+        }
+        self.file_data_sweph(&self.sweph_planet_files(), jd)
+    }
+
+    #[cfg(feature = "swisseph-files")]
+    fn file_data_sweph(
+        &self,
+        files: &[crate::sweph_file::SwissEphFile],
+        jd: f64,
+    ) -> Option<crate::types::FileData> {
+        files
+            .iter()
+            .rev()
+            .find(|f| {
+                let (start, end) = f.header().time_range;
+                start <= jd && jd <= end
+            })
+            .map(|f| {
+                let h = f.header();
+                crate::types::FileData {
+                    path: f.path().to_path_buf(),
+                    start_jd: h.time_range.0,
+                    end_jd: h.time_range.1,
+                    denum: h.denum,
+                }
+            })
+    }
+
+    #[cfg(not(feature = "swisseph-files"))]
+    fn file_data_sweph(&self, _files: &[()], _jd: f64) -> Option<crate::types::FileData> {
+        None
+    }
+
+    #[cfg(feature = "swisseph-files")]
+    fn sweph_planet_files(&self) -> &[crate::sweph_file::SwissEphFile] {
+        &self.planet_files
+    }
+
+    #[cfg(not(feature = "swisseph-files"))]
+    fn sweph_planet_files(&self) -> &[()] {
+        &[]
+    }
+
+    #[cfg(feature = "swisseph-files")]
+    fn sweph_moon_files(&self) -> &[crate::sweph_file::SwissEphFile] {
+        &self.moon_files
+    }
+
+    #[cfg(not(feature = "swisseph-files"))]
+    fn sweph_moon_files(&self) -> &[()] {
+        &[]
+    }
+
+    #[cfg(feature = "swisseph-files")]
+    fn sweph_main_asteroid_files(&self) -> &[crate::sweph_file::SwissEphFile] {
+        &self.main_asteroid_files
+    }
+
+    #[cfg(not(feature = "swisseph-files"))]
+    fn sweph_main_asteroid_files(&self) -> &[()] {
+        &[]
+    }
+
+    // -----------------------------------------------------------------------
     // Body name lookup (sweph.c:6946–7125)
     // -----------------------------------------------------------------------
 

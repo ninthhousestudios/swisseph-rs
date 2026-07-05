@@ -332,3 +332,97 @@ fn get_astro_models() {
         swisseph_ffi::swisseph_free(handle);
     }
 }
+
+#[test]
+fn get_file_data_moshier_returns_error() {
+    unsafe {
+        let config = default_config();
+        let mut handle: *mut SweEphemeris = ptr::null_mut();
+        let mut err_buf = [0u8; 256];
+        swisseph_ffi::swisseph_new(
+            &config,
+            &mut handle,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        );
+
+        let mut path_buf = [0u8; 256];
+        let mut tfstart = 0.0f64;
+        let mut tfend = 0.0f64;
+        let mut denum = 0i32;
+        let ret = swisseph_ffi::swisseph_get_file_data(
+            handle,
+            0, // Planet
+            2451545.0,
+            path_buf.as_mut_ptr() as *mut c_char,
+            path_buf.len(),
+            &mut tfstart,
+            &mut tfend,
+            &mut denum,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        );
+        assert_eq!(ret, SweErrorCode::EphemerisNotAvailable as i32);
+
+        swisseph_ffi::swisseph_free(handle);
+    }
+}
+
+#[test]
+fn get_file_data_invalid_ifno() {
+    unsafe {
+        let config = default_config();
+        let mut handle: *mut SweEphemeris = ptr::null_mut();
+        let mut err_buf = [0u8; 256];
+        swisseph_ffi::swisseph_new(
+            &config,
+            &mut handle,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        );
+
+        let mut path_buf = [0u8; 256];
+        let mut tfstart = 0.0f64;
+        let mut tfend = 0.0f64;
+        let mut denum = 0i32;
+        let ret = swisseph_ffi::swisseph_get_file_data(
+            handle,
+            99, // invalid ifno
+            2451545.0,
+            path_buf.as_mut_ptr() as *mut c_char,
+            path_buf.len(),
+            &mut tfstart,
+            &mut tfend,
+            &mut denum,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        );
+        assert_eq!(ret, SweErrorCode::InvalidArg as i32);
+
+        swisseph_ffi::swisseph_free(handle);
+    }
+}
+
+#[test]
+fn get_file_data_null_handle() {
+    unsafe {
+        let mut err_buf = [0u8; 256];
+        let mut path_buf = [0u8; 256];
+        let mut tfstart = 0.0f64;
+        let mut tfend = 0.0f64;
+        let mut denum = 0i32;
+        let ret = swisseph_ffi::swisseph_get_file_data(
+            ptr::null(),
+            0,
+            2451545.0,
+            path_buf.as_mut_ptr() as *mut c_char,
+            path_buf.len(),
+            &mut tfstart,
+            &mut tfend,
+            &mut denum,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        );
+        assert_eq!(ret, SweErrorCode::InvalidArg as i32);
+    }
+}

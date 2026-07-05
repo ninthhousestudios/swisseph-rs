@@ -219,6 +219,90 @@ fn astro_models_to_i32s(m: &swisseph::AstroModels) -> [i32; 8] {
 }
 
 // ---------------------------------------------------------------------------
+// File data introspection (stateless swe_get_current_file_data)
+// ---------------------------------------------------------------------------
+
+/// Query which ephemeris file would serve a calculation at `jd` for the given
+/// file category `ifno`.
+///
+/// This is the stateless equivalent of C's `swe_get_current_file_data(ifno)`.
+/// Instead of reporting the file used by the last `swe_calc` call, the caller
+/// provides `jd` to select the file explicitly.
+///
+/// `ifno` values (mirrors C):
+/// - 0 = planet (`sepl*.se1` or JPL `.eph`)
+/// - 1 = moon (`semo*.se1`)
+/// - 2 = main asteroid (`seas*.se1`)
+/// - 3 = individual asteroid (always returns "no data" — stateless, no "last used")
+/// - 4 = planet moon (always returns "no data" — stateless, no "last used")
+///
+/// Returns 0 on success, negative error code on failure. Returns
+/// `EphemerisNotAvailable` when no file covers the given `jd` (including
+/// Moshier-only configs which have no files).
+///
+/// # Safety
+/// - `handle` must be a valid, non-NULL handle from `swisseph_new`.
+/// - `path_buf`, if non-NULL, must point to at least `path_cap` writable bytes.
+/// - `tfstart`, `tfend`, `denum` must each point to a writable slot (or be NULL).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn swisseph_get_file_data(
+    handle: *const SweEphemeris,
+    ifno: i32,
+    jd: f64,
+    path_buf: *mut c_char,
+    path_cap: usize,
+    tfstart: *mut f64,
+    tfend: *mut f64,
+    denum: *mut i32,
+    err_buf: *mut c_char,
+    err_cap: usize,
+) -> i32 {
+    ffi_guard!(err_buf, err_cap, {
+        if handle.is_null() {
+            unsafe { write_err(err_buf, err_cap, "null pointer argument") };
+            return SweErrorCode::InvalidArg as i32;
+        }
+
+        let eph = unsafe { &(*handle).0 };
+        let kind = match swisseph::FileDataKind::try_from(ifno) {
+            Ok(k) => k,
+            Err(_) => {
+                let msg = format!("invalid ifno: {ifno}");
+                unsafe { write_err(err_buf, err_cap, &msg) };
+                return SweErrorCode::InvalidArg as i32;
+            }
+        };
+
+        match eph.file_data(kind, jd) {
+            Some(fd) => unsafe {
+                let path_str = fd.path.to_string_lossy();
+                write_err(path_buf, path_cap, &path_str);
+                if !tfstart.is_null() {
+                    *tfstart = fd.start_jd;
+                }
+                if !tfend.is_null() {
+                    *tfend = fd.end_jd;
+                }
+                if !denum.is_null() {
+                    *denum = fd.denum;
+                }
+                SweErrorCode::Ok as i32
+            },
+            None => {
+                unsafe {
+                    write_err(
+                        err_buf,
+                        err_cap,
+                        "no file data available for the given ifno/jd",
+                    )
+                };
+                SweErrorCode::EphemerisNotAvailable as i32
+            }
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
 // calc / calc_ut
 // ---------------------------------------------------------------------------
 

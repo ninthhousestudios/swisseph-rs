@@ -48,6 +48,7 @@ pub const J_LIB: i32 = 14;
 
 /// A memory-mapped, parsed JPL DE ephemeris file.
 pub struct JplFile {
+    path: std::path::PathBuf,
     mmap: Mmap,
     header: JplHeader,
 }
@@ -64,7 +65,16 @@ impl JplFile {
             .map_err(|e| Error::FileFormat(format!("mmap failed: {e}")))?;
         let header = header::parse_header(&mmap)?;
         header::validate_file_length(&mmap, &header)?;
-        Ok(Self { mmap, header })
+        Ok(Self {
+            path: path.to_path_buf(),
+            mmap,
+            header,
+        })
+    }
+
+    /// Return the file path this file was opened from.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Return the parsed file header.

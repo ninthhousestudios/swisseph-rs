@@ -164,6 +164,39 @@ int32_t swisseph_get_astro_models(const SweEphemeris *handle,
                                   char *err_buf,
                                   uintptr_t err_cap);
 
+// Query which ephemeris file would serve a calculation at `jd` for the given
+// file category `ifno`.
+//
+// This is the stateless equivalent of C's `swe_get_current_file_data(ifno)`.
+// Instead of reporting the file used by the last `swe_calc` call, the caller
+// provides `jd` to select the file explicitly.
+//
+// `ifno` values (mirrors C):
+// - 0 = planet (`sepl*.se1` or JPL `.eph`)
+// - 1 = moon (`semo*.se1`)
+// - 2 = main asteroid (`seas*.se1`)
+// - 3 = individual asteroid (always returns "no data" — stateless, no "last used")
+// - 4 = planet moon (always returns "no data" — stateless, no "last used")
+//
+// Returns 0 on success, negative error code on failure. Returns
+// `EphemerisNotAvailable` when no file covers the given `jd` (including
+// Moshier-only configs which have no files).
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle from `swisseph_new`.
+// - `path_buf`, if non-NULL, must point to at least `path_cap` writable bytes.
+// - `tfstart`, `tfend`, `denum` must each point to a writable slot (or be NULL).
+int32_t swisseph_get_file_data(const SweEphemeris *handle,
+                               int32_t ifno,
+                               double jd,
+                               char *path_buf,
+                               uintptr_t path_cap,
+                               double *tfstart,
+                               double *tfend,
+                               int32_t *denum,
+                               char *err_buf,
+                               uintptr_t err_cap);
+
 // Compute planetary position at `tjd_ut` (Julian Day, UT1).
 //
 // # Parameters

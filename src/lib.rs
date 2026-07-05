@@ -156,9 +156,9 @@ pub use riseset::RiseSetResult;
 pub use stars::{Star, StarCatalog};
 pub use types::{
     AsteroidId, AstroModels, BiasModel, Body, CalendarType, DegreeParts, DeltaT, DeltaTModel,
-    EphemerisSource, Epsilon, FictitiousBody, FictitiousId, FrameTransform, HouseSystem, JdTt,
-    JdUt1, JplHorMode, JplHoraMode, Nutation, NutationModel, PlanetMoonId, PrecessionDirection,
-    PrecessionModel, SiderealMode, SiderealTimeModel, UtcComponents, UtcToJd,
+    EphemerisSource, Epsilon, FictitiousBody, FictitiousId, FileData, FileDataKind, FrameTransform,
+    HouseSystem, JdTt, JdUt1, JplHorMode, JplHoraMode, Nutation, NutationModel, PlanetMoonId,
+    PrecessionDirection, PrecessionModel, SiderealMode, SiderealTimeModel, UtcComponents, UtcToJd,
 };
 
 /// Convenience alias for `Result<T, swisseph::Error>`.

@@ -9,7 +9,7 @@ pub mod types;
 
 pub use evaluate::evaluate_body;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
 
@@ -22,6 +22,7 @@ pub use types::{
 
 /// A memory-mapped, parsed `.se1` ephemeris file.
 pub struct SwissEphFile {
+    path: PathBuf,
     mmap: Mmap,
     header: FileHeader,
     planets: Vec<PlanetFileData>,
@@ -40,10 +41,16 @@ impl SwissEphFile {
             .map_err(|e| Error::FileFormat(format!("mmap failed: {e}")))?;
         let (header, planets) = parse::parse_file(&mmap, file_type)?;
         Ok(Self {
+            path: path.to_path_buf(),
             mmap,
             header,
             planets,
         })
+    }
+
+    /// Return the file path this file was opened from.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Return the parsed file header.
@@ -252,6 +259,7 @@ mod tests {
         assert_eq!(meta.h, 10.38);
         assert_eq!(meta.g, 0.15);
         assert_eq!(meta.name, "Eros");
+        assert_eq!(f.path(), path);
     }
 
     #[test]

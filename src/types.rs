@@ -741,6 +741,68 @@ pub enum EphemerisSource {
 }
 
 // ---------------------------------------------------------------------------
+// FileDataKind / FileData
+// ---------------------------------------------------------------------------
+
+/// Which category of ephemeris file to query. Mirrors C's `ifno` parameter in
+/// `swe_get_current_file_data`. In C, the function reports the file used by the
+/// *last* calculation (global state). The stateless Rust equivalent
+/// [`Ephemeris::file_data`] takes a `jd` to select which file would serve that
+/// epoch instead.
+///
+/// `Asteroid` and `PlanetMoon` always return `None` in the stateless API because
+/// they require knowing which specific body was queried — information that C
+/// tracks implicitly via its global "last opened" file slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i32)]
+pub enum FileDataKind {
+    /// Planet file (`sepl*.se1` or the JPL `.eph` file).
+    Planet = 0,
+    /// Moon file (`semo*.se1`).
+    Moon = 1,
+    /// Main asteroid file (`seas*.se1`: Chiron, Pholus, Ceres, Pallas, Juno, Vesta).
+    MainAsteroid = 2,
+    /// Individual numbered asteroid file. Always returns `None` (stateless: no
+    /// "last-used" file concept — use the lib API for specific asteroids).
+    Asteroid = 3,
+    /// Planetary moon file (`sepm*.se1`). Always returns `None` (stateless: no
+    /// "last-used" file concept — use the lib API for specific planet moons).
+    PlanetMoon = 4,
+}
+
+impl TryFrom<i32> for FileDataKind {
+    type Error = crate::Error;
+
+    fn try_from(v: i32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Planet),
+            1 => Ok(Self::Moon),
+            2 => Ok(Self::MainAsteroid),
+            3 => Ok(Self::Asteroid),
+            4 => Ok(Self::PlanetMoon),
+            _ => Err(crate::Error::InvalidBody(v)),
+        }
+    }
+}
+
+/// Metadata about an ephemeris file serving a given epoch.
+///
+/// Returned by [`Ephemeris::file_data`]. This is the stateless equivalent of C's
+/// `swe_get_current_file_data` — instead of reporting the file used by the last
+/// calculation, the caller provides a Julian Day to select the file.
+#[derive(Debug, Clone)]
+pub struct FileData {
+    /// Filesystem path to the ephemeris file.
+    pub path: std::path::PathBuf,
+    /// Start of the file's Julian Day coverage.
+    pub start_jd: f64,
+    /// End of the file's Julian Day coverage.
+    pub end_jd: f64,
+    /// JPL DE number the file's data derives from.
+    pub denum: i32,
+}
+
+// ---------------------------------------------------------------------------
 // Astronomical model enums
 // ---------------------------------------------------------------------------
 
