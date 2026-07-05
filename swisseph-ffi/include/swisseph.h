@@ -204,8 +204,8 @@ int32_t swisseph_get_astro_models(const SweEphemeris *handle,
 //
 // **String truncation**: if the file path exceeds `path_cap - 1` bytes, it is
 // silently truncated at a UTF-8 character boundary and NUL-terminated. The
-// return code is still 0 (success). Callers needing the full path should
-// provide a buffer of at least 256 bytes.
+// return code is still 0 (success) — truncation is not signaled. Size the
+// buffer generously (the path length depends on `ephe_path` in the config).
 //
 // # Safety
 // - `handle` must be a valid, non-NULL handle from `swisseph_new`.

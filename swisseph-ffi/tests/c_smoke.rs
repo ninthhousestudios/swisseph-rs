@@ -12,7 +12,10 @@ fn c_smoke_test() {
     } else {
         "release"
     };
-    let target_dir = crate_dir.parent().unwrap().join("target").join(profile);
+    let target_base = std::env::var("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| crate_dir.parent().unwrap().join("target"));
+    let target_dir = target_base.join(profile);
 
     let out_dir = std::env::var("OUT_DIR")
         .map(std::path::PathBuf::from)
@@ -21,23 +24,20 @@ fn c_smoke_test() {
 
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
 
-    let lib_name = if cfg!(target_os = "macos") {
-        "swisseph_ffi"
-    } else {
-        "swisseph_ffi"
-    };
-
-    let compile = Command::new(&cc)
+    let mut compile_cmd = Command::new(&cc);
+    compile_cmd
         .arg(&c_src)
         .arg(format!("-I{}", include_dir.display()))
         .arg(format!("-L{}", target_dir.display()))
-        .arg(format!("-l{lib_name}"))
+        .arg("-lswisseph_ffi")
         .arg("-lm")
-        .arg("-lpthread")
-        .arg("-ldl")
-        .arg("-o")
-        .arg(&exe_path)
-        .output();
+        .arg("-lpthread");
+    if cfg!(target_os = "linux") {
+        compile_cmd.arg("-ldl");
+    }
+    compile_cmd.arg("-o").arg(&exe_path);
+
+    let compile = compile_cmd.output();
 
     let compile = match compile {
         Ok(o) => o,
