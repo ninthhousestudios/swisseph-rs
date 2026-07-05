@@ -764,7 +764,7 @@ pub(crate) fn transform_nodaps_output(
 
         // --- sidereal projection (ECL_T0 / SSY_PLANE rigorous, or ayanamsa) ---
         if flags.contains(CalcFlags::SIDEREAL) {
-            eph.apply_sidereal(&mut xreturn, &x2000, tjd_et, flags)?;
+            eph.apply_sidereal(&mut xreturn, &x2000, tjd_et, flags, eph.config())?;
         }
 
         out[ij] = extract_output(&xreturn, flags);

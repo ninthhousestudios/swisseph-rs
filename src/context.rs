@@ -396,7 +396,7 @@ impl Ephemeris {
 
         let (mut xreturn, x2000, flags_used) = self.calc_inner(jd_tt, body, flags, &config)?;
         if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
-            self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags_used)?;
+            self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags_used, &config)?;
         }
         Ok(CalcResult {
             data: Self::extract_for_body(&xreturn, body, flags_used),
@@ -432,16 +432,27 @@ impl Ephemeris {
     /// Nutation is added unless `NONUT` is set in `flags`.
     #[doc(alias = "swe_get_ayanamsa_ex")]
     pub fn get_ayanamsa_ex(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error> {
-        let idx = crate::ayanamsa::sidereal_index(&self.config);
+        self.get_ayanamsa_ex_with_config(jd_tt, flags, &self.config)
+    }
+
+    /// Same as [`get_ayanamsa_ex`](Self::get_ayanamsa_ex) but with an explicit config override;
+    /// see [`calc_with_config`](Self::calc_with_config).
+    pub fn get_ayanamsa_ex_with_config(
+        &self,
+        jd_tt: f64,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<f64, Error> {
+        let idx = crate::ayanamsa::sidereal_index(config);
         if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
             let (daya, _) = self.fixstar_ayanamsa(jd_tt, flags)?;
             if !flags.contains(CalcFlags::NONUT) {
-                let dpsi = crate::nutation::nutation(jd_tt, flags, &self.config.astro_models).dpsi;
+                let dpsi = crate::nutation::nutation(jd_tt, flags, &config.astro_models).dpsi;
                 return Ok(daya + dpsi * crate::constants::RADTODEG);
             }
             return Ok(daya);
         }
-        crate::ayanamsa::get_ayanamsa_ex_nut(&self.config, jd_tt, flags, &self.config.astro_models)
+        crate::ayanamsa::get_ayanamsa_ex_nut(config, jd_tt, flags, &config.astro_models)
     }
 
     /// Ayanamsa at `jd_ut` (UT1), degrees. Nutation added unless `NONUT` is set.
@@ -1130,7 +1141,7 @@ impl Ephemeris {
 
         // §9 sidereal tail
         if flags.contains(CalcFlags::SIDEREAL) {
-            self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags)?;
+            self.apply_sidereal(&mut xreturn, &x2000, jd_tt, flags, &config)?;
         }
 
         Ok(CalcResult {
@@ -2355,9 +2366,9 @@ impl Ephemeris {
         // evals run without SPEED), collapsing the longitude speed to ~0.
         if flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {
             let pos_flags = flags_used & !CalcFlags::SPEED;
-            self.apply_sidereal(&mut x0, &x2000_0, jd_tt - dt, pos_flags)?;
-            self.apply_sidereal(&mut x2, &x2000_2, jd_tt + dt, pos_flags)?;
-            self.apply_sidereal(&mut x1, &x2000_1, jd_tt, pos_flags)?;
+            self.apply_sidereal(&mut x0, &x2000_0, jd_tt - dt, pos_flags, config)?;
+            self.apply_sidereal(&mut x2, &x2000_2, jd_tt + dt, pos_flags, config)?;
+            self.apply_sidereal(&mut x1, &x2000_1, jd_tt, pos_flags, config)?;
         }
 
         crate::calc::denormalize_positions(&mut x0, &x1, &mut x2);
@@ -2375,17 +2386,18 @@ impl Ephemeris {
         x2000: &[f64; 6],
         jd_tt: f64,
         flags: CalcFlags,
+        config: &EphemerisConfig,
     ) -> Result<(), Error> {
         use crate::constants::RADTODEG;
         use crate::math::cartesian_to_polar_with_speed;
 
-        let bits = self.config.sidereal_bits;
-        let models = &self.config.astro_models;
+        let bits = config.sidereal_bits;
+        let models = &config.astro_models;
         let has_speed = flags.contains(CalcFlags::SPEED);
         let has_meaningful_x2000 = *x2000 != [0.0f64; 6];
 
         if has_meaningful_x2000 && bits.contains(SiderealBits::ECL_T0) {
-            let (xecl, xequ) = crate::ayanamsa::trop_ra2sid_lon(x2000, &self.config, models, flags);
+            let (xecl, xequ) = crate::ayanamsa::trop_ra2sid_lon(x2000, config, models, flags);
 
             xreturn[6..12].copy_from_slice(&xecl);
             xreturn[18..24].copy_from_slice(&xequ);
@@ -2424,7 +2436,7 @@ impl Ephemeris {
             };
             xreturn[17] = if has_speed { equ_pol[5] } else { 0.0 };
         } else if has_meaningful_x2000 && bits.contains(SiderealBits::SSY_PLANE) {
-            let xecl = crate::ayanamsa::trop_ra2sid_lon_sosy(x2000, &self.config, models, flags);
+            let xecl = crate::ayanamsa::trop_ra2sid_lon_sosy(x2000, config, models, flags);
 
             xreturn[6..12].copy_from_slice(&xecl);
 
@@ -2449,12 +2461,11 @@ impl Ephemeris {
             // Leave equatorial [12..24] untouched (matches C Branch 2)
         } else {
             // Default branch: ayanamsa subtraction on ecliptic polar
-            let idx = crate::ayanamsa::sidereal_index(&self.config);
+            let idx = crate::ayanamsa::sidereal_index(config);
             let (daya_val, daya_sp) = if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
                 self.fixstar_ayanamsa(jd_tt, flags)?
             } else {
-                let a =
-                    crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd_tt, flags, models)?;
+                let a = crate::ayanamsa::get_ayanamsa_with_speed(config, jd_tt, flags, models)?;
                 (a[0], a[1])
             };
             crate::calc::apply_sidereal_default(xreturn, [daya_val, daya_sp], has_speed);
