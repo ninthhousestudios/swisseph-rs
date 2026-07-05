@@ -766,6 +766,22 @@ impl Ephemeris {
         crate::eclipse::sol_eclipse_where(self, tjd_ut, ifl)
     }
 
+    /// Raw local eclipse/occultation circumstances at a point. Unlike
+    /// [`sol_eclipse_how`](Self::sol_eclipse_how) this is the bare internal `eclipse_how`:
+    /// no CENTRAL/NONCENTRAL merge, no redundant az/alt recompute, no horizon-visibility gate.
+    pub fn eclipse_how_at(
+        &self,
+        tjd_ut: f64,
+        ipl: Body,
+        starname: Option<&str>,
+        ifl: CalcFlags,
+        geopos: [f64; 3],
+    ) -> Result<crate::eclipse::EclipseHow, Error> {
+        crate::eclipse::eclipse_how(
+            self, tjd_ut, ipl, starname, ifl, geopos[0], geopos[1], geopos[2],
+        )
+    }
+
     /// Local circumstances of a solar eclipse at a specific observer at `tjd_ut` (UT1):
     /// magnitude, obscuration, contact geometry, azimuth/altitude.
     /// `geopos` = \[longitude (east+), latitude (north+), height (m)\].

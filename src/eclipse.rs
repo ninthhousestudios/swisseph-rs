@@ -2332,10 +2332,8 @@ fn normalize_occulted_body(ipl: Body) -> Body {
 /// Geographic position of maximal occultation of `ipl`/`starname` by the Moon at `tjd_ut` (UT).
 /// Port of `swe_lun_occult_where` (swecl.c:606-630, §1) -- a thin wrapper over [`eclipse_where`]
 /// threading the occulted body through in place of the Sun; same shape/masking as
-/// [`sol_eclipse_where`]. C additionally calls `eclipse_how` here purely to catch an error from
-/// it and to fill `attr[3]`, both of which the Rust port omits for the same reason
-/// `sol_eclipse_where` does: local-circumstance attributes live in a separate function
-/// ([`eclipse_how`], exposed for occultations by a later task).
+/// [`sol_eclipse_where`]. C additionally calls `eclipse_how` here to fill `attr[]` --
+/// the FFI layer replicates this via [`Ephemeris::eclipse_how_at`](crate::Ephemeris::eclipse_how_at).
 pub(crate) fn lun_occult_where(
     eph: &Ephemeris,
     tjd_ut: f64,

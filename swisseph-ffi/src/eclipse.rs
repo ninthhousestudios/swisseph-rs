@@ -271,7 +271,9 @@ pub unsafe extern "C" fn swisseph_rise_trans_true_hor(
 /// penumbra_diameter_km, shadow_axis_distance_km, umbra_fundamental_km, penumbra_fundamental_km,
 /// cos_umbra_half, cos_penumbra_half), [9]=0.
 ///
-/// `attr[20]` out: zeroed — local circumstances require [`swisseph_sol_eclipse_how`].
+/// `attr[20]` out: local circumstances at the central point (magnitude, azimuth, etc.),
+/// populated via an internal `eclipse_how` call. `attr[3]` is `dcore[0]` (core shadow diameter).
+/// Zeroed when no eclipse is found.
 ///
 /// # Safety
 /// - `handle`, `geopos`, `attr` must be valid, non-NULL.
@@ -298,7 +300,26 @@ pub unsafe extern "C" fn swisseph_sol_eclipse_where(
             Ok(w) => {
                 unsafe {
                     write_eclipse_where_geopos(&w, geopos);
-                    zero_f64_array(attr, 20);
+                }
+                let ifl_masked =
+                    calc_flags & (CalcFlags::JPLEPH | CalcFlags::SWIEPH | CalcFlags::MOSEPH);
+                if !w.flags.is_empty() {
+                    if let Ok(how) = eph.eclipse_how_at(
+                        tjd_ut,
+                        Body::Sun,
+                        None,
+                        ifl_masked,
+                        [w.central_longitude, w.central_latitude, 0.0],
+                    ) {
+                        unsafe {
+                            write_eclipse_how_attr(&how, attr);
+                            *attr.add(3) = w.core_diameter_km;
+                        }
+                    } else {
+                        unsafe { zero_f64_array(attr, 20) };
+                    }
+                } else {
+                    unsafe { zero_f64_array(attr, 20) };
                 }
                 w.flags.bits() as i32
             }
@@ -683,7 +704,8 @@ pub unsafe extern "C" fn swisseph_lun_eclipse_when_loc(
 /// On success returns **positive** EclipseFlags bits. Negative = error.
 ///
 /// `geopos[10]` out: same layout as [`swisseph_sol_eclipse_where`].
-/// `attr[20]` out: zeroed — local circumstances require the `_how`-level API.
+/// `attr[20]` out: local circumstances at the central point, same as [`swisseph_sol_eclipse_where`].
+/// `attr[3]` is `dcore[0]`. Zeroed when no eclipse is found.
 ///
 /// # Safety
 /// - `handle` must be valid, non-NULL.
@@ -727,11 +749,36 @@ pub unsafe extern "C" fn swisseph_lun_occult_where(
 
         let calc_flags = CalcFlags::from_bits_retain(ifl as u32);
 
+        // Normalize asteroid-134340 → Pluto, matching lun_occult_where's internal alias.
+        let body_for_how = match body {
+            Body::Asteroid(id) if id.mpc_number() == 134340 => Body::Pluto,
+            b => b,
+        };
+
         match eph.lun_occult_where(tjd_ut, body, star, calc_flags) {
             Ok(w) => {
                 unsafe {
                     write_eclipse_where_geopos(&w, geopos);
-                    zero_f64_array(attr, 20);
+                }
+                let ifl_masked =
+                    calc_flags & (CalcFlags::JPLEPH | CalcFlags::SWIEPH | CalcFlags::MOSEPH);
+                if !w.flags.is_empty() {
+                    if let Ok(how) = eph.eclipse_how_at(
+                        tjd_ut,
+                        body_for_how,
+                        star,
+                        ifl_masked,
+                        [w.central_longitude, w.central_latitude, 0.0],
+                    ) {
+                        unsafe {
+                            write_eclipse_how_attr(&how, attr);
+                            *attr.add(3) = w.core_diameter_km;
+                        }
+                    } else {
+                        unsafe { zero_f64_array(attr, 20) };
+                    }
+                } else {
+                    unsafe { zero_f64_array(attr, 20) };
                 }
                 w.flags.bits() as i32
             }

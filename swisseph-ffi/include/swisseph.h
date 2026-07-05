@@ -749,7 +749,9 @@ int32_t swisseph_rise_trans_true_hor(const SweEphemeris *handle,
 // penumbra_diameter_km, shadow_axis_distance_km, umbra_fundamental_km, penumbra_fundamental_km,
 // cos_umbra_half, cos_penumbra_half), [9]=0.
 //
-// `attr[20]` out: zeroed — local circumstances require [`swisseph_sol_eclipse_how`].
+// `attr[20]` out: local circumstances at the central point (magnitude, azimuth, etc.),
+// populated via an internal `eclipse_how` call. `attr[3]` is `dcore[0]` (core shadow diameter).
+// Zeroed when no eclipse is found.
 //
 // # Safety
 // - `handle`, `geopos`, `attr` must be valid, non-NULL.
@@ -899,7 +901,8 @@ int32_t swisseph_lun_eclipse_when_loc(const SweEphemeris *handle,
 // On success returns **positive** EclipseFlags bits. Negative = error.
 //
 // `geopos[10]` out: same layout as [`swisseph_sol_eclipse_where`].
-// `attr[20]` out: zeroed — local circumstances require the `_how`-level API.
+// `attr[20]` out: local circumstances at the central point, same as [`swisseph_sol_eclipse_where`].
+// `attr[3]` is `dcore[0]`. Zeroed when no eclipse is found.
 //
 // # Safety
 // - `handle` must be valid, non-NULL.

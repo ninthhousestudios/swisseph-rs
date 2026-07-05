@@ -286,9 +286,14 @@ fn sol_eclipse_how_known_eclipse() {
 #[test]
 fn sol_eclipse_where_known() {
     let eph = make_eph();
-    let tjd_ut = 2458353.03681;
+    // 1999-Aug-11 total solar eclipse at maximum
+    let tjd_ut = 2451401.9604166667;
 
     let lib_result = eph.sol_eclipse_where(tjd_ut, CalcFlags::empty()).unwrap();
+    assert!(
+        !lib_result.flags.is_empty(),
+        "expected a central eclipse at this epoch"
+    );
 
     let handle = unsafe { default_handle() };
     let mut geopos = [0.0f64; 10];
@@ -311,6 +316,45 @@ fn sol_eclipse_where_known() {
     assert_eps(geopos[0], lib_result.central_longitude, 1e-15, "lon");
     assert_eps(geopos[1], lib_result.central_latitude, 1e-15, "lat");
     assert_eps(geopos[2], lib_result.core_diameter_km, 1e-15, "core_diam");
+
+    // attr[20] populated via eclipse_how at the central point
+    let how = eph
+        .eclipse_how_at(
+            tjd_ut,
+            Body::Sun,
+            None,
+            CalcFlags::empty(),
+            [
+                lib_result.central_longitude,
+                lib_result.central_latitude,
+                0.0,
+            ],
+        )
+        .unwrap();
+    assert_eps(attr[0], how.magnitude, 1e-15, "attr[0] magnitude");
+    assert_eps(attr[1], how.diameter_ratio, 1e-15, "attr[1] diameter_ratio");
+    assert_eps(attr[2], how.obscuration, 1e-15, "attr[2] obscuration");
+    assert_eps(
+        attr[3],
+        lib_result.core_diameter_km,
+        1e-15,
+        "attr[3] core_diameter_km (dcore[0])",
+    );
+    assert_eps(attr[4], how.azimuth, 1e-15, "attr[4] azimuth");
+    assert_eps(attr[5], how.true_altitude, 1e-15, "attr[5] true_altitude");
+    assert_eps(
+        attr[6],
+        how.apparent_altitude,
+        1e-15,
+        "attr[6] apparent_altitude",
+    );
+    assert_eps(attr[7], how.elongation, 1e-15, "attr[7] elongation");
+    assert_eps(attr[8], how.nasa_magnitude, 1e-15, "attr[8] nasa_magnitude");
+    assert_eps(attr[9], how.saros_series, 1e-15, "attr[9] saros_series");
+    assert_eps(attr[10], how.saros_member, 1e-15, "attr[10] saros_member");
+    for i in 11..20 {
+        assert_eq!(attr[i], 0.0, "attr[{i}] should be 0");
+    }
 
     unsafe { swisseph_ffi::swisseph_free(handle) };
 }
@@ -539,11 +583,16 @@ fn lun_occult_when_glob_venus() {
 #[test]
 fn lun_occult_where_venus() {
     let eph = make_eph();
-    let tjd_ut = 2458800.5;
+    // Venus occultation maximum from occ_when_glob (CENTRAL|TOTAL, retval=5)
+    let tjd_ut = 2451607.5448415945;
 
     let lib_result = eph
         .lun_occult_where(tjd_ut, Body::Venus, None, CalcFlags::empty())
         .unwrap();
+    assert!(
+        !lib_result.flags.is_empty(),
+        "expected an occultation at this epoch"
+    );
 
     let handle = unsafe { default_handle() };
     let mut geopos = [0.0f64; 10];
@@ -567,6 +616,36 @@ fn lun_occult_where_venus() {
     assert_eq!(ret as u32, lib_result.flags.bits());
     assert_eps(geopos[0], lib_result.central_longitude, 1e-15, "lon");
     assert_eps(geopos[1], lib_result.central_latitude, 1e-15, "lat");
+
+    // attr[20] populated via eclipse_how at the central point
+    let how = eph
+        .eclipse_how_at(
+            tjd_ut,
+            Body::Venus,
+            None,
+            CalcFlags::empty(),
+            [
+                lib_result.central_longitude,
+                lib_result.central_latitude,
+                0.0,
+            ],
+        )
+        .unwrap();
+    assert_eps(attr[0], how.magnitude, 1e-15, "attr[0] magnitude");
+    assert_eps(attr[1], how.diameter_ratio, 1e-15, "attr[1] diameter_ratio");
+    assert_eps(attr[2], how.obscuration, 1e-15, "attr[2] obscuration");
+    assert_eps(
+        attr[3],
+        lib_result.core_diameter_km,
+        1e-15,
+        "attr[3] core_diameter_km (dcore[0])",
+    );
+    assert_eps(attr[4], how.azimuth, 1e-15, "attr[4] azimuth");
+    assert_eps(attr[5], how.true_altitude, 1e-15, "attr[5] true_altitude");
+    assert_eps(attr[7], how.elongation, 1e-15, "attr[7] elongation");
+    for i in 11..20 {
+        assert_eq!(attr[i], 0.0, "attr[{i}] should be 0");
+    }
 
     unsafe { swisseph_ffi::swisseph_free(handle) };
 }
