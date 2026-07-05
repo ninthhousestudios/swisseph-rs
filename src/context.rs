@@ -445,7 +445,7 @@ impl Ephemeris {
     ) -> Result<f64, Error> {
         let idx = crate::ayanamsa::sidereal_index(config);
         if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
-            let (daya, _) = self.fixstar_ayanamsa(jd_tt, flags)?;
+            let (daya, _) = self.fixstar_ayanamsa(jd_tt, flags, config)?;
             if !flags.contains(CalcFlags::NONUT) {
                 let dpsi = crate::nutation::nutation(jd_tt, flags, &config.astro_models).dpsi;
                 return Ok(daya + dpsi * crate::constants::RADTODEG);
@@ -2463,7 +2463,7 @@ impl Ephemeris {
             // Default branch: ayanamsa subtraction on ecliptic polar
             let idx = crate::ayanamsa::sidereal_index(config);
             let (daya_val, daya_sp) = if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
-                self.fixstar_ayanamsa(jd_tt, flags)?
+                self.fixstar_ayanamsa(jd_tt, flags, config)?
             } else {
                 let a = crate::ayanamsa::get_ayanamsa_with_speed(config, jd_tt, flags, models)?;
                 (a[0], a[1])
@@ -2609,7 +2609,7 @@ impl Ephemeris {
         }
         // Moshier is heliocentric; Sun is at the origin, so sun_bary = 0.
         let sun_bary = [0.0f64; 6];
-        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
+        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary, config)
     }
 
     /// SWIEPH backend: barycentric Earth for parallax/aberration, sun_bary for deflection.
@@ -2670,7 +2670,7 @@ impl Ephemeris {
             xobs_dt[i] += offset_dt[i];
         }
 
-        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
+        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary, config)
     }
 
     /// JPL backend: barycentric Earth for parallax/aberration, sun_bary for deflection.
@@ -2703,7 +2703,7 @@ impl Ephemeris {
             xobs_dt[i] += offset_dt[i];
         }
 
-        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary)
+        self.calc_fixstar_inner(star, jd, flags, xobs, xobs_dt, sun_bary, config)
     }
 
     /// Core fixed-star position pipeline (port of `fixstar_calc_from_struct`).
@@ -2723,6 +2723,7 @@ impl Ephemeris {
         xobs: [f64; 6],
         xobs_dt: [f64; 6],
         sun_bary: [f64; 6],
+        config: &EphemerisConfig,
     ) -> Result<[f64; 6], Error> {
         use crate::bias::{fk4_fk5, frame_bias, icrs2fk5};
         use crate::calc::{nutate, precess_speed};
@@ -2737,7 +2738,7 @@ impl Ephemeris {
         use crate::types::FrameTransform;
         use crate::types::PrecessionDirection;
 
-        let models = &self.config.astro_models;
+        let models = &config.astro_models;
         // Force speed internally; honor caller's SPEED for output (step 18).
         let iflag = flags | CalcFlags::SPEED;
 
@@ -2922,28 +2923,25 @@ impl Ephemeris {
 
         // Step 15: Sidereal transform.
         if iflag.contains(CalcFlags::SIDEREAL) {
-            let bits = self.config.sidereal_bits;
+            let bits = config.sidereal_bits;
             if bits.contains(crate::flags::SiderealBits::ECL_T0) {
-                let (xecl, xequ) =
-                    crate::ayanamsa::trop_ra2sid_lon(&xxsv, &self.config, models, iflag);
+                let (xecl, xequ) = crate::ayanamsa::trop_ra2sid_lon(&xxsv, config, models, iflag);
                 x = if iflag.contains(CalcFlags::EQUATORIAL) {
                     xequ
                 } else {
                     xecl
                 };
             } else if bits.contains(crate::flags::SiderealBits::SSY_PLANE) {
-                let xecl =
-                    crate::ayanamsa::trop_ra2sid_lon_sosy(&xxsv, &self.config, models, iflag);
+                let xecl = crate::ayanamsa::trop_ra2sid_lon_sosy(&xxsv, config, models, iflag);
                 x = xecl;
             } else {
                 // Default: subtract ayanamsa from ecliptic (or equatorial) longitude.
                 x = cartesian_to_polar_with_speed(x);
-                let idx = crate::ayanamsa::sidereal_index(&self.config);
+                let idx = crate::ayanamsa::sidereal_index(config);
                 let (daya_val, daya_sp) = if crate::ayanamsa::FIXED_STAR_INDICES.contains(&idx) {
-                    self.fixstar_ayanamsa(jd, iflag)?
+                    self.fixstar_ayanamsa(jd, iflag, config)?
                 } else {
-                    let a =
-                        crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd, iflag, models)?;
+                    let a = crate::ayanamsa::get_ayanamsa_with_speed(config, jd, iflag, models)?;
                     (a[0], a[1])
                 };
                 x[0] -= daya_val * DEGTORAD;
@@ -2982,7 +2980,12 @@ impl Ephemeris {
     /// Ayanamsa value (degrees) for one of the 12 fixed-star modes at `jd_tt`.
     /// Mirrors C's early-return block in `swi_get_ayanamsa_ex` (sweph.c:3049–3142).
     /// Does NOT add nutation; caller adds it when appropriate.
-    fn fixstar_ayanamsa_single(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error> {
+    fn fixstar_ayanamsa_single(
+        &self,
+        jd_tt: f64,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<f64, Error> {
         use crate::math::{armc_to_mc, normalize_degrees};
 
         // Flag construction mirrors C's swi_get_ayanamsa_ex entry (sweph.c:3007–3028).
@@ -3001,7 +3004,7 @@ impl Ephemeris {
             iflag_true |= CalcFlags::NOGDEFL;
         }
 
-        let idx = crate::ayanamsa::sidereal_index(&self.config);
+        let idx = crate::ayanamsa::sidereal_index(config);
 
         let daya = match idx {
             17 => {
@@ -3045,10 +3048,9 @@ impl Ephemeris {
                 // obliquity uses iflag_base (= ephe|NONUT), matching C's `iflag` at that point.
                 let (_, r) = self.fixstar2(",SgrA*", jd_tt, iflag_true | CalcFlags::EQUATORIAL)?;
                 let ra = r.data[0];
-                let eps_deg =
-                    crate::obliquity::obliquity(jd_tt, iflag_base, &self.config.astro_models)
-                        .eps
-                        .to_degrees();
+                let eps_deg = crate::obliquity::obliquity(jd_tt, iflag_base, &config.astro_models)
+                    .eps
+                    .to_degrees();
                 normalize_degrees(armc_to_mc(ra, eps_deg) - 246.666_666_666_7)
             }
             39 => {
@@ -3067,10 +3069,15 @@ impl Ephemeris {
 
     /// Returns `(ayanamsa_deg, speed_deg_per_day)` for fixed-star ayanamsa modes.
     /// Speed via two-point derivative (matches C's `swi_get_ayanamsa_with_speed` pattern).
-    fn fixstar_ayanamsa(&self, jd_tt: f64, flags: CalcFlags) -> Result<(f64, f64), Error> {
+    fn fixstar_ayanamsa(
+        &self,
+        jd_tt: f64,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<(f64, f64), Error> {
         const TINTV: f64 = 0.001;
-        let d0 = self.fixstar_ayanamsa_single(jd_tt, flags)?;
-        let d2 = self.fixstar_ayanamsa_single(jd_tt - TINTV, flags)?;
+        let d0 = self.fixstar_ayanamsa_single(jd_tt, flags, config)?;
+        let d2 = self.fixstar_ayanamsa_single(jd_tt - TINTV, flags, config)?;
         // Both samples are independently normalized to [0,360); use the signed
         // shortest difference so a 360° wrap between samples doesn't blow up the
         // speed (~3.6e5 deg/day spike). diff_degrees returns a value in (-180,180].
