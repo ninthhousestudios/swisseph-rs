@@ -648,6 +648,288 @@ void swisseph_split_deg(double ddeg,
                         double *secfr,
                         int32_t *sign);
 
+// Rise/set/meridian-transit search at `tjd_ut` (UT1).
+//
+// Returns 0 on success, **-2** for circumpolar body (no error message — this is
+// a status, not an error, matching C convention), or a negative error code with
+// a message in `err_buf`.
+//
+// # Parameters
+// - `ipl`: body number
+// - `starname`: fixed star name (NUL-terminated), or NULL for a planet
+// - `epheflag`: calculation flags (SEFLG_MOSEPH etc.)
+// - `rsmi`: rise/set event selector (SE_CALC_RISE=1, SE_CALC_SET=2, etc.)
+// - `geopos`: [lon, lat, height], 3 `f64` values
+// - `atpress`: atmospheric pressure (hPa)
+// - `attemp`: atmospheric temperature (°C)
+// - `tret`: out, pointer to 1 `f64` receiving the event time (UT)
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `tret` must point to a writable `f64`.
+int32_t swisseph_rise_trans(const SweEphemeris *handle,
+                            double tjd_ut,
+                            int32_t ipl,
+                            const char *starname,
+                            int32_t epheflag,
+                            int32_t rsmi,
+                            const double *geopos,
+                            double atpress,
+                            double attemp,
+                            double *tret,
+                            char *err_buf,
+                            uintptr_t err_cap);
+
+// Rise/set/meridian-transit search with custom horizon height at `tjd_ut` (UT1).
+//
+// Same return convention as [`swisseph_rise_trans`]: 0 = success, -2 = circumpolar,
+// negative = error.
+//
+// # Parameters
+// - `horhgt`: horizon height in degrees (-100 = auto-dip from `geopos[2]`)
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `tret` must point to a writable `f64`.
+int32_t swisseph_rise_trans_true_hor(const SweEphemeris *handle,
+                                     double tjd_ut,
+                                     int32_t ipl,
+                                     const char *starname,
+                                     int32_t epheflag,
+                                     int32_t rsmi,
+                                     const double *geopos,
+                                     double atpress,
+                                     double attemp,
+                                     double horhgt,
+                                     double *tret,
+                                     char *err_buf,
+                                     uintptr_t err_cap);
+
+// Geographic position of greatest solar eclipse at `tjd_ut` (UT1).
+//
+// On success returns **positive** EclipseFlags bits (CENTRAL/NONCENTRAL/TOTAL/ANNULAR/PARTIAL);
+// 0 (empty flags) means no eclipse at this instant. Negative = error.
+//
+// `geopos[10]` out: [0]=lon, [1]=lat, [2..8]=shadow-cone geometry (core_diameter_km,
+// penumbra_diameter_km, shadow_axis_distance_km, umbra_fundamental_km, penumbra_fundamental_km,
+// cos_umbra_half, cos_penumbra_half), [9]=0.
+//
+// `attr[20]` out: zeroed — local circumstances require [`swisseph_sol_eclipse_how`].
+//
+// # Safety
+// - `handle`, `geopos`, `attr` must be valid, non-NULL.
+int32_t swisseph_sol_eclipse_where(const SweEphemeris *handle,
+                                   double tjd_ut,
+                                   int32_t ifl,
+                                   double *geopos,
+                                   double *attr,
+                                   char *err_buf,
+                                   uintptr_t err_cap);
+
+// Local circumstances of a solar eclipse at observer `geopos` at `tjd_ut` (UT1).
+//
+// On success returns **positive** EclipseFlags bits; 0 = no eclipse visible.
+// Negative = error.
+//
+// `attr[20]` out: [0]=magnitude, [1]=diameter_ratio, [2]=obscuration,
+// [3]=core_diameter_km, [4]=azimuth, [5]=true_altitude, [6]=apparent_altitude,
+// [7]=elongation, [8]=nasa_magnitude, [9]=saros_series, [10]=saros_member, [11..19]=0.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values [lon, lat, height].
+// - `attr` must point to at least 20 writable `f64` slots.
+int32_t swisseph_sol_eclipse_how(const SweEphemeris *handle,
+                                 double tjd_ut,
+                                 int32_t ifl,
+                                 const double *geopos,
+                                 double *attr,
+                                 char *err_buf,
+                                 uintptr_t err_cap);
+
+// Global solar eclipse search from `tjd_start` (UT1).
+//
+// On success returns **positive** EclipseFlags bits. Negative = error.
+//
+// `tret[10]` out: [0]=time_maximum, [1]=time_ra_conjunction, [2]=time_begin, [3]=time_end,
+// [4]=time_totality_begin, [5]=time_totality_end, [6]=time_centerline_begin,
+// [7]=time_centerline_end, [8..9]=0.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `tret` must point to at least 10 writable `f64` slots.
+int32_t swisseph_sol_eclipse_when_glob(const SweEphemeris *handle,
+                                       double tjd_start,
+                                       int32_t ifl,
+                                       int32_t ifltype,
+                                       int32_t backward,
+                                       double *tret,
+                                       char *err_buf,
+                                       uintptr_t err_cap);
+
+// Local solar eclipse search from `tjd_start` (UT1), visible from `geopos`.
+//
+// On success returns **positive** EclipseFlags bits. Negative = error.
+//
+// `tret[10]` out: [0]=time_maximum, [1]=time_first_contact, [2]=time_second_contact,
+// [3]=time_third_contact, [4]=time_fourth_contact, [5]=time_sunrise, [6]=time_sunset,
+// [7..9]=0. **Different slot semantics from sol_eclipse_when_glob.**
+//
+// `attr[20]` out: local circumstances at maximum (same layout as sol_eclipse_how).
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `tret` must point to at least 10 writable `f64` slots.
+// - `attr` must point to at least 20 writable `f64` slots.
+int32_t swisseph_sol_eclipse_when_loc(const SweEphemeris *handle,
+                                      double tjd_start,
+                                      int32_t ifl,
+                                      const double *geopos,
+                                      int32_t backward,
+                                      double *tret,
+                                      double *attr,
+                                      char *err_buf,
+                                      uintptr_t err_cap);
+
+// Local circumstances of a lunar eclipse at observer `geopos` at `tjd_ut` (UT1).
+//
+// On success returns **positive** EclipseFlags bits; 0 = no eclipse visible.
+// Negative = error.
+//
+// `attr[20]` out: [0]=umbral_magnitude, [1]=penumbral_magnitude, [2]=0, [3]=0,
+// [4]=azimuth, [5]=true_altitude, [6]=apparent_altitude, [7]=distance_from_opposition,
+// [8]=umbral_magnitude (dup), [9]=saros_series, [10]=saros_member, [11..19]=0.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `attr` must point to at least 20 writable `f64` slots.
+int32_t swisseph_lun_eclipse_how(const SweEphemeris *handle,
+                                 double tjd_ut,
+                                 int32_t ifl,
+                                 const double *geopos,
+                                 double *attr,
+                                 char *err_buf,
+                                 uintptr_t err_cap);
+
+// Global lunar eclipse search from `tjd_start` (UT1).
+//
+// On success returns **positive** EclipseFlags bits. Negative = error.
+//
+// `tret[10]` out: [0]=time_maximum, [1]=0 (unused), [2]=time_partial_begin,
+// [3]=time_partial_end, [4]=time_totality_begin, [5]=time_totality_end,
+// [6]=time_penumbral_begin, [7]=time_penumbral_end, [8..9]=0.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `tret` must point to at least 10 writable `f64` slots.
+int32_t swisseph_lun_eclipse_when(const SweEphemeris *handle,
+                                  double tjd_start,
+                                  int32_t ifl,
+                                  int32_t ifltype,
+                                  int32_t backward,
+                                  double *tret,
+                                  char *err_buf,
+                                  uintptr_t err_cap);
+
+// Local lunar eclipse search from `tjd_start` (UT1), visible from `geopos`.
+//
+// On success returns **positive** EclipseFlags bits. Negative = error.
+//
+// `tret[10]` out: [0]=time_maximum, [1]=0 (unused), [2]=time_partial_begin,
+// [3]=time_partial_end, [4]=time_totality_begin, [5]=time_totality_end,
+// [6]=time_penumbral_begin, [7]=time_penumbral_end, [8]=time_moonrise,
+// [9]=time_moonset.
+//
+// `attr[20]` out: lunar eclipse circumstances (same layout as lun_eclipse_how).
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `tret` must point to at least 10 writable `f64` slots.
+// - `attr` must point to at least 20 writable `f64` slots.
+int32_t swisseph_lun_eclipse_when_loc(const SweEphemeris *handle,
+                                      double tjd_start,
+                                      int32_t ifl,
+                                      const double *geopos,
+                                      int32_t backward,
+                                      double *tret,
+                                      double *attr,
+                                      char *err_buf,
+                                      uintptr_t err_cap);
+
+// Geographic position of maximal lunar occultation at `tjd_ut` (UT1).
+//
+// On success returns **positive** EclipseFlags bits. Negative = error.
+//
+// `geopos[10]` out: same layout as [`swisseph_sol_eclipse_where`].
+// `attr[20]` out: zeroed — local circumstances require the `_how`-level API.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos`, `attr` must point to at least 10/20 writable `f64` slots.
+int32_t swisseph_lun_occult_where(const SweEphemeris *handle,
+                                  double tjd_ut,
+                                  int32_t ipl,
+                                  const char *starname,
+                                  int32_t ifl,
+                                  double *geopos,
+                                  double *attr,
+                                  char *err_buf,
+                                  uintptr_t err_cap);
+
+// Global occultation search from `tjd_start` (UT1).
+//
+// On success returns **positive** EclipseFlags bits. Negative = error.
+//
+// `tret[10]` out: same slot layout as [`swisseph_sol_eclipse_when_glob`], but `tret[1]`
+// is the occulted body's transit instant (not specifically the Sun's).
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `tret` must point to at least 10 writable `f64` slots.
+int32_t swisseph_lun_occult_when_glob(const SweEphemeris *handle,
+                                      double tjd_start,
+                                      int32_t ipl,
+                                      const char *starname,
+                                      int32_t ifl,
+                                      int32_t ifltype,
+                                      int32_t backward,
+                                      double *tret,
+                                      char *err_buf,
+                                      uintptr_t err_cap);
+
+// Local occultation search from `tjd_start` (UT1), visible from `geopos`.
+//
+// On success returns **positive** EclipseFlags bits. Negative = error.
+//
+// `tret[10]` out: [0]=time_maximum, [1]=time_first_contact, [2]=time_second_contact,
+// [3]=time_third_contact, [4]=time_fourth_contact, [5]=time_rise, [6]=time_set,
+// [7..9]=0. Same slot semantics as [`swisseph_sol_eclipse_when_loc`]; for a fixed star,
+// contacts 1/4 alias contacts 2/3.
+//
+// `attr[20]` out: local circumstances at maximum (same layout as sol_eclipse_how).
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `tret` must point to at least 10 writable `f64` slots.
+// - `attr` must point to at least 20 writable `f64` slots.
+int32_t swisseph_lun_occult_when_loc(const SweEphemeris *handle,
+                                     double tjd_start,
+                                     int32_t ipl,
+                                     const char *starname,
+                                     int32_t ifl,
+                                     const double *geopos,
+                                     int32_t backward,
+                                     double *tret,
+                                     double *attr,
+                                     char *err_buf,
+                                     uintptr_t err_cap);
+
 // Compute tropical house cusps and angular points at `tjd_ut` (UT1).
 //
 // # Parameters

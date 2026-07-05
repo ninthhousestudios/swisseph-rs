@@ -1,5 +1,6 @@
 pub mod config;
 pub mod date;
+pub mod eclipse;
 pub mod error;
 pub mod houses;
 pub mod util;
