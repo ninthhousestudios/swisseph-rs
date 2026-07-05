@@ -363,11 +363,12 @@ impl Ephemeris {
         self.calc_with_config(jd_tt, body, flags, &self.config)
     }
 
-    /// Same as [`calc`](Self::calc) but with an explicit config override. Used by the rise/set
-    /// module (`riseset.rs`) to thread a caller-supplied `geopos` into the TOPOCTR pipeline
-    /// without requiring it to match the `Ephemeris`'s own configured topographic position
-    /// (mirrors C's per-call `swe_set_topo` before `swe_calc_ut`, but stateless).
-    pub(crate) fn calc_with_config(
+    /// Same as [`calc`](Self::calc) but with an explicit config override.
+    ///
+    /// Callers pass a clone of [`config()`](Self::config) with per-call fields changed
+    /// (e.g. `topographic` for a different observer position). This threads the override
+    /// through the entire pipeline without requiring a new `Ephemeris` instance.
+    pub fn calc_with_config(
         &self,
         jd_tt: f64,
         body: Body,
@@ -415,7 +416,7 @@ impl Ephemeris {
 
     /// Same as [`calc_ut`](Self::calc_ut) but with an explicit config override; see
     /// [`calc_with_config`](Self::calc_with_config).
-    pub(crate) fn calc_ut_with_config(
+    pub fn calc_ut_with_config(
         &self,
         jd_ut: f64,
         body: Body,
@@ -2485,7 +2486,7 @@ impl Ephemeris {
     /// `eclipse_how`/`occult_when_loc`) get a topocentric fixed-star position at a caller-supplied
     /// `geopos` without requiring it to match the `Ephemeris`'s own configured topographic
     /// position.
-    pub(crate) fn fixstar2_with_config(
+    pub fn fixstar2_with_config(
         &self,
         star: &str,
         jd_tt: f64,

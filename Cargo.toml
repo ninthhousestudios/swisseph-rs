@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "swisseph-ffi"]
+
 [package]
 name = "swisseph"
 version = "0.1.0"

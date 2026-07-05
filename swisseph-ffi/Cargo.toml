@@ -1,0 +1,17 @@
+[package]
+name = "swisseph-ffi"
+version = "0.1.0"
+edition = "2024"
+description = "C ABI (cdylib) for the swisseph Rust ephemeris library"
+license = "AGPL-3.0-or-later"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+swisseph = { path = ".." }
+
+[dev-dependencies]
+cbindgen = "0.29"
+
+[build-dependencies]

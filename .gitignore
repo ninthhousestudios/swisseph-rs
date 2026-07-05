@@ -1,5 +1,6 @@
 /target
 /tools/golden_gen
+/tools/bench_c
 docs/phase-planning-prompt.md
 ephe/
 
