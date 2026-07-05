@@ -303,20 +303,16 @@ pub unsafe extern "C" fn swisseph_sol_eclipse_where(
                 }
                 let ifl_masked =
                     calc_flags & (CalcFlags::JPLEPH | CalcFlags::SWIEPH | CalcFlags::MOSEPH);
-                if !w.flags.is_empty() {
-                    if let Ok(how) = eph.eclipse_how_at(
-                        tjd_ut,
-                        Body::Sun,
-                        None,
-                        ifl_masked,
-                        [w.central_longitude, w.central_latitude, 0.0],
-                    ) {
-                        unsafe {
-                            write_eclipse_how_attr(&how, attr);
-                            *attr.add(3) = w.core_diameter_km;
-                        }
-                    } else {
-                        unsafe { zero_f64_array(attr, 20) };
+                if let Ok(how) = eph.eclipse_how_at(
+                    tjd_ut,
+                    Body::Sun,
+                    None,
+                    ifl_masked,
+                    [w.central_longitude, w.central_latitude, 0.0],
+                ) {
+                    unsafe {
+                        write_eclipse_how_attr(&how, attr);
+                        *attr.add(3) = w.core_diameter_km;
                     }
                 } else {
                     unsafe { zero_f64_array(attr, 20) };
@@ -762,20 +758,16 @@ pub unsafe extern "C" fn swisseph_lun_occult_where(
                 }
                 let ifl_masked =
                     calc_flags & (CalcFlags::JPLEPH | CalcFlags::SWIEPH | CalcFlags::MOSEPH);
-                if !w.flags.is_empty() {
-                    if let Ok(how) = eph.eclipse_how_at(
-                        tjd_ut,
-                        body_for_how,
-                        star,
-                        ifl_masked,
-                        [w.central_longitude, w.central_latitude, 0.0],
-                    ) {
-                        unsafe {
-                            write_eclipse_how_attr(&how, attr);
-                            *attr.add(3) = w.core_diameter_km;
-                        }
-                    } else {
-                        unsafe { zero_f64_array(attr, 20) };
+                if let Ok(how) = eph.eclipse_how_at(
+                    tjd_ut,
+                    body_for_how,
+                    star,
+                    ifl_masked,
+                    [w.central_longitude, w.central_latitude, 0.0],
+                ) {
+                    unsafe {
+                        write_eclipse_how_attr(&how, attr);
+                        *attr.add(3) = w.core_diameter_km;
                     }
                 } else {
                     unsafe { zero_f64_array(attr, 20) };

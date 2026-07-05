@@ -359,6 +359,61 @@ fn sol_eclipse_where_known() {
     unsafe { swisseph_ffi::swisseph_free(handle) };
 }
 
+#[test]
+fn sol_eclipse_where_no_eclipse_still_populates_attr() {
+    let eph = make_eph();
+    // J2000 — no solar eclipse at this epoch (C golden: retval=0, non-zero attr)
+    let tjd_ut = 2451545.0;
+
+    let lib_result = eph.sol_eclipse_where(tjd_ut, CalcFlags::empty()).unwrap();
+    assert!(lib_result.flags.is_empty(), "expected no eclipse at J2000");
+
+    let handle = unsafe { default_handle() };
+    let mut geopos = [0.0f64; 10];
+    let mut attr = [0.0f64; 20];
+    let mut err_buf = [0u8; 256];
+
+    let ret = unsafe {
+        swisseph_ffi::eclipse::swisseph_sol_eclipse_where(
+            handle,
+            tjd_ut,
+            0,
+            geopos.as_mut_ptr(),
+            attr.as_mut_ptr(),
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        )
+    };
+
+    assert_eq!(ret, 0, "retval should be 0 (no eclipse)");
+
+    // C populates attr unconditionally via eclipse_how — verify FFI does too
+    let how = eph
+        .eclipse_how_at(
+            tjd_ut,
+            Body::Sun,
+            None,
+            CalcFlags::empty(),
+            [
+                lib_result.central_longitude,
+                lib_result.central_latitude,
+                0.0,
+            ],
+        )
+        .unwrap();
+    assert_eps(attr[0], how.magnitude, 1e-15, "attr[0] magnitude");
+    assert_eps(attr[1], how.diameter_ratio, 1e-15, "attr[1] diameter_ratio");
+    assert_eps(
+        attr[3],
+        lib_result.core_diameter_km,
+        1e-15,
+        "attr[3] core_diameter_km (dcore[0])",
+    );
+    assert_eps(attr[4], how.azimuth, 1e-15, "attr[4] azimuth");
+
+    unsafe { swisseph_ffi::swisseph_free(handle) };
+}
+
 // ---------------------------------------------------------------------------
 // sol_eclipse_when_loc
 // ---------------------------------------------------------------------------
