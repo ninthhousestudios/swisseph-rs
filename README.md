@@ -169,6 +169,22 @@ cargo run --example eclipse_search  # next 3 solar + lunar eclipses
 cargo run --example sidereal        # tropical vs Lahiri side by side
 ```
 
+## Performance
+
+| Workload | Rust | C | Ratio |
+|----------|------|---|-------|
+| Full chart, Swiss files (10 planets) | 102 µs | 40 µs | 2.6× |
+| Placidus houses | 5.4 µs | 9.6 µs | **0.56×** |
+| Solar eclipse search | 2.84 ms | 2.61 ms | 1.09× |
+
+Thread scaling (one shared `&Ephemeris`, Moshier, 10k charts):
+1 thread → 5,912 charts/sec, 4 threads → 20,120 charts/sec (**3.4× scaling**),
+8 threads → 24,691 charts/sec. Zero synchronization — `Ephemeris` is `Send + Sync`.
+
+The Moshier backend's single-call overhead is higher than C (C caches Earth/nutation
+globally across calls), but scales linearly with threads where C cannot.
+See [`docs/benchmarks.md`](docs/benchmarks.md) for methodology and analysis.
+
 ## License
 
 This crate is a derivative work of the Swiss Ephemeris.
