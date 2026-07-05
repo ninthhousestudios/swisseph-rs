@@ -736,6 +736,56 @@ fn nod_aps_null_xnasc() {
 }
 
 #[test]
+fn helio_cross_sun_rejected() {
+    let handle = unsafe { default_handle() };
+    let mut jx = 0.0f64;
+    let mut err_buf = [0u8; 256];
+    let ret = unsafe {
+        swisseph_ffi::pheno::swisseph_helio_cross(
+            handle,
+            Body::Sun.to_raw_id(),
+            0.0,
+            2451545.0,
+            CalcFlags::SPEED.bits() as i32,
+            1,
+            &mut jx,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        )
+    };
+    assert_eq!(
+        ret, -2,
+        "helio_cross(Sun) should return UnsupportedFlags (-2)"
+    );
+    unsafe { swisseph_ffi::swisseph_free(handle) };
+}
+
+#[test]
+fn helio_cross_moon_rejected() {
+    let handle = unsafe { default_handle() };
+    let mut jx = 0.0f64;
+    let mut err_buf = [0u8; 256];
+    let ret = unsafe {
+        swisseph_ffi::pheno::swisseph_helio_cross(
+            handle,
+            Body::Moon.to_raw_id(),
+            0.0,
+            2451545.0,
+            CalcFlags::SPEED.bits() as i32,
+            1,
+            &mut jx,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        )
+    };
+    assert_eq!(
+        ret, -2,
+        "helio_cross(Moon) should return UnsupportedFlags (-2)"
+    );
+    unsafe { swisseph_ffi::swisseph_free(handle) };
+}
+
+#[test]
 fn solcross_null_jx() {
     let handle = unsafe { default_handle() };
     let mut err_buf = [0u8; 256];
