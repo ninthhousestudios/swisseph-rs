@@ -4,8 +4,8 @@ use swisseph::flags::CalcFlags;
 use swisseph::nodaps::NodApsMethod;
 use swisseph::types::Body;
 
-use crate::SweEphemeris;
 use crate::error::{SweErrorCode, error_code, ffi_guard, write_err};
+use crate::{SweEphemeris, SweSidMode, build_config};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,6 +34,9 @@ unsafe fn write_phenomena(p: &swisseph::Phenomena, attr: *mut f64) {
 /// # Parameters
 /// - `ipl`: body number
 /// - `iflag`: calculation flags
+/// - `geopos`: NULL, or pointer to `[lon, lat, alt]` for a per-call topographic override
+///   (needed when `SEFLG_TOPOCTR` is set for Moon horizontal parallax)
+/// - `sid_mode`: NULL, or pointer to a `SweSidMode` for a per-call sidereal override
 /// - `attr`: out-param, pointer to 20 `f64` slots. `attr[0]`=phase_angle, `[1]`=phase,
 ///   `[2]`=elongation, `[3]`=apparent_diameter, `[4]`=apparent_magnitude,
 ///   `[5]`=horizontal_parallax, `[6..19]`=0.
@@ -43,13 +46,17 @@ unsafe fn write_phenomena(p: &swisseph::Phenomena, attr: *mut f64) {
 ///
 /// # Safety
 /// - `handle` must be valid, non-NULL.
+/// - `geopos`, if non-NULL, must point to 3 readable `f64` values.
 /// - `attr` must point to at least 20 writable `f64` slots.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn swisseph_pheno(
     handle: *const SweEphemeris,
     tjd_et: f64,
     ipl: i32,
     iflag: i32,
+    geopos: *const f64,
+    sid_mode: *const SweSidMode,
     attr: *mut f64,
     flags_used: *mut i32,
     err_buf: *mut c_char,
@@ -72,7 +79,12 @@ pub unsafe extern "C" fn swisseph_pheno(
         };
         let calc_flags = CalcFlags::from_bits_retain(iflag as u32);
 
-        match eph.pheno(tjd_et, body, calc_flags) {
+        let result = match unsafe { build_config(eph, geopos, sid_mode) } {
+            Some(config) => eph.pheno_with_config(tjd_et, body, calc_flags, &config),
+            None => eph.pheno(tjd_et, body, calc_flags),
+        };
+
+        match result {
             Ok((pheno, used)) => {
                 unsafe {
                     write_phenomena(&pheno, attr);
@@ -95,13 +107,17 @@ pub unsafe extern "C" fn swisseph_pheno(
 ///
 /// # Safety
 /// - `handle` must be valid, non-NULL.
+/// - `geopos`, if non-NULL, must point to 3 readable `f64` values.
 /// - `attr` must point to at least 20 writable `f64` slots.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn swisseph_pheno_ut(
     handle: *const SweEphemeris,
     tjd_ut: f64,
     ipl: i32,
     iflag: i32,
+    geopos: *const f64,
+    sid_mode: *const SweSidMode,
     attr: *mut f64,
     flags_used: *mut i32,
     err_buf: *mut c_char,
@@ -124,7 +140,12 @@ pub unsafe extern "C" fn swisseph_pheno_ut(
         };
         let calc_flags = CalcFlags::from_bits_retain(iflag as u32);
 
-        match eph.pheno_ut(tjd_ut, body, calc_flags) {
+        let result = match unsafe { build_config(eph, geopos, sid_mode) } {
+            Some(config) => eph.pheno_ut_with_config(tjd_ut, body, calc_flags, &config),
+            None => eph.pheno_ut(tjd_ut, body, calc_flags),
+        };
+
+        match result {
             Ok((pheno, used)) => {
                 unsafe {
                     write_phenomena(&pheno, attr);

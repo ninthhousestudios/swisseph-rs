@@ -58,6 +58,8 @@ fn pheno_venus() {
             tjd_et,
             body.to_raw_id(),
             CalcFlags::SPEED.bits() as i32,
+            ptr::null(),
+            ptr::null(),
             attr.as_mut_ptr(),
             &mut flags_used,
             err_buf.as_mut_ptr() as *mut c_char,
@@ -107,6 +109,8 @@ fn pheno_moon() {
             tjd_et,
             body.to_raw_id(),
             CalcFlags::SPEED.bits() as i32,
+            ptr::null(),
+            ptr::null(),
             attr.as_mut_ptr(),
             ptr::null_mut(),
             err_buf.as_mut_ptr() as *mut c_char,
@@ -141,6 +145,8 @@ fn pheno_ut_venus() {
             tjd_ut,
             body.to_raw_id(),
             CalcFlags::SPEED.bits() as i32,
+            ptr::null(),
+            ptr::null(),
             attr.as_mut_ptr(),
             ptr::null_mut(),
             err_buf.as_mut_ptr() as *mut c_char,
@@ -151,6 +157,50 @@ fn pheno_ut_venus() {
     assert_eq!(ret, 0);
     assert_eps(attr[0], lib_p.phase_angle, 1e-15, "phase_angle_ut");
     assert_eps(attr[2], lib_p.elongation, 1e-15, "elongation_ut");
+
+    unsafe { swisseph_ffi::swisseph_free(handle) };
+}
+
+#[test]
+fn pheno_moon_topocentric_geopos_override() {
+    let geopos = [8.55, 47.37, 500.0];
+    let tjd_et = 2451545.0;
+    let body = Body::Moon;
+    let flags = CalcFlags::SPEED | CalcFlags::TOPOCTR;
+
+    let mut config = EphemerisConfig::default();
+    config.topographic = Some(swisseph::config::TopoPosition {
+        longitude: geopos[0],
+        latitude: geopos[1],
+        altitude: geopos[2],
+    });
+    let eph = Ephemeris::new(config).unwrap();
+    let (lib_p, _) = eph.pheno(tjd_et, body, flags).unwrap();
+
+    let handle = unsafe { default_handle() };
+    let mut attr = [0.0f64; 20];
+    let mut err_buf = [0u8; 256];
+    let ret = unsafe {
+        swisseph_ffi::pheno::swisseph_pheno(
+            handle,
+            tjd_et,
+            body.to_raw_id(),
+            flags.bits() as i32,
+            geopos.as_ptr(),
+            ptr::null(),
+            attr.as_mut_ptr(),
+            ptr::null_mut(),
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        )
+    };
+
+    assert_eq!(ret, 0);
+    assert_eps(attr[5], lib_p.horizontal_parallax, 1e-15, "topo_hpar");
+    assert!(
+        attr[5] > 0.0,
+        "topocentric Moon should have nonzero horizontal_parallax"
+    );
 
     unsafe { swisseph_ffi::swisseph_free(handle) };
 }
@@ -700,6 +750,8 @@ fn pheno_null_handle() {
             2451545.0,
             Body::Venus.to_raw_id(),
             0,
+            ptr::null(),
+            ptr::null(),
             attr.as_mut_ptr(),
             ptr::null_mut(),
             err_buf.as_mut_ptr() as *mut c_char,

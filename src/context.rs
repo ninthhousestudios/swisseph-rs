@@ -792,6 +792,18 @@ impl Ephemeris {
         crate::phenomena::pheno(self, tjd_et, body, flags)
     }
 
+    /// [`pheno`](Self::pheno) with a per-call config override (topographic position,
+    /// sidereal mode).
+    pub fn pheno_with_config(
+        &self,
+        tjd_et: f64,
+        body: Body,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<(crate::phenomena::Phenomena, CalcFlags), Error> {
+        crate::phenomena::pheno_with_config(self, tjd_et, body, flags, config)
+    }
+
     /// UT-based [`pheno`](Self::pheno).
     #[doc(alias = "swe_pheno_ut")]
     pub fn pheno_ut(
@@ -801,6 +813,17 @@ impl Ephemeris {
         flags: CalcFlags,
     ) -> Result<(crate::phenomena::Phenomena, CalcFlags), Error> {
         crate::phenomena::pheno_ut(self, tjd_ut, body, flags)
+    }
+
+    /// UT-based [`pheno_with_config`](Self::pheno_with_config).
+    pub fn pheno_ut_with_config(
+        &self,
+        tjd_ut: f64,
+        body: Body,
+        flags: CalcFlags,
+        config: &EphemerisConfig,
+    ) -> Result<(crate::phenomena::Phenomena, CalcFlags), Error> {
+        crate::phenomena::pheno_ut_with_config(self, tjd_ut, body, flags, config)
     }
 
     /// Limiting visual magnitude of an object at `tjd_ut` (UT1).

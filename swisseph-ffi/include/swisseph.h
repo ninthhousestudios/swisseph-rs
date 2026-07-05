@@ -1212,6 +1212,9 @@ double swisseph_refrac_extended(double inalt,
 // # Parameters
 // - `ipl`: body number
 // - `iflag`: calculation flags
+// - `geopos`: NULL, or pointer to `[lon, lat, alt]` for a per-call topographic override
+//   (needed when `SEFLG_TOPOCTR` is set for Moon horizontal parallax)
+// - `sid_mode`: NULL, or pointer to a `SweSidMode` for a per-call sidereal override
 // - `attr`: out-param, pointer to 20 `f64` slots. `attr[0]`=phase_angle, `[1]`=phase,
 //   `[2]`=elongation, `[3]`=apparent_diameter, `[4]`=apparent_magnitude,
 //   `[5]`=horizontal_parallax, `[6..19]`=0.
@@ -1221,11 +1224,14 @@ double swisseph_refrac_extended(double inalt,
 //
 // # Safety
 // - `handle` must be valid, non-NULL.
+// - `geopos`, if non-NULL, must point to 3 readable `f64` values.
 // - `attr` must point to at least 20 writable `f64` slots.
 int32_t swisseph_pheno(const SweEphemeris *handle,
                        double tjd_et,
                        int32_t ipl,
                        int32_t iflag,
+                       const double *geopos,
+                       const struct SweSidMode *sid_mode,
                        double *attr,
                        int32_t *flags_used,
                        char *err_buf,
@@ -1235,11 +1241,14 @@ int32_t swisseph_pheno(const SweEphemeris *handle,
 //
 // # Safety
 // - `handle` must be valid, non-NULL.
+// - `geopos`, if non-NULL, must point to 3 readable `f64` values.
 // - `attr` must point to at least 20 writable `f64` slots.
 int32_t swisseph_pheno_ut(const SweEphemeris *handle,
                           double tjd_ut,
                           int32_t ipl,
                           int32_t iflag,
+                          const double *geopos,
+                          const struct SweSidMode *sid_mode,
                           double *attr,
                           int32_t *flags_used,
                           char *err_buf,

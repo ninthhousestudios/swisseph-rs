@@ -37,7 +37,7 @@ pub struct SweSidMode {
 
 /// Build a config with per-call overrides applied. Returns `None` when no overrides
 /// are present (callers should use the plain Ephemeris method in that case).
-unsafe fn build_config(
+pub(crate) unsafe fn build_config(
     eph: &Ephemeris,
     geopos: *const f64,
     sid_mode: *const SweSidMode,
