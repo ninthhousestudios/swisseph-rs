@@ -166,59 +166,54 @@ pub(crate) unsafe fn config_to_rust(c: &SweConfig) -> Result<EphemerisConfig, &'
     }
 
     // Variable-length arrays
-    config.asteroid_numbers = unsafe { slice_from_ptr(c.asteroid_numbers, c.asteroid_numbers_len) };
+    config.asteroid_numbers =
+        unsafe { slice_from_ptr(c.asteroid_numbers, c.asteroid_numbers_len)? };
     config.planet_moon_numbers =
-        unsafe { slice_from_ptr(c.planet_moon_numbers, c.planet_moon_numbers_len) };
+        unsafe { slice_from_ptr(c.planet_moon_numbers, c.planet_moon_numbers_len)? };
     config.extra_leap_seconds =
-        unsafe { slice_from_ptr(c.extra_leap_seconds, c.extra_leap_seconds_len) };
+        unsafe { slice_from_ptr(c.extra_leap_seconds, c.extra_leap_seconds_len)? };
 
     // Astro models — 0 means "default", non-zero is the raw C enum value
-    apply_astro_models(&mut config, c);
+    apply_astro_models(&mut config, c)?;
 
     Ok(config)
 }
 
-fn apply_astro_models(config: &mut EphemerisConfig, c: &SweConfig) {
+fn apply_astro_models(config: &mut EphemerisConfig, c: &SweConfig) -> Result<(), &'static str> {
     if c.astro_model_prec_longterm != 0 {
-        if let Some(m) = prec_model_from_i32(c.astro_model_prec_longterm) {
-            config.astro_models.prec_longterm = m;
-        }
+        config.astro_models.prec_longterm = prec_model_from_i32(c.astro_model_prec_longterm)
+            .ok_or("invalid astro_model_prec_longterm")?;
     }
     if c.astro_model_prec_shortterm != 0 {
-        if let Some(m) = prec_model_from_i32(c.astro_model_prec_shortterm) {
-            config.astro_models.prec_shortterm = m;
-        }
+        config.astro_models.prec_shortterm = prec_model_from_i32(c.astro_model_prec_shortterm)
+            .ok_or("invalid astro_model_prec_shortterm")?;
     }
     if c.astro_model_nutation != 0 {
-        if let Some(m) = nutation_model_from_i32(c.astro_model_nutation) {
-            config.astro_models.nutation = m;
-        }
+        config.astro_models.nutation = nutation_model_from_i32(c.astro_model_nutation)
+            .ok_or("invalid astro_model_nutation")?;
     }
     if c.astro_model_bias != 0 {
-        if let Some(m) = bias_model_from_i32(c.astro_model_bias) {
-            config.astro_models.bias = m;
-        }
+        config.astro_models.bias =
+            bias_model_from_i32(c.astro_model_bias).ok_or("invalid astro_model_bias")?;
     }
     if c.astro_model_jplhor != 0 {
-        if let Some(m) = jplhor_mode_from_i32(c.astro_model_jplhor) {
-            config.astro_models.jplhor_mode = m;
-        }
+        config.astro_models.jplhor_mode =
+            jplhor_mode_from_i32(c.astro_model_jplhor).ok_or("invalid astro_model_jplhor")?;
     }
     if c.astro_model_jplhora != 0 {
-        if let Some(m) = jplhora_mode_from_i32(c.astro_model_jplhora) {
-            config.astro_models.jplhora_mode = m;
-        }
+        config.astro_models.jplhora_mode =
+            jplhora_mode_from_i32(c.astro_model_jplhora).ok_or("invalid astro_model_jplhora")?;
     }
     if c.astro_model_sidereal_time != 0 {
-        if let Some(m) = sidereal_time_model_from_i32(c.astro_model_sidereal_time) {
-            config.astro_models.sidereal_time = m;
-        }
+        config.astro_models.sidereal_time =
+            sidereal_time_model_from_i32(c.astro_model_sidereal_time)
+                .ok_or("invalid astro_model_sidereal_time")?;
     }
     if c.astro_model_delta_t != 0 {
-        if let Some(m) = delta_t_model_from_i32(c.astro_model_delta_t) {
-            config.astro_models.delta_t = m;
-        }
+        config.astro_models.delta_t =
+            delta_t_model_from_i32(c.astro_model_delta_t).ok_or("invalid astro_model_delta_t")?;
     }
+    Ok(())
 }
 
 fn prec_model_from_i32(v: i32) -> Option<swisseph::PrecessionModel> {
@@ -320,9 +315,12 @@ unsafe fn nullable_cstr_to_string(ptr: *const c_char) -> Result<Option<String>, 
     Ok(Some(s.to_owned()))
 }
 
-unsafe fn slice_from_ptr(ptr: *const i32, len: usize) -> Vec<i32> {
-    if ptr.is_null() || len == 0 {
-        return Vec::new();
+unsafe fn slice_from_ptr(ptr: *const i32, len: usize) -> Result<Vec<i32>, &'static str> {
+    if len == 0 {
+        return Ok(Vec::new());
     }
-    unsafe { std::slice::from_raw_parts(ptr, len).to_vec() }
+    if ptr.is_null() {
+        return Err("null pointer with nonzero length");
+    }
+    Ok(unsafe { std::slice::from_raw_parts(ptr, len).to_vec() })
 }
