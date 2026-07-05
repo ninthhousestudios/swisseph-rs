@@ -195,10 +195,24 @@ int32_t swisseph_calc_ut(const SweEphemeris *handle,
                          uintptr_t err_cap);
 
 // Compute planetary position at `tjd_et` (Julian Day, TT/ET).
-// Same as `swisseph_calc_ut` but takes Terrestrial Time directly.
+//
+// # Parameters
+// - `handle`: ephemeris handle from `swisseph_new`
+// - `tjd_et`: Julian Day in TT/ET
+// - `ipl`: body number (C `ipl` values, matching `Body` discriminant)
+// - `iflag`: calculation flags (C `SEFLG_*` bit values)
+// - `geopos`: NULL, or pointer to `[lon, lat, alt]` for a per-call topographic override
+// - `sid_mode`: NULL, or pointer to a `SweSidMode` for a per-call sidereal override
+// - `xx`: out-param, pointer to 6 `f64` slots receiving [lon, lat, dist, lon_speed, lat_speed, dist_speed]
+// - `flags_used`: out-param (may be NULL), pointer to `i32` receiving the flags actually applied
+// - `err_buf`, `err_cap`: optional error message buffer
+//
+// Returns 0 on success, negative error code on failure.
 //
 // # Safety
-// Same as `swisseph_calc_ut`.
+// - `handle` must be a valid, non-NULL handle.
+// - `xx` must point to at least 6 writable `f64` slots.
+// - `geopos`, if non-NULL, must point to 3 readable `f64` values.
 int32_t swisseph_calc(const SweEphemeris *handle,
                       double tjd_et,
                       int32_t ipl,
@@ -260,10 +274,23 @@ int32_t swisseph_fixstar2(const SweEphemeris *handle,
                           uintptr_t err_cap);
 
 // Compute fixed-star position at `tjd_ut` (UT1).
-// Same as `swisseph_fixstar2` but takes Universal Time.
+//
+// # Parameters
+// - `star`: input star name (NUL-terminated UTF-8)
+// - `star_out`: buffer receiving the resolved "name,bayer" canonical name (NUL-terminated);
+//   may be NULL if the resolved name is not needed
+// - `star_out_cap`: capacity of `star_out` in bytes (including NUL)
+// - `geopos`: NULL, or `[lon, lat, alt]` for per-call topographic override
+// - `sid_mode`: NULL, or per-call sidereal override
+// - `xx`: out-param, pointer to 6 `f64` slots
+// - `flags_used`: out-param (may be NULL)
+//
+// Returns 0 on success, negative error code on failure.
 //
 // # Safety
-// Same as `swisseph_fixstar2`.
+// - `star` must be a valid NUL-terminated UTF-8 string.
+// - `star_out` may be NULL; if non-NULL, `star_out_cap` bytes must be writable.
+// - `xx` must point to at least 6 writable `f64` slots.
 int32_t swisseph_fixstar2_ut(const SweEphemeris *handle,
                              const char *star,
                              char *star_out,
@@ -319,8 +346,16 @@ int32_t swisseph_get_ayanamsa_ex(const SweEphemeris *handle,
 
 // Ayanamsa at `tjd_ut` (UT1) with flags. Nutation added unless `NONUT` is set.
 //
+// # Parameters
+// - `sid_mode`: NULL uses the handle's configured sidereal mode; non-NULL overrides per-call
+// - `daya`: out-param receiving the ayanamsa in degrees
+// - `flags_used`: out-param (may be NULL)
+//
+// Returns 0 on success, negative error code on failure.
+//
 // # Safety
-// Same as `swisseph_get_ayanamsa_ex`.
+// - `handle` must be valid, non-NULL.
+// - `daya` must point to a writable `f64`.
 int32_t swisseph_get_ayanamsa_ex_ut(const SweEphemeris *handle,
                                     double tjd_ut,
                                     int32_t iflag,
