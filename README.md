@@ -83,7 +83,7 @@ The C library stores all state in one process-global `swed` struct:
 - **Consequences**: not thread-safe, one configuration per process, and bindings to
   higher-level languages must serialize all calls or maintain one copy of the shared
   library per thread/isolate. The
-  [swisseph.dart](https://github.com/nickvdyck/swisseph.dart) package, for example,
+  [swisseph.dart](https://github.com/ninthhousestudios/swisseph.dart) package, for example,
   loads a separate copy of the native library per Dart isolate — the direct motivation
   for this stateless port.
 
