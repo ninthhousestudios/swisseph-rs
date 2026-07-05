@@ -1,6 +1,7 @@
 pub mod config;
 pub mod date;
 pub mod error;
+pub mod houses;
 pub mod util;
 
 use std::ffi::c_char;
@@ -81,7 +82,7 @@ unsafe fn write_calc_result(r: &swisseph::CalcResult, xx: *mut f64, flags_used: 
 
 /// Convert a `*const c_char` to a `&str`. Returns `Err` with a static message on
 /// null or invalid UTF-8.
-unsafe fn cstr_to_str<'a>(ptr: *const c_char) -> Result<&'a str, &'static str> {
+pub(crate) unsafe fn cstr_to_str<'a>(ptr: *const c_char) -> Result<&'a str, &'static str> {
     if ptr.is_null() {
         return Err("null star name");
     }

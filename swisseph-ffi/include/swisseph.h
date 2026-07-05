@@ -648,6 +648,274 @@ void swisseph_split_deg(double ddeg,
                         double *secfr,
                         int32_t *sign);
 
+// Compute tropical house cusps and angular points at `tjd_ut` (UT1).
+//
+// # Parameters
+// - `handle`: ephemeris handle from `swisseph_new`
+// - `tjd_ut`: Julian Day in UT1
+// - `geolat`: geographic latitude (north positive), degrees
+// - `geolon`: geographic longitude (east positive), degrees
+// - `hsys`: house system as ASCII char code (e.g. `'P'` for Placidus)
+// - `cusps`: out, must point to at least 13 writable `f64` slots (37 for `'G'` Gauquelin)
+// - `ascmc`: out, must point to at least 10 writable `f64` slots
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - `cusps` must point to at least 13 (or 37 for Gauquelin) writable `f64` slots.
+// - `ascmc` must point to at least 10 writable `f64` slots.
+int32_t swisseph_houses(const SweEphemeris *handle,
+                        double tjd_ut,
+                        double geolat,
+                        double geolon,
+                        int32_t hsys,
+                        double *cusps,
+                        double *ascmc,
+                        char *err_buf,
+                        uintptr_t err_cap);
+
+// Compute house cusps and angular points at `tjd_ut` (UT1) with flags.
+//
+// Sidereal mode (when `SEFLG_SIDEREAL` is set in `iflag`) uses the mode
+// configured on the handle at construction time.
+//
+// # Parameters
+// - `iflag`: calculation flags (e.g. `SEFLG_SIDEREAL`)
+// - `cusps`: out, at least 13 `f64` slots (37 for Gauquelin)
+// - `ascmc`: out, at least 10 `f64` slots
+//
+// ascmc layout: [0]=Asc, [1]=MC, [2]=ARMC, [3]=Vertex, [4]=equatorial Asc,
+// [5]=co-Asc (Koch), [6]=co-Asc (Munkasey), [7]=polar Asc, [8..9]=0.
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - `cusps` must point to at least 13 (or 37 for Gauquelin) writable `f64` slots.
+// - `ascmc` must point to at least 10 writable `f64` slots.
+int32_t swisseph_houses_ex(const SweEphemeris *handle,
+                           double tjd_ut,
+                           int32_t iflag,
+                           double geolat,
+                           double geolon,
+                           int32_t hsys,
+                           double *cusps,
+                           double *ascmc,
+                           char *err_buf,
+                           uintptr_t err_cap);
+
+// Compute house cusps, angular points, and their speeds at `tjd_ut` (UT1).
+//
+// Sidereal mode (when `SEFLG_SIDEREAL` is set in `iflag`) uses the mode
+// configured on the handle at construction time.
+//
+// # Parameters
+// - `cusp_speed`: out, nullable — cusp speeds (degrees/day), same sizing as `cusps`
+// - `ascmc_speed`: out, nullable — angular-point speeds (10 slots, same layout as `ascmc`)
+//
+// Cusps must be sized 13 for all systems except Gauquelin ('G') which needs 37.
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - `cusps`, `ascmc` must be valid and properly sized.
+// - `cusp_speed`, `ascmc_speed` may be NULL (speeds omitted).
+int32_t swisseph_houses_ex2(const SweEphemeris *handle,
+                            double tjd_ut,
+                            int32_t iflag,
+                            double geolat,
+                            double geolon,
+                            int32_t hsys,
+                            double *cusps,
+                            double *ascmc,
+                            double *cusp_speed,
+                            double *ascmc_speed,
+                            char *err_buf,
+                            uintptr_t err_cap);
+
+// Compute house cusps from ARMC, obliquity, and geographic latitude directly.
+//
+// Handle-free function — does not need an Ephemeris instance.
+//
+// # Safety
+// - `cusps` must point to at least 13 (or 37 for Gauquelin) writable `f64` slots.
+// - `ascmc` must point to at least 10 writable `f64` slots.
+int32_t swisseph_houses_armc(double armc,
+                             double geolat,
+                             double eps,
+                             int32_t hsys,
+                             double *cusps,
+                             double *ascmc,
+                             char *err_buf,
+                             uintptr_t err_cap);
+
+// Compute house cusps and speeds from ARMC, obliquity, and geographic latitude.
+//
+// Handle-free. `sundec` is required for Sunshine house systems (`'I'`/`'i'`);
+// pass NULL for all others.
+//
+// # Safety
+// - `cusps`, `ascmc` must be valid and properly sized.
+// - `cusp_speed`, `ascmc_speed` may be NULL.
+// - `sundec` may be NULL (required for Sunshine systems).
+int32_t swisseph_houses_armc_ex2(double armc,
+                                 double geolat,
+                                 double eps,
+                                 int32_t hsys,
+                                 const double *sundec,
+                                 double *cusps,
+                                 double *ascmc,
+                                 double *cusp_speed,
+                                 double *ascmc_speed,
+                                 char *err_buf,
+                                 uintptr_t err_cap);
+
+// Compute the house position of a planet (continuous 1.0..13.0 for 12-house
+// systems, 1.0..37.0 for Gauquelin).
+//
+// # Parameters
+// - `armc`: sidereal time as ARMC (degrees)
+// - `geolat`: geographic latitude (degrees)
+// - `eps`: obliquity of ecliptic (degrees)
+// - `hsys`: house system (ASCII char)
+// - `xpin`: ecliptic longitude and latitude of the planet, 2 `f64` values
+// - `sundec`: Sun declination, required for Sunshine (`'I'`/`'i'`); NULL otherwise
+// - `hpos`: out, house position (1.0..13.0 or 1.0..37.0)
+//
+// # Safety
+// - `xpin` must point to 2 readable `f64` values.
+// - `hpos` must point to a writable `f64`.
+// - `sundec` may be NULL.
+int32_t swisseph_house_pos(double armc,
+                           double geolat,
+                           double eps,
+                           int32_t hsys,
+                           const double *xpin,
+                           const double *sundec,
+                           double *hpos,
+                           char *err_buf,
+                           uintptr_t err_cap);
+
+// Get the human-readable name of a house system.
+//
+// Handle-free. Writes the name to `buf` (NUL-terminated, truncated if needed).
+//
+// # Safety
+// - `buf` must point to at least `cap` writable bytes.
+int32_t swisseph_house_name(int32_t hsys,
+                            char *buf,
+                            uintptr_t cap,
+                            char *err_buf,
+                            uintptr_t err_cap);
+
+// Compute a Gauquelin sector position at `tjd_ut` (UT1).
+//
+// # Parameters
+// - `ipl`: planet body ID
+// - `starname`: fixed star name (NUL-terminated), or NULL for a planet
+// - `iflag`: calculation flags
+// - `imeth`: method (0/1 = geometric, 2–5 = rise/set-based)
+// - `geopos`: geographic position [lon, lat, height], 3 `f64` values
+// - `atpress`: atmospheric pressure (hPa), for rise/set methods
+// - `attemp`: atmospheric temperature (°C), for rise/set methods
+// - `dgsect`: out, Gauquelin sector (1.0..36.x)
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - `geopos` must point to 3 readable `f64` values.
+// - `dgsect` must point to a writable `f64`.
+// - `starname` may be NULL.
+int32_t swisseph_gauquelin_sector(const SweEphemeris *handle,
+                                  double tjd_ut,
+                                  int32_t ipl,
+                                  const char *starname,
+                                  int32_t iflag,
+                                  int32_t imeth,
+                                  const double *geopos,
+                                  double atpress,
+                                  double attemp,
+                                  double *dgsect,
+                                  char *err_buf,
+                                  uintptr_t err_cap);
+
+// Convert ecliptic/equatorial coordinates to horizontal (azimuth + altitude).
+//
+// # Parameters
+// - `calc_flag`: `SE_ECL2HOR` (0) or `SE_EQU2HOR` (1)
+// - `geopos`: [longitude, latitude, height], 3 `f64` values
+// - `atpress`: atmospheric pressure (hPa) — 0 for no refraction
+// - `attemp`: atmospheric temperature (°C)
+// - `xin`: input [longitude/RA, latitude/declination], 2 `f64` values
+// - `xaz`: out [azimuth, true altitude, apparent altitude], 3 `f64` values
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `xin` must point to 2 readable `f64` values (only [0] and [1] used).
+// - `xaz` must point to 3 writable `f64` values.
+void swisseph_azalt(const SweEphemeris *handle,
+                    double tjd_ut,
+                    int32_t calc_flag,
+                    const double *geopos,
+                    double atpress,
+                    double attemp,
+                    const double *xin,
+                    double *xaz);
+
+// Convert horizontal (azimuth + altitude) back to ecliptic/equatorial.
+//
+// # Parameters
+// - `calc_flag`: `SE_HOR2ECL` (0) or `SE_HOR2EQU` (1)
+// - `geopos`: [longitude, latitude, height], 3 `f64` values
+// - `xin`: [azimuth (from south, clockwise), true altitude], 2 `f64` values
+// - `xout`: out [lon/RA, lat/dec], 2 `f64` values
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `geopos` must point to 3 readable `f64` values.
+// - `xin` must point to 2 readable `f64` values.
+// - `xout` must point to 2 writable `f64` values.
+void swisseph_azalt_rev(const SweEphemeris *handle,
+                        double tjd_ut,
+                        int32_t calc_flag,
+                        const double *geopos,
+                        const double *xin,
+                        double *xout);
+
+// Simple atmospheric refraction (sea-level, no dip).
+//
+// Handle-free.
+//
+// # Parameters
+// - `inalt`: input altitude (degrees)
+// - `atpress`: atmospheric pressure (hPa)
+// - `attemp`: atmospheric temperature (°C)
+// - `calc_flag`: `SE_TRUE_TO_APP` (0) or `SE_APP_TO_TRUE` (1)
+//
+// Returns the refracted/de-refracted altitude (degrees).
+double swisseph_refrac(double inalt, double atpress, double attemp, int32_t calc_flag);
+
+// Extended atmospheric refraction with horizon dip for an elevated observer.
+//
+// Handle-free.
+//
+// # Parameters
+// - `inalt`: input altitude (degrees)
+// - `geoalt`: observer height above sea level (meters)
+// - `atpress`: atmospheric pressure (hPa)
+// - `attemp`: atmospheric temperature (°C)
+// - `lapse_rate`: temperature lapse rate (K/m), typically 0.0065
+// - `calc_flag`: `SE_TRUE_TO_APP` (0) or `SE_APP_TO_TRUE` (1)
+// - `dret`: out, 4 `f64` values: [true alt, apparent alt, refraction, dip]
+//
+// Returns the refracted/de-refracted altitude.
+//
+// # Safety
+// - `dret` must point to at least 4 writable `f64` slots.
+double swisseph_refrac_extended(double inalt,
+                                double geoalt,
+                                double atpress,
+                                double attemp,
+                                double lapse_rate,
+                                int32_t calc_flag,
+                                double *dret);
+
 // Normalize degrees to [0, 360). Port of `swe_degnorm`.
 double swisseph_degnorm(double x);
 
