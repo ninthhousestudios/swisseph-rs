@@ -286,7 +286,7 @@ pub unsafe extern "C" fn swisseph_sol_eclipse_where(
     err_cap: usize,
 ) -> i32 {
     ffi_guard!(err_buf, err_cap, {
-        if handle.is_null() || geopos.is_null() {
+        if handle.is_null() || geopos.is_null() || attr.is_null() {
             unsafe { write_err(err_buf, err_cap, "null pointer argument") };
             return SweErrorCode::InvalidArg as i32;
         }
@@ -702,7 +702,7 @@ pub unsafe extern "C" fn swisseph_lun_occult_where(
     err_cap: usize,
 ) -> i32 {
     ffi_guard!(err_buf, err_cap, {
-        if handle.is_null() || geopos.is_null() {
+        if handle.is_null() || geopos.is_null() || attr.is_null() {
             unsafe { write_err(err_buf, err_cap, "null pointer argument") };
             return SweErrorCode::InvalidArg as i32;
         }
