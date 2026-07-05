@@ -276,7 +276,7 @@ impl Ephemeris {
     /// Capability: Swiss requires `!planet_files.is_empty()`, Jpl requires
     /// `jpl_file.is_some()`. Unavailable → C's fallback cascade
     /// (Jpl→Swiss→Moshier), signaled via the returned source.
-    pub(crate) fn effective_config<'a>(
+    pub fn effective_config<'a>(
         &self,
         flags: CalcFlags,
         config: &'a EphemerisConfig,

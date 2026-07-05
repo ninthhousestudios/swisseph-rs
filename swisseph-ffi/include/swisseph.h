@@ -414,4 +414,271 @@ int32_t swisseph_get_planet_name(const SweEphemeris *handle,
 // `config` must point to a valid, writable `SweConfig`.
 void swisseph_config_default(struct SweConfig *config);
 
+// Convert a calendar date + fractional hour (UT) to a Julian Day number.
+// `gregflag`: 0 = Julian calendar, 1 = Gregorian calendar.
+//
+// # Safety
+// No pointer arguments.
+double swisseph_julday(int32_t year, int32_t month, int32_t day, double hour, int32_t gregflag);
+
+// Convert a Julian Day number to calendar date components.
+// `gregflag`: 0 = Julian calendar, 1 = Gregorian calendar.
+//
+// # Safety
+// - `year`, `month`, `day` must point to writable `i32` slots.
+// - `hour` must point to a writable `f64`.
+void swisseph_revjul(double jd,
+                     int32_t gregflag,
+                     int32_t *year,
+                     int32_t *month,
+                     int32_t *day,
+                     double *hour);
+
+// Validate and convert a calendar date to a Julian Day.
+// Returns 0 on success (writes JD to `*tjd`), or ERR on invalid date.
+// `cal`: 'g'/'G' = Gregorian, 'j'/'J' = Julian.
+//
+// # Safety
+// - `tjd` must point to a writable `f64`.
+int32_t swisseph_date_conversion(int32_t year,
+                                 int32_t month,
+                                 int32_t day,
+                                 double hour,
+                                 char cal,
+                                 double *tjd,
+                                 char *err_buf,
+                                 uintptr_t err_cap);
+
+// Day of the week for a Julian Day: 0 = Monday .. 6 = Sunday.
+//
+// # Safety
+// No pointer arguments.
+int32_t swisseph_day_of_week(double jd);
+
+// Shift a UTC date/time by a timezone offset (hours, east positive).
+// All time components are both input and output (in-place conversion).
+//
+// # Safety
+// - All pointer arguments must point to writable locations.
+void swisseph_utc_time_zone(int32_t iyear,
+                            int32_t imonth,
+                            int32_t iday,
+                            int32_t ihour,
+                            int32_t imin,
+                            double dsec,
+                            double d_timezone,
+                            int32_t *oyear,
+                            int32_t *omonth,
+                            int32_t *oday,
+                            int32_t *ohour,
+                            int32_t *omin,
+                            double *osec);
+
+// Convert UTC to Julian Day (TT and UT1). Writes `dret[0]` = JD(TT), `dret[1]` = JD(UT1).
+// `gregflag`: 0 = Julian, 1 = Gregorian.
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - `dret` must point to at least 2 writable `f64` slots.
+int32_t swisseph_utc_to_jd(const SweEphemeris *handle,
+                           int32_t year,
+                           int32_t month,
+                           int32_t day,
+                           int32_t hour,
+                           int32_t min,
+                           double sec,
+                           int32_t gregflag,
+                           double *dret,
+                           char *err_buf,
+                           uintptr_t err_cap);
+
+// Convert Julian Day (TT) to UTC calendar components.
+// `gregflag`: 0 = Julian, 1 = Gregorian.
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - All out-param pointers must be writable.
+void swisseph_jdet_to_utc(const SweEphemeris *handle,
+                          double tjd_et,
+                          int32_t gregflag,
+                          int32_t *year,
+                          int32_t *month,
+                          int32_t *day,
+                          int32_t *hour,
+                          int32_t *min,
+                          double *sec);
+
+// Convert Julian Day (UT1) to UTC calendar components.
+// `gregflag`: 0 = Julian, 1 = Gregorian.
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - All out-param pointers must be writable.
+void swisseph_jdut1_to_utc(const SweEphemeris *handle,
+                           double tjd_ut,
+                           int32_t gregflag,
+                           int32_t *year,
+                           int32_t *month,
+                           int32_t *day,
+                           int32_t *hour,
+                           int32_t *min,
+                           double *sec);
+
+// Compute Delta T (TT - UT1) in days for `tjd_ut`.
+// Uses the handle's configured ephemeris model.
+//
+// # Safety
+// `handle` must be a valid, non-NULL handle.
+double swisseph_deltat(const SweEphemeris *handle, double tjd_ut);
+
+// Compute Delta T (TT - UT1) in days for `tjd_ut`, with iflag-based ephemeris resolution.
+// Writes the result to `*deltat`. Returns 0 on success.
+//
+// The `iflag` EPHMASK bits select which ephemeris backend's tidal acceleration to use.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `deltat` must point to a writable `f64`.
+int32_t swisseph_deltat_ex(const SweEphemeris *handle,
+                           double tjd_ut,
+                           int32_t iflag,
+                           double *deltat,
+                           char *err_buf,
+                           uintptr_t err_cap);
+
+// Greenwich Apparent Sidereal Time (hours, 0..24) from `tjd_ut`.
+// Uses the handle's configured astro models. Forces TIDAL_DEFAULT internally
+// (matching C's `swe_sidtime` behavior).
+//
+// # Safety
+// `handle` must be valid, non-NULL.
+double swisseph_sidtime(const SweEphemeris *handle, double tjd_ut);
+
+// Greenwich Apparent Sidereal Time (hours, 0..24) from pre-computed
+// true obliquity `eps` (degrees) and nutation in longitude `nut` (degrees).
+// Forces TIDAL_DEFAULT internally (matching C's `swe_sidtime0` behavior).
+//
+// # Safety
+// `handle` must be valid, non-NULL.
+double swisseph_sidtime0(const SweEphemeris *handle, double tjd_ut, double eps, double nut);
+
+// Equation of time at `tjd_ut` (UT1). Returns `E = LAT − LMT` in **days**.
+// Positive means the Sun is ahead of the mean Sun.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `e` must point to a writable `f64`.
+int32_t swisseph_time_equ(const SweEphemeris *handle,
+                          double tjd_ut,
+                          double *e,
+                          char *err_buf,
+                          uintptr_t err_cap);
+
+// Convert Local Mean Time to Local Apparent Time.
+// `geolon` in degrees (east-positive). `tjd_lmt` and output are Julian Day (UT-scale).
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `tjd_lat` must point to a writable `f64`.
+int32_t swisseph_lmt_to_lat(const SweEphemeris *handle,
+                            double tjd_lmt,
+                            double geolon,
+                            double *tjd_lat,
+                            char *err_buf,
+                            uintptr_t err_cap);
+
+// Convert Local Apparent Time to Local Mean Time.
+// `geolon` in degrees (east-positive). `tjd_lat` and output are Julian Day (UT-scale).
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `tjd_lmt` must point to a writable `f64`.
+int32_t swisseph_lat_to_lmt(const SweEphemeris *handle,
+                            double tjd_lat,
+                            double geolon,
+                            double *tjd_lmt,
+                            char *err_buf,
+                            uintptr_t err_cap);
+
+// Round centiseconds to the nearest arcsecond with a 30°-boundary guard.
+//
+// # Safety
+// No pointer arguments.
+int32_t swisseph_csroundsec(int32_t x);
+
+// Format time-of-day centiseconds as `"HH:MM:SS"` into `buf`.
+// `sep` is the separator character (e.g. ':').
+// `suppress_zero`: if true, omits seconds when they are zero.
+//
+// # Safety
+// - `buf` must point to at least `cap` writable bytes.
+void swisseph_cs2timestr(int32_t t, char sep, bool suppress_zero, char *buf, uintptr_t cap);
+
+// Format arc centiseconds as a longitude/latitude string with direction letters.
+// `pchar` for positive, `mchar` for negative.
+//
+// # Safety
+// - `buf` must point to at least `cap` writable bytes.
+void swisseph_cs2lonlatstr(int32_t t, char pchar, char mchar, char *buf, uintptr_t cap);
+
+// Format arc centiseconds as degrees-within-sign (`" D°MM'SS"`).
+// Truncates (no rounding) and wraps into [0, 30°).
+//
+// # Safety
+// - `buf` must point to at least `cap` writable bytes.
+void swisseph_cs2degstr(int32_t t, char *buf, uintptr_t cap);
+
+// Split a decimal degree value into components. Mirrors C's `swe_split_deg`.
+//
+// # Parameters
+// - `ddeg`: decimal degrees to split
+// - `roundflag`: combination of SE_SPLIT_DEG_* flags
+// - `deg`, `min`, `sec`: out-params for integer components
+// - `secfr`: out-param for fractional seconds
+// - `sign`: out-param for sign (zodiacal sign index, or ±1)
+//
+// # Safety
+// All out-param pointers must be writable.
+void swisseph_split_deg(double ddeg,
+                        int32_t roundflag,
+                        int32_t *deg,
+                        int32_t *min,
+                        int32_t *sec,
+                        double *secfr,
+                        int32_t *sign);
+
+// Normalize degrees to [0, 360). Port of `swe_degnorm`.
+double swisseph_degnorm(double x);
+
+// Normalize radians to [0, 2π). Port of `swe_radnorm`.
+double swisseph_radnorm(double x);
+
+// Difference `p1 - p2` normalized to [0, 360). Port of `swe_difdegn`.
+double swisseph_difdegn(double p1, double p2);
+
+// Difference `p1 - p2` normalized to (-180, 180]. Port of `swe_difdeg2n`.
+double swisseph_difdeg2n(double p1, double p2);
+
+// Midpoint of two degree values on the 360° circle. Port of `swe_deg_midp`.
+double swisseph_deg_midp(double x1, double x0);
+
+// Midpoint of two radian values on the 2π circle. Port of `swe_rad_midp`.
+double swisseph_rad_midp(double x1, double x0);
+
+// Coordinate transformation (ecliptic ↔ equatorial).
+// `xpo[3]` in, `xpn[3]` out. `eps` in degrees.
+//
+// # Safety
+// - `xpo` must point to 3 readable `f64` values.
+// - `xpn` must point to 3 writable `f64` values.
+void swisseph_cotrans(const double *xpo, double *xpn, double eps);
+
+// Coordinate transformation with speed (ecliptic ↔ equatorial).
+// `xpo[6]` in (pos + speed), `xpn[6]` out. `eps` in degrees.
+//
+// # Safety
+// - `xpo` must point to 6 readable `f64` values.
+// - `xpn` must point to 6 writable `f64` values.
+void swisseph_cotrans_sp(const double *xpo, double *xpn, double eps);
+
 #endif  /* SWISSEPH_H */

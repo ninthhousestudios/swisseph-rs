@@ -1,5 +1,7 @@
 pub mod config;
+pub mod date;
 pub mod error;
+pub mod util;
 
 use std::ffi::c_char;
 
