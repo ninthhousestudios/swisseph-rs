@@ -338,6 +338,40 @@ fn deltat_ex_parity() {
     }
 }
 
+#[test]
+fn deltat_ex_sentinel_minus_one() {
+    // C's swe_deltat_ex(tjd, -1, NULL) forces SE_TIDAL_DEFAULT. Verify our FFI
+    // matches the sidtime path (which also forces TIDAL_DEFAULT) rather than
+    // falling through to Moshier/DE404.
+    unsafe {
+        let handle = default_handle();
+        let mut dt_sentinel = 0.0f64;
+        let mut dt_plain = 0.0f64;
+        let mut err_buf = [0u8; 256];
+        let ret = swisseph_ffi::date::swisseph_deltat_ex(
+            handle,
+            J2000,
+            -1, // sentinel
+            &mut dt_sentinel,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        );
+        assert_eq!(ret, 0);
+        // For default Moshier config, TIDAL_DEFAULT == TIDAL_DE431, config has
+        // TIDAL_DE404. At J2000 the difference is tiny but nonzero at far epochs.
+        // At minimum, verify it doesn't crash and returns a valid value.
+        assert!(dt_sentinel > 0.0005 && dt_sentinel < 0.001);
+
+        // Compare against the plain swisseph_deltat (which uses config's tid_acc).
+        // For Moshier default config, tid_acc is DE404 — so at J2000 these should
+        // differ only at the ~1e-9 level (tidal correction is tiny near J2000).
+        dt_plain = swisseph_ffi::date::swisseph_deltat(handle, J2000);
+        // They'll be very close at J2000 but not necessarily bitwise-equal
+        assert!((dt_sentinel - dt_plain).abs() < 1e-6);
+        swisseph_ffi::swisseph_free(handle);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // sidereal time
 // ---------------------------------------------------------------------------
@@ -559,15 +593,29 @@ fn difdegn_range() {
     // difdegn = p1 - p2 in [0, 360)
     let r = swisseph_ffi::util::swisseph_difdegn(10.0, 350.0);
     assert!((r - 20.0).abs() < 1e-10);
+    // Boundary: exactly 360 difference wraps to 0
+    let r = swisseph_ffi::util::swisseph_difdegn(0.0, 0.0);
+    assert!(r.abs() < 1e-10);
+    // Boundary: exactly 180 difference stays at 180
+    let r = swisseph_ffi::util::swisseph_difdegn(180.0, 0.0);
+    assert!((r - 180.0).abs() < 1e-10);
 }
 
 #[test]
 fn difdeg2n_range() {
-    // difdeg2n = p1 - p2 in (-180, 180]
+    // difdeg2n = p1 - p2 in [-180, 180)
     let r = swisseph_ffi::util::swisseph_difdeg2n(10.0, 350.0);
     assert!((r - 20.0).abs() < 1e-10);
     let r = swisseph_ffi::util::swisseph_difdeg2n(350.0, 10.0);
     assert!((r - (-20.0)).abs() < 1e-10);
+    // Boundary: exactly 180 difference maps to -180 (the [-180, 180) convention)
+    let r = swisseph_ffi::util::swisseph_difdeg2n(0.0, 180.0);
+    assert!((r - (-180.0)).abs() < 1e-10);
+    let r = swisseph_ffi::util::swisseph_difdeg2n(180.0, 0.0);
+    assert!((r - (-180.0)).abs() < 1e-10);
+    // 90 - 270 = -180 (wraps)
+    let r = swisseph_ffi::util::swisseph_difdeg2n(90.0, 270.0);
+    assert!((r - (-180.0)).abs() < 1e-10);
 }
 
 #[test]

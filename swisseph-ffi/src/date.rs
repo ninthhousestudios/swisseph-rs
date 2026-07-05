@@ -356,6 +356,7 @@ pub unsafe extern "C" fn swisseph_deltat(handle: *const SweEphemeris, tjd_ut: f6
 /// Writes the result to `*deltat`. Returns 0 on success.
 ///
 /// The `iflag` EPHMASK bits select which ephemeris backend's tidal acceleration to use.
+/// Pass `iflag = -1` to force the default tidal acceleration (matching C's sentinel behavior).
 ///
 /// # Safety
 /// - `handle` must be valid, non-NULL.
@@ -375,9 +376,17 @@ pub unsafe extern "C" fn swisseph_deltat_ex(
             return SweErrorCode::InvalidArg as i32;
         }
         let eph = unsafe { &(*handle).0 };
-        let calc_flags = CalcFlags::from_bits_retain(iflag as u32);
-        let config = eph.effective_config(calc_flags, eph.config());
-        let dt = calc_deltat(tjd_ut, &config);
+        // C's swe_deltat_ex(tjd, -1, NULL) sentinel forces SE_TIDAL_DEFAULT
+        // regardless of configured backend. Replicate that here.
+        let dt = if iflag == -1 {
+            let mut forced = eph.config().clone();
+            forced.tidal_acceleration = Some(swisseph::constants::TIDAL_DEFAULT);
+            calc_deltat(tjd_ut, &forced)
+        } else {
+            let calc_flags = CalcFlags::from_bits_retain(iflag as u32);
+            let config = eph.effective_config(calc_flags, eph.config());
+            calc_deltat(tjd_ut, &config)
+        };
         unsafe { *deltat = dt };
         SweErrorCode::Ok as i32
     })

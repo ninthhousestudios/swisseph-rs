@@ -535,6 +535,7 @@ double swisseph_deltat(const SweEphemeris *handle, double tjd_ut);
 // Writes the result to `*deltat`. Returns 0 on success.
 //
 // The `iflag` EPHMASK bits select which ephemeris backend's tidal acceleration to use.
+// Pass `iflag = -1` to force the default tidal acceleration (matching C's sentinel behavior).
 //
 // # Safety
 // - `handle` must be valid, non-NULL.
@@ -656,7 +657,7 @@ double swisseph_radnorm(double x);
 // Difference `p1 - p2` normalized to [0, 360). Port of `swe_difdegn`.
 double swisseph_difdegn(double p1, double p2);
 
-// Difference `p1 - p2` normalized to (-180, 180]. Port of `swe_difdeg2n`.
+// Difference `p1 - p2` normalized to [-180, 180). Port of `swe_difdeg2n`.
 double swisseph_difdeg2n(double p1, double p2);
 
 // Midpoint of two degree values on the 360° circle. Port of `swe_deg_midp`.

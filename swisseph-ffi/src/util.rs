@@ -22,7 +22,7 @@ pub extern "C" fn swisseph_difdegn(p1: f64, p2: f64) -> f64 {
     math::diff_degrees_norm(p1, p2)
 }
 
-/// Difference `p1 - p2` normalized to (-180, 180]. Port of `swe_difdeg2n`.
+/// Difference `p1 - p2` normalized to [-180, 180). Port of `swe_difdeg2n`.
 #[unsafe(no_mangle)]
 pub extern "C" fn swisseph_difdeg2n(p1: f64, p2: f64) -> f64 {
     math::diff_degrees(p1, p2)
