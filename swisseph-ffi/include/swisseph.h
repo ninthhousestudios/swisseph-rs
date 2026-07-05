@@ -1207,6 +1207,261 @@ double swisseph_refrac_extended(double inalt,
                                 int32_t calc_flag,
                                 double *dret);
 
+// Planetary phenomena (phase angle, elongation, magnitude, etc.) at `tjd_et` (TT).
+//
+// # Parameters
+// - `ipl`: body number
+// - `iflag`: calculation flags
+// - `attr`: out-param, pointer to 20 `f64` slots. `attr[0]`=phase_angle, `[1]`=phase,
+//   `[2]`=elongation, `[3]`=apparent_diameter, `[4]`=apparent_magnitude,
+//   `[5]`=horizontal_parallax, `[6..19]`=0.
+// - `flags_used`: out-param (may be NULL), flags actually applied
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `attr` must point to at least 20 writable `f64` slots.
+int32_t swisseph_pheno(const SweEphemeris *handle,
+                       double tjd_et,
+                       int32_t ipl,
+                       int32_t iflag,
+                       double *attr,
+                       int32_t *flags_used,
+                       char *err_buf,
+                       uintptr_t err_cap);
+
+// Planetary phenomena at `tjd_ut` (UT1). See [`swisseph_pheno`] for details.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `attr` must point to at least 20 writable `f64` slots.
+int32_t swisseph_pheno_ut(const SweEphemeris *handle,
+                          double tjd_ut,
+                          int32_t ipl,
+                          int32_t iflag,
+                          double *attr,
+                          int32_t *flags_used,
+                          char *err_buf,
+                          uintptr_t err_cap);
+
+// Nodes and apsides at `tjd_et` (TT).
+//
+// # Parameters
+// - `ipl`: body number
+// - `iflag`: calculation flags
+// - `method`: `NodApsMethod` bits (1=MEAN, 2=OSCU, 4=OSCU_BAR, 256=FOPOINT)
+// - `xnasc`, `xndsc`, `xperi`, `xaphe`: out-params, each pointer to 6 `f64` slots
+//   receiving ascending node, descending node, perihelion, aphelion respectively
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - All four output pointers must point to at least 6 writable `f64` slots.
+int32_t swisseph_nod_aps(const SweEphemeris *handle,
+                         double tjd_et,
+                         int32_t ipl,
+                         int32_t iflag,
+                         int32_t method,
+                         double *xnasc,
+                         double *xndsc,
+                         double *xperi,
+                         double *xaphe,
+                         char *err_buf,
+                         uintptr_t err_cap);
+
+// Nodes and apsides at `tjd_ut` (UT1). See [`swisseph_nod_aps`] for details.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - All four output pointers must point to at least 6 writable `f64` slots.
+int32_t swisseph_nod_aps_ut(const SweEphemeris *handle,
+                            double tjd_ut,
+                            int32_t ipl,
+                            int32_t iflag,
+                            int32_t method,
+                            double *xnasc,
+                            double *xndsc,
+                            double *xperi,
+                            double *xaphe,
+                            char *err_buf,
+                            uintptr_t err_cap);
+
+// Osculating orbital elements at `tjd_et` (TT).
+//
+// # Parameters
+// - `ipl`: body number
+// - `iflag`: calculation flags
+// - `dret`: out-param, pointer to 50 `f64` slots. Slots `[0..16]` receive the 17 named
+//   orbital element fields (see `OrbitalElements::as_array` for slot meanings):
+//   `[0]`=semi_major_axis, `[1]`=eccentricity, `[2]`=inclination,
+//   `[3]`=ascending_node (Ω), `[4]`=arg_perihelion (ω), `[5]`=perihelion_lon (ϖ),
+//   `[6]`=mean_anomaly, `[7]`=true_anomaly, `[8]`=eccentric_anomaly,
+//   `[9]`=mean_longitude, `[10]`=sidereal_period, `[11]`=mean_daily_motion,
+//   `[12]`=tropical_period, `[13]`=synodic_period, `[14]`=perihelion_passage (JD TT),
+//   `[15]`=perihelion_distance, `[16]`=aphelion_distance.
+//   Slots `[17..49]` are zeroed.
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `dret` must point to at least 50 writable `f64` slots.
+int32_t swisseph_get_orbital_elements(const SweEphemeris *handle,
+                                      double tjd_et,
+                                      int32_t ipl,
+                                      int32_t iflag,
+                                      double *dret,
+                                      char *err_buf,
+                                      uintptr_t err_cap);
+
+// Maximum, minimum, and current true distance for a body at `tjd_et` (TT).
+//
+// # Parameters
+// - `dmax`, `dmin`, `dtrue`: out-params, pointers to writable `f64` values
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `dmax`, `dmin`, `dtrue` must each point to a writable `f64`.
+int32_t swisseph_orbit_max_min_true_distance(const SweEphemeris *handle,
+                                             double tjd_et,
+                                             int32_t ipl,
+                                             int32_t iflag,
+                                             double *dmax,
+                                             double *dmin,
+                                             double *dtrue,
+                                             char *err_buf,
+                                             uintptr_t err_cap);
+
+// Next Julian Day (TT) at which the Sun's ecliptic longitude equals `x2cross` (degrees).
+//
+// **Return convention differs from C:** returns `i32` status (0=OK, negative=error),
+// crossing JD written to `*jx`. C returns the JD directly with error signaled by
+// `jd < tjd` — this FFI uses the uniform out-param convention instead.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx` must point to a writable `f64`.
+int32_t swisseph_solcross(const SweEphemeris *handle,
+                          double x2cross,
+                          double tjd_et,
+                          int32_t iflag,
+                          double *jx,
+                          char *err_buf,
+                          uintptr_t err_cap);
+
+// UT-based [`swisseph_solcross`]. See that function for the return convention note.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx` must point to a writable `f64`.
+int32_t swisseph_solcross_ut(const SweEphemeris *handle,
+                             double x2cross,
+                             double tjd_ut,
+                             int32_t iflag,
+                             double *jx,
+                             char *err_buf,
+                             uintptr_t err_cap);
+
+// Next Julian Day (TT) at which the Moon's ecliptic longitude equals `x2cross` (degrees).
+//
+// **Return convention differs from C** — see [`swisseph_solcross`].
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx` must point to a writable `f64`.
+int32_t swisseph_mooncross(const SweEphemeris *handle,
+                           double x2cross,
+                           double tjd_et,
+                           int32_t iflag,
+                           double *jx,
+                           char *err_buf,
+                           uintptr_t err_cap);
+
+// UT-based [`swisseph_mooncross`].
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx` must point to a writable `f64`.
+int32_t swisseph_mooncross_ut(const SweEphemeris *handle,
+                              double x2cross,
+                              double tjd_ut,
+                              int32_t iflag,
+                              double *jx,
+                              char *err_buf,
+                              uintptr_t err_cap);
+
+// Next Julian Day (TT) at which the Moon crosses its node (ecliptic latitude = 0).
+//
+// **Return convention differs from C** — see [`swisseph_solcross`].
+//
+// # Parameters
+// - `jx`: out, crossing JD
+// - `xlon`: out, Moon's ecliptic longitude at the crossing (degrees)
+// - `xlat`: out, Moon's ecliptic latitude at the crossing (degrees, near zero)
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx`, `xlon`, `xlat` must each point to a writable `f64`.
+int32_t swisseph_mooncross_node(const SweEphemeris *handle,
+                                double tjd_et,
+                                int32_t iflag,
+                                double *xlon,
+                                double *xlat,
+                                double *jx,
+                                char *err_buf,
+                                uintptr_t err_cap);
+
+// UT-based [`swisseph_mooncross_node`].
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx`, `xlon`, `xlat` must each point to a writable `f64`.
+int32_t swisseph_mooncross_node_ut(const SweEphemeris *handle,
+                                   double tjd_ut,
+                                   int32_t iflag,
+                                   double *xlon,
+                                   double *xlat,
+                                   double *jx,
+                                   char *err_buf,
+                                   uintptr_t err_cap);
+
+// Next Julian Day (TT) at which `ipl`'s heliocentric longitude equals `x2cross` (degrees).
+// `dir >= 0` searches forward, `dir < 0` searches backward.
+//
+// **Return convention differs from C** — see [`swisseph_solcross`].
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx` must point to a writable `f64`.
+int32_t swisseph_helio_cross(const SweEphemeris *handle,
+                             int32_t ipl,
+                             double x2cross,
+                             double tjd_et,
+                             int32_t iflag,
+                             int32_t dir,
+                             double *jx,
+                             char *err_buf,
+                             uintptr_t err_cap);
+
+// UT-based [`swisseph_helio_cross`].
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `jx` must point to a writable `f64`.
+int32_t swisseph_helio_cross_ut(const SweEphemeris *handle,
+                                int32_t ipl,
+                                double x2cross,
+                                double tjd_ut,
+                                int32_t iflag,
+                                int32_t dir,
+                                double *jx,
+                                char *err_buf,
+                                uintptr_t err_cap);
+
 // Normalize degrees to [0, 360). Port of `swe_degnorm`.
 double swisseph_degnorm(double x);
 
