@@ -240,6 +240,11 @@ fn astro_models_to_i32s(m: &swisseph::AstroModels) -> [i32; 8] {
 /// `EphemerisNotAvailable` when no file covers the given `jd` (including
 /// Moshier-only configs which have no files).
 ///
+/// **String truncation**: if the file path exceeds `path_cap - 1` bytes, it is
+/// silently truncated at a UTF-8 character boundary and NUL-terminated. The
+/// return code is still 0 (success). Callers needing the full path should
+/// provide a buffer of at least 256 bytes.
+///
 /// # Safety
 /// - `handle` must be a valid, non-NULL handle from `swisseph_new`.
 /// - `path_buf`, if non-NULL, must point to at least `path_cap` writable bytes.
@@ -516,11 +521,12 @@ pub unsafe extern "C" fn swisseph_calc_pctr(
 ///
 /// # Parameters
 /// - `star`: input star name (NUL-terminated UTF-8)
-/// - `star_out`: buffer receiving the resolved "name,bayer" canonical name (NUL-terminated)
+/// - `star_out`: buffer receiving the resolved "name,bayer" canonical name (NUL-terminated);
+///   silently truncated if the name exceeds `star_out_cap - 1` bytes. May be NULL.
 /// - `star_out_cap`: capacity of `star_out` in bytes (including NUL)
 /// - `geopos`: NULL, or `[lon, lat, alt]` for per-call topographic override
 /// - `sid_mode`: NULL, or per-call sidereal override
-/// - `xx`: out-param, 6 `f64` slots
+/// - `xx`: out-param, 6 `f64` slots [lon, lat, dist, lon_speed, lat_speed, dist_speed] (degrees, AU, degrees/day)
 /// - `flags_used`: out-param (may be NULL)
 ///
 /// # Safety
@@ -895,7 +901,8 @@ pub unsafe extern "C" fn swisseph_get_ayanamsa_ut(
 /// Write the human-readable name for a sidereal mode into `buf`.
 /// User-defined mode (255) writes an empty string. Unknown mode returns an error.
 ///
-/// Handle-free — does not require an ephemeris instance.
+/// Handle-free — does not require an ephemeris instance. The name is NUL-terminated
+/// and silently truncated if it exceeds `cap - 1` bytes.
 ///
 /// # Safety
 /// - `buf` must point to at least `cap` writable bytes, or be NULL (returns error).
@@ -934,6 +941,8 @@ pub unsafe extern "C" fn swisseph_get_ayanamsa_name(
 // ---------------------------------------------------------------------------
 
 /// Write the display name for a body into `buf` (e.g. "Sun", "Chiron", asteroid name).
+///
+/// The name is NUL-terminated and silently truncated if it exceeds `cap - 1` bytes.
 ///
 /// # Safety
 /// - `handle` must be valid, non-NULL.

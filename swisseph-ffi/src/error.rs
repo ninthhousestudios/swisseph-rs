@@ -7,25 +7,45 @@ use swisseph::Error;
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SweErrorCode {
+    /// Success.
     Ok = 0,
+    /// Unknown or out-of-range body number (`ipl`).
     InvalidBody = -1,
+    /// Requested flag combination not supported (e.g. BARYCTR on Moshier).
     UnsupportedFlags = -2,
+    /// Unknown house system character.
     InvalidHouseSystem = -3,
+    /// Unknown sidereal mode index.
     InvalidSiderealMode = -4,
+    /// Calendar type not 'g'/'j' (or gregflag not 0/1).
     InvalidCalendarType = -5,
+    /// Calendar date does not exist.
     InvalidDate = -6,
+    /// No ephemeris file covers the requested epoch or body.
     EphemerisNotAvailable = -7,
+    /// Julian Day is outside the valid range for the loaded ephemeris.
     BeyondEphemerisLimits = -8,
+    /// Ephemeris file not found on disk.
     FileNotFound = -9,
+    /// Ephemeris file is corrupt or has an unsupported format.
     FileFormat = -10,
+    /// Body never rises or sets at this location (circumpolar or below horizon).
     CircumpolarBody = -11,
+    /// UTC time is invalid (e.g. 25:00 or 61 seconds).
     InvalidTime = -12,
+    /// Leap-second specification is invalid.
     InvalidLeapSecond = -13,
+    /// Requested ephemeris backend is not compiled in or not configured.
     UnsupportedEphemeris = -14,
+    /// Sidereal mode requires fixed-star data that is not loaded.
     SiderealModeRequiresFixedStars = -15,
+    /// Error originating from C interop.
     CError = -16,
+    /// A Rust panic was caught at the FFI boundary.
     Panic = -90,
+    /// A required argument was NULL or otherwise invalid.
     InvalidArg = -91,
+    /// Unexpected internal error.
     Internal = -99,
 }
 

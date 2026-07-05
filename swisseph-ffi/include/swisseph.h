@@ -21,25 +21,45 @@ enum SweErrorCode
   : int32_t
 #endif // __STDC_VERSION__ >= 202311L
  {
+  // Success.
   Ok = 0,
+  // Unknown or out-of-range body number (`ipl`).
   InvalidBody = -1,
+  // Requested flag combination not supported (e.g. BARYCTR on Moshier).
   UnsupportedFlags = -2,
+  // Unknown house system character.
   InvalidHouseSystem = -3,
+  // Unknown sidereal mode index.
   InvalidSiderealMode = -4,
+  // Calendar type not 'g'/'j' (or gregflag not 0/1).
   InvalidCalendarType = -5,
+  // Calendar date does not exist.
   InvalidDate = -6,
+  // No ephemeris file covers the requested epoch or body.
   EphemerisNotAvailable = -7,
+  // Julian Day is outside the valid range for the loaded ephemeris.
   BeyondEphemerisLimits = -8,
+  // Ephemeris file not found on disk.
   FileNotFound = -9,
+  // Ephemeris file is corrupt or has an unsupported format.
   FileFormat = -10,
+  // Body never rises or sets at this location (circumpolar or below horizon).
   CircumpolarBody = -11,
+  // UTC time is invalid (e.g. 25:00 or 61 seconds).
   InvalidTime = -12,
+  // Leap-second specification is invalid.
   InvalidLeapSecond = -13,
+  // Requested ephemeris backend is not compiled in or not configured.
   UnsupportedEphemeris = -14,
+  // Sidereal mode requires fixed-star data that is not loaded.
   SiderealModeRequiresFixedStars = -15,
+  // Error originating from C interop.
   CError = -16,
+  // A Rust panic was caught at the FFI boundary.
   Panic = -90,
+  // A required argument was NULL or otherwise invalid.
   InvalidArg = -91,
+  // Unexpected internal error.
   Internal = -99,
 };
 #if __STDC_VERSION__ >= 202311L
@@ -182,6 +202,11 @@ int32_t swisseph_get_astro_models(const SweEphemeris *handle,
 // `EphemerisNotAvailable` when no file covers the given `jd` (including
 // Moshier-only configs which have no files).
 //
+// **String truncation**: if the file path exceeds `path_cap - 1` bytes, it is
+// silently truncated at a UTF-8 character boundary and NUL-terminated. The
+// return code is still 0 (success). Callers needing the full path should
+// provide a buffer of at least 256 bytes.
+//
 // # Safety
 // - `handle` must be a valid, non-NULL handle from `swisseph_new`.
 // - `path_buf`, if non-NULL, must point to at least `path_cap` writable bytes.
@@ -282,11 +307,12 @@ int32_t swisseph_calc_pctr(const SweEphemeris *handle,
 //
 // # Parameters
 // - `star`: input star name (NUL-terminated UTF-8)
-// - `star_out`: buffer receiving the resolved "name,bayer" canonical name (NUL-terminated)
+// - `star_out`: buffer receiving the resolved "name,bayer" canonical name (NUL-terminated);
+//   silently truncated if the name exceeds `star_out_cap - 1` bytes. May be NULL.
 // - `star_out_cap`: capacity of `star_out` in bytes (including NUL)
 // - `geopos`: NULL, or `[lon, lat, alt]` for per-call topographic override
 // - `sid_mode`: NULL, or per-call sidereal override
-// - `xx`: out-param, 6 `f64` slots
+// - `xx`: out-param, 6 `f64` slots [lon, lat, dist, lon_speed, lat_speed, dist_speed] (degrees, AU, degrees/day)
 // - `flags_used`: out-param (may be NULL)
 //
 // # Safety
@@ -419,7 +445,8 @@ double swisseph_get_ayanamsa_ut(const SweEphemeris *handle,
 // Write the human-readable name for a sidereal mode into `buf`.
 // User-defined mode (255) writes an empty string. Unknown mode returns an error.
 //
-// Handle-free — does not require an ephemeris instance.
+// Handle-free — does not require an ephemeris instance. The name is NUL-terminated
+// and silently truncated if it exceeds `cap - 1` bytes.
 //
 // # Safety
 // - `buf` must point to at least `cap` writable bytes, or be NULL (returns error).
@@ -430,6 +457,8 @@ int32_t swisseph_get_ayanamsa_name(int32_t sid_mode_raw,
                                    uintptr_t err_cap);
 
 // Write the display name for a body into `buf` (e.g. "Sun", "Chiron", asteroid name).
+//
+// The name is NUL-terminated and silently truncated if it exceeds `cap - 1` bytes.
 //
 // # Safety
 // - `handle` must be valid, non-NULL.
