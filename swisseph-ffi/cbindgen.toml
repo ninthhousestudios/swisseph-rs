@@ -11,6 +11,7 @@ documentation_style = "c99"
 include = [
     "SweConfig",
     "SweErrorCode",
+    "SweSidMode",
 ]
 exclude = [
     "SweEphemeris",

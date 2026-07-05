@@ -111,6 +111,17 @@ typedef struct SweConfig {
   int32_t astro_model_delta_t;
 } SweConfig;
 
+// Per-call sidereal mode override. Nullable in all FFI signatures — NULL means
+// "use the handle's configured sidereal mode".
+typedef struct SweSidMode {
+  // Raw `swe_set_sid_mode` value (bits 0-7 = mode index, upper bits = SiderealBits).
+  int32_t sid_mode;
+  // Reference epoch for user-defined sidereal (mode index 255).
+  double t0;
+  // Initial ayanamsa at `t0`.
+  double ayan_t0;
+} SweSidMode;
+
 // Return the library version as a static NUL-terminated UTF-8 string.
 const char *swisseph_version(void);
 
@@ -136,8 +147,7 @@ int32_t swisseph_new(const struct SweConfig *config,
 void swisseph_free(SweEphemeris *handle);
 
 // Return the resolved tidal acceleration (arcsec/century^2).
-// Ephemeris::new resolves the value from the file denum when unset — the caller
-// can't know it without asking.
+// NAN when unresolved (e.g. Moshier without explicit override).
 //
 // # Safety
 // `handle` must be a valid, non-NULL handle from `swisseph_new`.
@@ -162,8 +172,9 @@ int32_t swisseph_get_astro_models(const SweEphemeris *handle,
 // - `ipl`: body number (C `ipl` values, matching `Body` discriminant)
 // - `iflag`: calculation flags (C `SEFLG_*` bit values)
 // - `geopos`: NULL, or pointer to `[lon, lat, alt]` for a per-call topographic override
+// - `sid_mode`: NULL, or pointer to a `SweSidMode` for a per-call sidereal override
 // - `xx`: out-param, pointer to 6 `f64` slots receiving [lon, lat, dist, lon_speed, lat_speed, dist_speed]
-// - `flags_used`: out-param, pointer to `i32` receiving the flags actually applied
+// - `flags_used`: out-param (may be NULL), pointer to `i32` receiving the flags actually applied
 // - `err_buf`, `err_cap`: optional error message buffer
 //
 // Returns 0 on success, negative error code on failure.
@@ -171,17 +182,196 @@ int32_t swisseph_get_astro_models(const SweEphemeris *handle,
 // # Safety
 // - `handle` must be a valid, non-NULL handle.
 // - `xx` must point to at least 6 writable `f64` slots.
-// - `flags_used` may be NULL.
 // - `geopos`, if non-NULL, must point to 3 readable `f64` values.
 int32_t swisseph_calc_ut(const SweEphemeris *handle,
                          double tjd_ut,
                          int32_t ipl,
                          int32_t iflag,
                          const double *geopos,
+                         const struct SweSidMode *sid_mode,
                          double *xx,
                          int32_t *flags_used,
                          char *err_buf,
                          uintptr_t err_cap);
+
+// Compute planetary position at `tjd_et` (Julian Day, TT/ET).
+// Same as `swisseph_calc_ut` but takes Terrestrial Time directly.
+//
+// # Safety
+// Same as `swisseph_calc_ut`.
+int32_t swisseph_calc(const SweEphemeris *handle,
+                      double tjd_et,
+                      int32_t ipl,
+                      int32_t iflag,
+                      const double *geopos,
+                      const struct SweSidMode *sid_mode,
+                      double *xx,
+                      int32_t *flags_used,
+                      char *err_buf,
+                      uintptr_t err_cap);
+
+// Compute planetocentric position at `tjd_et` (TT).
+// Swiss/JPL only — Moshier returns an error.
+//
+// # Parameters
+// - `ipl`: target body
+// - `iplctr`: center body (must differ from `ipl`)
+// - No `geopos` override (C's `swe_calc_pctr` has no topocentric path)
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle.
+// - `xx` must point to at least 6 writable `f64` slots.
+int32_t swisseph_calc_pctr(const SweEphemeris *handle,
+                           double tjd_et,
+                           int32_t ipl,
+                           int32_t iplctr,
+                           int32_t iflag,
+                           double *xx,
+                           int32_t *flags_used,
+                           char *err_buf,
+                           uintptr_t err_cap);
+
+// Compute fixed-star position at `tjd_et` (TT).
+//
+// # Parameters
+// - `star`: input star name (NUL-terminated UTF-8)
+// - `star_out`: buffer receiving the resolved "name,bayer" canonical name (NUL-terminated)
+// - `star_out_cap`: capacity of `star_out` in bytes (including NUL)
+// - `geopos`: NULL, or `[lon, lat, alt]` for per-call topographic override
+// - `sid_mode`: NULL, or per-call sidereal override
+// - `xx`: out-param, 6 `f64` slots
+// - `flags_used`: out-param (may be NULL)
+//
+// # Safety
+// - `star` must be a valid NUL-terminated UTF-8 string.
+// - `star_out` may be NULL; if non-NULL, `star_out_cap` bytes must be writable.
+// - `xx` must point to at least 6 writable `f64` slots.
+int32_t swisseph_fixstar2(const SweEphemeris *handle,
+                          const char *star,
+                          char *star_out,
+                          uintptr_t star_out_cap,
+                          double tjd_et,
+                          int32_t iflag,
+                          const double *geopos,
+                          const struct SweSidMode *sid_mode,
+                          double *xx,
+                          int32_t *flags_used,
+                          char *err_buf,
+                          uintptr_t err_cap);
+
+// Compute fixed-star position at `tjd_ut` (UT1).
+// Same as `swisseph_fixstar2` but takes Universal Time.
+//
+// # Safety
+// Same as `swisseph_fixstar2`.
+int32_t swisseph_fixstar2_ut(const SweEphemeris *handle,
+                             const char *star,
+                             char *star_out,
+                             uintptr_t star_out_cap,
+                             double tjd_ut,
+                             int32_t iflag,
+                             const double *geopos,
+                             const struct SweSidMode *sid_mode,
+                             double *xx,
+                             int32_t *flags_used,
+                             char *err_buf,
+                             uintptr_t err_cap);
+
+// Look up the magnitude of a fixed star by name.
+//
+// # Parameters
+// - `star`: input star name (NUL-terminated UTF-8)
+// - `star_out`: buffer receiving the resolved canonical name (may be NULL)
+// - `star_out_cap`: capacity of `star_out`
+// - `mag`: out-param receiving the magnitude
+//
+// # Safety
+// - `star` must be a valid NUL-terminated UTF-8 string.
+// - `mag` must point to a writable `f64`.
+int32_t swisseph_fixstar2_mag(const SweEphemeris *handle,
+                              const char *star,
+                              char *star_out,
+                              uintptr_t star_out_cap,
+                              double *mag,
+                              char *err_buf,
+                              uintptr_t err_cap);
+
+// Ayanamsa at `tjd_et` (TT) with flags. Nutation added unless `NONUT` is set.
+//
+// # Parameters
+// - `sid_mode`: NULL uses the handle's configured sidereal mode; non-NULL overrides per-call
+// - `daya`: out-param receiving the ayanamsa in degrees
+// - `flags_used`: out-param (may be NULL)
+//
+// Returns 0 on success, negative error code on failure.
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `daya` must point to a writable `f64`.
+int32_t swisseph_get_ayanamsa_ex(const SweEphemeris *handle,
+                                 double tjd_et,
+                                 int32_t iflag,
+                                 const struct SweSidMode *sid_mode,
+                                 double *daya,
+                                 int32_t *flags_used,
+                                 char *err_buf,
+                                 uintptr_t err_cap);
+
+// Ayanamsa at `tjd_ut` (UT1) with flags. Nutation added unless `NONUT` is set.
+//
+// # Safety
+// Same as `swisseph_get_ayanamsa_ex`.
+int32_t swisseph_get_ayanamsa_ex_ut(const SweEphemeris *handle,
+                                    double tjd_ut,
+                                    int32_t iflag,
+                                    const struct SweSidMode *sid_mode,
+                                    double *daya,
+                                    int32_t *flags_used,
+                                    char *err_buf,
+                                    uintptr_t err_cap);
+
+// Legacy ayanamsa at `tjd_et` (TT), no nutation, returns degrees directly.
+// Returns NAN on error (e.g. no sidereal mode configured and no per-call override).
+//
+// # Safety
+// `handle` must be valid, non-NULL.
+double swisseph_get_ayanamsa(const SweEphemeris *handle,
+                             double tjd_et,
+                             const struct SweSidMode *sid_mode);
+
+// Legacy ayanamsa at `tjd_ut` (UT1), no nutation, returns degrees directly.
+// Returns NAN on error.
+//
+// # Safety
+// `handle` must be valid, non-NULL.
+double swisseph_get_ayanamsa_ut(const SweEphemeris *handle,
+                                double tjd_ut,
+                                const struct SweSidMode *sid_mode);
+
+// Write the human-readable name for a sidereal mode into `buf`.
+// User-defined mode (255) writes an empty string. Unknown mode returns an error.
+//
+// Handle-free — does not require an ephemeris instance.
+//
+// # Safety
+// - `buf` must point to at least `cap` writable bytes, or be NULL (returns error).
+int32_t swisseph_get_ayanamsa_name(int32_t sid_mode_raw,
+                                   char *buf,
+                                   uintptr_t cap,
+                                   char *err_buf,
+                                   uintptr_t err_cap);
+
+// Write the display name for a body into `buf` (e.g. "Sun", "Chiron", asteroid name).
+//
+// # Safety
+// - `handle` must be valid, non-NULL.
+// - `buf` must point to at least `cap` writable bytes.
+int32_t swisseph_get_planet_name(const SweEphemeris *handle,
+                                 int32_t ipl,
+                                 char *buf,
+                                 uintptr_t cap,
+                                 char *err_buf,
+                                 uintptr_t err_cap);
 
 // Fill a SweConfig with sane defaults (Moshier, no paths, NAN for unset scalars).
 //

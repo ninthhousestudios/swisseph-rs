@@ -94,6 +94,7 @@ fn calc_ut_moshier_sun() {
             0,           // Sun
             256,         // SEFLG_SPEED
             ptr::null(), // no geopos override
+            ptr::null(), // no sidereal override
             xx.as_mut_ptr(),
             &mut flags_used,
             err_buf.as_mut_ptr() as *mut c_char,
@@ -142,6 +143,7 @@ fn calc_ut_moshier_moon() {
             1, // Moon
             256,
             ptr::null(),
+            ptr::null(),
             xx.as_mut_ptr(),
             &mut flags_used,
             err_buf.as_mut_ptr() as *mut c_char,
@@ -186,6 +188,7 @@ fn calc_ut_invalid_body() {
             -999, // truly invalid body (no Body variant for negative values below valid range)
             256,
             ptr::null(),
+            ptr::null(),
             xx.as_mut_ptr(),
             ptr::null_mut(),
             err_buf.as_mut_ptr() as *mut c_char,
@@ -220,6 +223,7 @@ fn calc_ut_with_geopos_override() {
             1, // Moon
             256 | 32768,
             geopos.as_ptr(),
+            ptr::null(),
             xx.as_mut_ptr(),
             &mut flags_used,
             err_buf.as_mut_ptr() as *mut c_char,
