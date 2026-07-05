@@ -14,7 +14,8 @@ use crate::error::{SweErrorCode, error_code, ffi_guard, write_err};
 // ---------------------------------------------------------------------------
 
 fn hsys_from_char(c: i32) -> Result<HouseSystem, i32> {
-    HouseSystem::try_from(c as u8).map_err(|_| SweErrorCode::InvalidHouseSystem as i32)
+    let byte = u8::try_from(c).map_err(|_| SweErrorCode::InvalidHouseSystem as i32)?;
+    HouseSystem::try_from(byte).map_err(|_| SweErrorCode::InvalidHouseSystem as i32)
 }
 
 unsafe fn write_ascmc(ascmc: &houses::AscMc, out: *mut f64) {
@@ -77,7 +78,9 @@ unsafe fn write_cusp_speeds(result: &houses::HouseResult, hsys: HouseSystem, out
 /// - `geolon`: geographic longitude (east positive), degrees
 /// - `hsys`: house system as ASCII char code (e.g. `'P'` for Placidus)
 /// - `cusps`: out, must point to at least 13 writable `f64` slots (37 for `'G'` Gauquelin)
-/// - `ascmc`: out, must point to at least 10 writable `f64` slots
+/// - `ascmc`: out, must point to at least 10 writable `f64` slots.
+///   Layout: [0]=Asc, [1]=MC, [2]=ARMC, [3]=Vertex, [4]=equatorial Asc,
+///   [5]=co-Asc (Koch), [6]=co-Asc (Munkasey), [7]=polar Asc, [8]=0, [9]=0.
 ///
 /// # Safety
 /// - `handle` must be a valid, non-NULL handle.
@@ -276,6 +279,9 @@ pub unsafe extern "C" fn swisseph_houses_ex2(
 ///
 /// Handle-free function — does not need an Ephemeris instance.
 ///
+/// ascmc layout: [0]=Asc, [1]=MC, [2]=ARMC, [3]=Vertex, [4]=equatorial Asc,
+/// [5]=co-Asc (Koch), [6]=co-Asc (Munkasey), [7]=polar Asc, [8]=0, [9]=0.
+///
 /// # Safety
 /// - `cusps` must point to at least 13 (or 37 for Gauquelin) writable `f64` slots.
 /// - `ascmc` must point to at least 10 writable `f64` slots.
@@ -330,6 +336,10 @@ pub unsafe extern "C" fn swisseph_houses_armc(
 ///
 /// Handle-free. `sundec` is required for Sunshine house systems (`'I'`/`'i'`);
 /// pass NULL for all others.
+///
+/// ascmc/ascmc_speed layout: [0]=Asc, [1]=MC, [2]=ARMC, [3]=Vertex,
+/// [4]=equatorial Asc, [5]=co-Asc (Koch), [6]=co-Asc (Munkasey),
+/// [7]=polar Asc, [8]=0, [9]=0.
 ///
 /// # Safety
 /// - `cusps`, `ascmc` must be valid and properly sized.
@@ -590,7 +600,7 @@ pub unsafe extern "C" fn swisseph_gauquelin_sector(
 /// # Parameters
 /// - `calc_flag`: `SE_ECL2HOR` (0) or `SE_EQU2HOR` (1)
 /// - `geopos`: [longitude, latitude, height], 3 `f64` values
-/// - `atpress`: atmospheric pressure (hPa) — 0 for no refraction
+/// - `atpress`: atmospheric pressure (hPa) — 0 auto-estimates from `geopos[2]` altitude
 /// - `attemp`: atmospheric temperature (°C)
 /// - `xin`: input [longitude/RA, latitude/declination], 2 `f64` values
 /// - `xaz`: out [azimuth, true altitude, apparent altitude], 3 `f64` values
@@ -616,21 +626,23 @@ pub unsafe extern "C" fn swisseph_azalt(
         return;
     }
 
-    let eph = unsafe { &(*handle).0 };
-    let dir = match calc_flag {
-        0 => AzAltDir::EclToHor,
-        _ => AzAltDir::EquToHor,
-    };
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let eph = unsafe { &(*handle).0 };
+        let dir = match calc_flag {
+            0 => AzAltDir::EclToHor,
+            _ => AzAltDir::EquToHor,
+        };
 
-    let gp = unsafe { [*geopos, *geopos.add(1), *geopos.add(2)] };
-    let xi = unsafe { [*xin, *xin.add(1)] };
+        let gp = unsafe { [*geopos, *geopos.add(1), *geopos.add(2)] };
+        let xi = unsafe { [*xin, *xin.add(1)] };
 
-    let result = eph.azalt(tjd_ut, dir, gp, atpress, attemp, 0.0, xi);
-    unsafe {
-        *xaz = result[0];
-        *xaz.add(1) = result[1];
-        *xaz.add(2) = result[2];
-    }
+        let result = eph.azalt(tjd_ut, dir, gp, atpress, attemp, 0.0, xi);
+        unsafe {
+            *xaz = result[0];
+            *xaz.add(1) = result[1];
+            *xaz.add(2) = result[2];
+        }
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -663,20 +675,22 @@ pub unsafe extern "C" fn swisseph_azalt_rev(
         return;
     }
 
-    let eph = unsafe { &(*handle).0 };
-    let dir = match calc_flag {
-        0 => HorDir::HorToEcl,
-        _ => HorDir::HorToEqu,
-    };
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let eph = unsafe { &(*handle).0 };
+        let dir = match calc_flag {
+            0 => HorDir::HorToEcl,
+            _ => HorDir::HorToEqu,
+        };
 
-    let gp = unsafe { [*geopos, *geopos.add(1), *geopos.add(2)] };
-    let xi = unsafe { [*xin, *xin.add(1)] };
+        let gp = unsafe { [*geopos, *geopos.add(1), *geopos.add(2)] };
+        let xi = unsafe { [*xin, *xin.add(1)] };
 
-    let result = eph.azalt_rev(tjd_ut, dir, gp, xi);
-    unsafe {
-        *xout = result[0];
-        *xout.add(1) = result[1];
-    }
+        let result = eph.azalt_rev(tjd_ut, dir, gp, xi);
+        unsafe {
+            *xout = result[0];
+            *xout.add(1) = result[1];
+        }
+    }));
 }
 
 // ---------------------------------------------------------------------------

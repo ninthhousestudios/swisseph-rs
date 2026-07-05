@@ -917,6 +917,38 @@ fn houses_invalid_hsys() {
     };
     assert_eq!(ret, SweErrorCode::InvalidHouseSystem as i32);
 
+    // Negative i32 — must not wrap into a valid u8
+    let ret = unsafe {
+        swisseph_ffi::houses::swisseph_houses(
+            handle,
+            J2000,
+            47.37,
+            8.55,
+            -1,
+            cusps.as_mut_ptr(),
+            ascmc.as_mut_ptr(),
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        )
+    };
+    assert_eq!(ret, SweErrorCode::InvalidHouseSystem as i32);
+
+    // i32 > 255 congruent to 'P' — must not wrap
+    let ret = unsafe {
+        swisseph_ffi::houses::swisseph_houses(
+            handle,
+            J2000,
+            47.37,
+            8.55,
+            b'P' as i32 + 256,
+            cusps.as_mut_ptr(),
+            ascmc.as_mut_ptr(),
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        )
+    };
+    assert_eq!(ret, SweErrorCode::InvalidHouseSystem as i32);
+
     unsafe { swisseph_ffi::swisseph_free(handle) };
 }
 

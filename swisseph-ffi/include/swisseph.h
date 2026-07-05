@@ -657,7 +657,9 @@ void swisseph_split_deg(double ddeg,
 // - `geolon`: geographic longitude (east positive), degrees
 // - `hsys`: house system as ASCII char code (e.g. `'P'` for Placidus)
 // - `cusps`: out, must point to at least 13 writable `f64` slots (37 for `'G'` Gauquelin)
-// - `ascmc`: out, must point to at least 10 writable `f64` slots
+// - `ascmc`: out, must point to at least 10 writable `f64` slots.
+//   Layout: [0]=Asc, [1]=MC, [2]=ARMC, [3]=Vertex, [4]=equatorial Asc,
+//   [5]=co-Asc (Koch), [6]=co-Asc (Munkasey), [7]=polar Asc, [8]=0, [9]=0.
 //
 // # Safety
 // - `handle` must be a valid, non-NULL handle.
@@ -733,6 +735,9 @@ int32_t swisseph_houses_ex2(const SweEphemeris *handle,
 //
 // Handle-free function — does not need an Ephemeris instance.
 //
+// ascmc layout: [0]=Asc, [1]=MC, [2]=ARMC, [3]=Vertex, [4]=equatorial Asc,
+// [5]=co-Asc (Koch), [6]=co-Asc (Munkasey), [7]=polar Asc, [8]=0, [9]=0.
+//
 // # Safety
 // - `cusps` must point to at least 13 (or 37 for Gauquelin) writable `f64` slots.
 // - `ascmc` must point to at least 10 writable `f64` slots.
@@ -749,6 +754,10 @@ int32_t swisseph_houses_armc(double armc,
 //
 // Handle-free. `sundec` is required for Sunshine house systems (`'I'`/`'i'`);
 // pass NULL for all others.
+//
+// ascmc/ascmc_speed layout: [0]=Asc, [1]=MC, [2]=ARMC, [3]=Vertex,
+// [4]=equatorial Asc, [5]=co-Asc (Koch), [6]=co-Asc (Munkasey),
+// [7]=polar Asc, [8]=0, [9]=0.
 //
 // # Safety
 // - `cusps`, `ascmc` must be valid and properly sized.
@@ -839,7 +848,7 @@ int32_t swisseph_gauquelin_sector(const SweEphemeris *handle,
 // # Parameters
 // - `calc_flag`: `SE_ECL2HOR` (0) or `SE_EQU2HOR` (1)
 // - `geopos`: [longitude, latitude, height], 3 `f64` values
-// - `atpress`: atmospheric pressure (hPa) — 0 for no refraction
+// - `atpress`: atmospheric pressure (hPa) — 0 auto-estimates from `geopos[2]` altitude
 // - `attemp`: atmospheric temperature (°C)
 // - `xin`: input [longitude/RA, latitude/declination], 2 `f64` values
 // - `xaz`: out [azimuth, true altitude, apparent altitude], 3 `f64` values
