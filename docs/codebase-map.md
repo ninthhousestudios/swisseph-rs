@@ -1200,6 +1200,55 @@ All `pub fn`. Key functions and their line ranges:
 3. Add `mod <name>;` to `tests/golden/main.rs`
 4. C generator in `tests/c-gen/` compiled against `../swisseph/libswe.a`
 
+## swisseph-ffi Crate Layout
+
+```
+swisseph-ffi/
+├── Cargo.toml          — crate-type = ["cdylib", "staticlib", "rlib"]
+├── cbindgen.toml       — cbindgen config, exports SweConfig/SweErrorCode/SweSidMode
+├── include/
+│   └── swisseph.h      — generated C header (do not hand-edit, regenerate via cbindgen)
+├── src/
+│   ├── lib.rs          — SweEphemeris opaque handle, SweSidMode, build_config helpers,
+│   │                      handle lifecycle (swisseph_new/free/version/get_tid_acc/get_astro_models/
+│   │                      get_file_data), calc/calc_ut/calc_pctr, fixstar2 family, ayanamsa family,
+│   │                      planet_name
+│   ├── config.rs       — SweConfig #[repr(C)] struct, swisseph_config_default, config_to_rust
+│   │                      (C→Rust config conversion), astro model i32→enum converters
+│   ├── error.rs        — SweErrorCode enum, error_code (Error→i32), write_err (UTF-8-safe
+│   │                      NUL-terminated buffer write with truncation), ffi_guard! macro
+│   │                      (catch_unwind wrapper)
+│   ├── date.rs         — julday/revjul, date_conversion, day_of_week, utc_time_zone,
+│   │                      utc_to_jd/jdet_to_utc/jdut1_to_utc, deltat/deltat_ex,
+│   │                      sidtime/sidtime0, time_equ/lmt_to_lat/lat_to_lmt,
+│   │                      format fns (csroundsec, cs2timestr, cs2lonlatstr, cs2degstr, split_deg)
+│   ├── houses.rs       — houses/houses_ex/houses_ex2, houses_armc/houses_armc_ex2,
+│   │                      house_pos, house_name, gauquelin_sector
+│   ├── eclipse.rs      — sol_eclipse_where/how/when_glob/when_loc, lun_eclipse_how/when/when_loc,
+│   │                      lun_occult_where/when_glob/when_loc, rise_trans/rise_trans_true_hor,
+│   │                      azalt/azalt_rev, refrac/refrac_extended
+│   ├── pheno.rs        — pheno/pheno_ut, nod_aps/nod_aps_ut, get_orbital_elements,
+│   │                      orbit_max_min_true_distance, crossing functions (solcross..helio_cross)
+│   ├── heliacal.rs     — heliacal_ut, heliacal_pheno_ut, vis_limit_mag, heliacal_angle,
+│   │                      topo_arcus_visionis
+│   └── util.rs         — handle-free math: degnorm, radnorm, difdegn, difdeg2n,
+│                          deg_midp, rad_midp, cotrans, cotrans_sp
+└── tests/
+    ├── c/smoke.c       — C-side ABI smoke test (compiled+run from c_smoke.rs)
+    ├── c_smoke.rs      — compiles smoke.c against include/swisseph.h, links libswisseph_ffi
+    ├── concurrency.rs  — 8-thread bitwise determinism, handle-as-usize round-trip,
+    │                      err_buf isolation
+    ├── header_freshness.rs — asserts include/swisseph.h matches cbindgen output
+    ├── handle.rs       — new/free lifecycle, null safety, calc_ut verification,
+    │                      geopos override, version, tid_acc, astro_models, file_data
+    ├── calc.rs         — calc/calc_ut/calc_pctr/fixstar2 FFI-vs-Rust parity tests
+    ├── date.rs         — date/time FFI-vs-Rust parity tests
+    ├── eclipse.rs      — eclipse/occultation/riseset/azalt/refrac parity tests
+    ├── houses.rs       — houses family parity tests
+    ├── pheno.rs        — pheno/nodaps/orbit/crossings parity tests
+    └── heliacal.rs     — heliacal family parity tests
+```
+
 ## C Source Reference
 
 - C repo: `../swisseph/`

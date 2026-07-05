@@ -1,9 +1,7 @@
 # FFI Design: C ABI for the Dart Binding
 
-Status: **decided, not yet implemented**. This document records the FFI-layer decisions for
-the future Dart binding (the successor to swisseph.dart) so they survive until that work
-starts. The decisions below are made; the FFI crate itself is created when the Dart work
-begins.
+Status: **implemented** (`swisseph-ffi` crate). This document records the FFI-layer design
+decisions for the Dart binding (the successor to swisseph.dart).
 
 The premise the whole design rests on — `Ephemeris: Send + Sync`, no interior mutability —
 is enforced today by `tests/send_sync.rs` (compile-time assertion + 8-thread bitwise
@@ -84,8 +82,22 @@ This is the contract the FFI layer depends on, enforced by `tests/send_sync.rs`:
 - `#[repr]` stability is NOT required on lib-crate types: `swisseph-ffi` defines its own
   `#[repr(C)]` mirrors and converts at the boundary. The lib crate stays idiomatic Rust.
 
+## Divergences from the original design (emerged during FFI 2/8–7/8)
+
+- **Crossings return convention**: C's `swe_solcross` etc. return the crossing JD directly,
+  with error signaled by `jd < tjd`. The FFI uses the uniform `i32` return code + `*jx`
+  out-param convention instead, avoiding the sentinel ambiguity.
+- **String truncation**: `write_err` (used for both error messages and string out-params
+  like star names and file paths) silently truncates without signaling. Documented in the
+  header comments but callers cannot detect truncation programmatically. Acceptable for
+  the current API surface (star names < 64 bytes, file paths < 256 bytes).
+- **Eclipse `_where` functions**: produce `attr[20]` out-param with local circumstances at
+  the central point (via an internal `eclipse_how` call), matching C's `swe_sol_eclipse_where`
+  output. The original design doc omitted this (noted `attr[]` as "needs the not-yet-ported
+  eclipse_how"), but it was implemented as part of the eclipse FFI work.
+
 ## Cross-references
 
-- The capstone benchmark — N isolates sharing one `Ephemeris` vs one copy per isolate —
-  lives in the benchmarks task (Polish 7/7).
 - Send+Sync enforcement: `tests/send_sync.rs`.
+- C-side ABI validation: `swisseph-ffi/tests/c_smoke.rs` + `tests/c/smoke.c`.
+- Concurrent ABI determinism: `swisseph-ffi/tests/concurrency.rs`.
