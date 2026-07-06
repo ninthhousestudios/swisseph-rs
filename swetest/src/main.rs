@@ -1,5 +1,6 @@
 mod args;
 mod compute;
+mod format;
 
 use std::process;
 

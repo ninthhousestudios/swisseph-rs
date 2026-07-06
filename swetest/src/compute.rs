@@ -3,6 +3,7 @@ use swisseph::types::{Body, CalendarType};
 use swisseph::{Ephemeris, EphemerisConfig};
 
 use crate::args::{BodySpec, StepUnit, SweTestArgs, TimeMode};
+use crate::format::{self, FormatContext, FormatNeeds};
 
 const VERSION: &str = "0.1.0";
 const GREG_BOUNDARY_JD: f64 = 2299161.0; // 15 Oct 1582
@@ -285,6 +286,38 @@ fn make_fictitious_body(id: i32) -> Option<Body> {
     Body::fictitious(id).ok()
 }
 
+fn body_to_ipl(body: Body) -> i32 {
+    match body {
+        Body::Sun => 0,
+        Body::Moon => 1,
+        Body::Mercury => 2,
+        Body::Venus => 3,
+        Body::Mars => 4,
+        Body::Jupiter => 5,
+        Body::Saturn => 6,
+        Body::Uranus => 7,
+        Body::Neptune => 8,
+        Body::Pluto => 9,
+        Body::MeanNode => 10,
+        Body::TrueNode => 11,
+        Body::MeanApogee => 12,
+        Body::OscuApogee => 13,
+        Body::Earth => 14,
+        Body::Chiron => 15,
+        Body::Pholus => 16,
+        Body::Ceres => 17,
+        Body::Pallas => 18,
+        Body::Juno => 19,
+        Body::Vesta => 20,
+        Body::IntpApogee => 21,
+        Body::IntpPerigee => 22,
+        Body::EclipticNutation => -1,
+        Body::Fictitious(id) => id.raw_id(),
+        Body::Asteroid(id) => 10000 + id.mpc_number(),
+        Body::PlanetMoon(id) => id.encoded(),
+    }
+}
+
 fn body_name(eph: &Ephemeris, spec: &BodySpec, args: &SweTestArgs) -> String {
     match spec {
         BodySpec::Planet(body) => eph.get_planet_name(*body),
@@ -319,6 +352,157 @@ fn body_name(eph: &Ephemeris, spec: &BodySpec, args: &SweTestArgs) -> String {
     }
 }
 
+fn resolve_body(spec: &BodySpec, args: &SweTestArgs) -> Option<Body> {
+    match spec {
+        BodySpec::Planet(body) => Some(*body),
+        BodySpec::Asteroid => parse_int_arg(&args.asteroid_number).and_then(make_asteroid_body),
+        BodySpec::PlanetMoon => parse_int_arg(&args.planet_moon).and_then(make_plmoon_body),
+        BodySpec::Fictitious => parse_int_arg(&args.fictitious).and_then(make_fictitious_body),
+        BodySpec::EclipticNutation => Some(Body::EclipticNutation),
+        _ => None,
+    }
+}
+
+fn compute_supplementary(
+    eph: &Ephemeris,
+    body: Body,
+    star: Option<&str>,
+    tjd_tt: f64,
+    tjd_ut: f64,
+    iflag: CalcFlags,
+    needs: &FormatNeeds,
+    args: &SweTestArgs,
+) -> (
+    Option<[f64; 6]>,
+    Option<[f64; 3]>,
+    Option<[f64; 6]>,
+    Option<[f64; 6]>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<[f64; 6]>,
+) {
+    let mut xequ = None;
+    let mut xaz = None;
+    let mut xcart = None;
+    let mut xecart = None;
+    let mut hpos = None;
+    let mut hposj = None;
+    let mut armc_val = None;
+    let mut attr = None;
+
+    if needs.equatorial {
+        let iflag2 = iflag | CalcFlags::EQUATORIAL;
+        let result = if let Some(s) = star {
+            eph.fixstar2(s, tjd_tt, iflag2).ok().map(|(_, r)| r)
+        } else {
+            eph.calc(tjd_tt, body, iflag2).ok()
+        };
+        if let Some(r) = result {
+            xequ = Some(r.data);
+        }
+    }
+
+    if needs.azalt {
+        let whicheph = iflag & (CalcFlags::SWIEPH | CalcFlags::JPLEPH | CalcFlags::MOSEPH);
+        let iflgt = whicheph | CalcFlags::EQUATORIAL | CalcFlags::TOPOCTR;
+        let topo_result = if let Some(s) = star {
+            eph.fixstar2(s, tjd_tt, iflgt).ok().map(|(_, r)| r)
+        } else {
+            eph.calc(tjd_tt, body, iflgt).ok()
+        };
+        if let Some(r) = topo_result {
+            let geopos = [args.geo_longitude, args.geo_latitude, args.geo_elevation];
+            let xin = [r.data[0], r.data[1]];
+            let az_result = eph.azalt(
+                tjd_ut,
+                swisseph::azalt::AzAltDir::EquToHor,
+                geopos,
+                args.atmosphere[0],
+                args.atmosphere[1],
+                0.0,
+                xin,
+            );
+            xaz = Some(az_result);
+        }
+    }
+
+    if needs.ecl_cartesian {
+        let iflag2 = iflag | CalcFlags::XYZ;
+        let result = if let Some(s) = star {
+            eph.fixstar2(s, tjd_tt, iflag2).ok().map(|(_, r)| r)
+        } else {
+            eph.calc(tjd_tt, body, iflag2).ok()
+        };
+        if let Some(r) = result {
+            xcart = Some(r.data);
+        }
+    }
+
+    if needs.equ_cartesian {
+        let iflag2 = iflag | CalcFlags::XYZ | CalcFlags::EQUATORIAL;
+        let result = if let Some(s) = star {
+            eph.fixstar2(s, tjd_tt, iflag2).ok().map(|(_, r)| r)
+        } else {
+            eph.calc(tjd_tt, body, iflag2).ok()
+        };
+        if let Some(r) = result {
+            xecart = Some(r.data);
+        }
+    }
+
+    if needs.house_pos {
+        let sidt = swisseph::sidereal_time::sidereal_time(tjd_ut, eph.config());
+        let armc = swisseph::math::normalize_degrees(sidt * 15.0 + args.geo_longitude);
+        armc_val = Some(armc);
+        if let Ok(ecl_nut) = eph.calc(tjd_tt, Body::EclipticNutation, CalcFlags::empty()) {
+            let xobl = ecl_nut.data[0];
+            let hsys = swisseph::types::HouseSystem::try_from(args.house_system as u8)
+                .unwrap_or(swisseph::types::HouseSystem::Placidus);
+            // Get the ecliptic position for house_pos
+            let xsv = if let Some(s) = star {
+                eph.fixstar2(s, tjd_tt, iflag).ok().map(|(_, r)| r.data)
+            } else {
+                eph.calc(tjd_tt, body, iflag).ok().map(|r| r.data)
+            };
+            if let Some(xsv) = xsv {
+                let xpin = [xsv[0], xsv[1]];
+                if let Ok(hp) =
+                    swisseph::houses::house_pos(armc, args.geo_latitude, xobl, hsys, xpin, None)
+                {
+                    hposj = Some(hp);
+                    if hsys == swisseph::types::HouseSystem::Gauquelin {
+                        hpos = Some((hp - 1.0) * 10.0);
+                    } else {
+                        hpos = Some((hp - 1.0) * 30.0);
+                    }
+                }
+            }
+        }
+    } else if needs.equatorial {
+        // armc needed for meridian distance even without full house_pos
+        let sidt = swisseph::sidereal_time::sidereal_time(tjd_ut, eph.config());
+        armc_val = Some(swisseph::math::normalize_degrees(
+            sidt * 15.0 + args.geo_longitude,
+        ));
+    }
+
+    if needs.phenomena && star.is_none() {
+        if let Ok(pheno) = eph.pheno(tjd_tt, body, iflag) {
+            attr = Some([
+                pheno.0.phase_angle,
+                pheno.0.phase,
+                pheno.0.elongation,
+                pheno.0.apparent_diameter,
+                pheno.0.apparent_magnitude,
+                pheno.0.horizontal_parallax,
+            ]);
+        }
+    }
+
+    (xequ, xaz, xcart, xecart, hpos, hposj, armc_val, attr)
+}
+
 fn compute_body(
     eph: &Ephemeris,
     spec: &BodySpec,
@@ -326,128 +510,134 @@ fn compute_body(
     tjd_tt: f64,
     tjd_ut: f64,
     iflag: CalcFlags,
+    needs: &FormatNeeds,
+    info: &EpochInfo,
 ) {
     let name = body_name(eph, spec, args);
 
     match spec {
-        BodySpec::Planet(body) => match eph.calc(tjd_tt, *body, iflag) {
-            Ok(result) => {
-                let d = &result.data;
-                println!(
-                    "{name:<15} {:.7}  {:.7}  {:.7}  {:.7}  {:.7}  {:.7}",
-                    d[0], d[1], d[2], d[3], d[4], d[5],
-                );
-            }
-            Err(e) => println!("{name:<15} error: {e}"),
-        },
-        BodySpec::Asteroid => {
-            if let Some(body) = parse_int_arg(&args.asteroid_number).and_then(make_asteroid_body) {
-                match eph.calc(tjd_tt, body, iflag) {
-                    Ok(result) => {
-                        let d = &result.data;
-                        println!(
-                            "{name:<15} {:.7}  {:.7}  {:.7}  {:.7}  {:.7}  {:.7}",
-                            d[0], d[1], d[2], d[3], d[4], d[5],
-                        );
-                    }
-                    Err(e) => println!("{name:<15} error: {e}"),
-                }
-            } else {
-                println!("{name:<15} error: no asteroid number (-xs)");
-            }
-        }
-        BodySpec::FixedStar => {
-            if let Some(ref star) = args.star_name {
-                match eph.fixstar2(star, tjd_tt, iflag) {
-                    Ok((canonical_name, result)) => {
-                        let d = &result.data;
-                        println!(
-                            "{canonical_name:<15} {:.7}  {:.7}  {:.7}  {:.7}  {:.7}  {:.7}",
-                            d[0], d[1], d[2], d[3], d[4], d[5],
-                        );
-                    }
-                    Err(e) => println!("{name:<15} error: {e}"),
-                }
-            } else {
-                println!("{name:<15} error: no star name (-xf)");
-            }
-        }
-        BodySpec::PlanetMoon => {
-            if let Some(body) = parse_int_arg(&args.planet_moon).and_then(make_plmoon_body) {
-                match eph.calc(tjd_tt, body, iflag) {
-                    Ok(result) => {
-                        let d = &result.data;
-                        println!(
-                            "{name:<15} {:.7}  {:.7}  {:.7}  {:.7}  {:.7}  {:.7}",
-                            d[0], d[1], d[2], d[3], d[4], d[5],
-                        );
-                    }
-                    Err(e) => println!("{name:<15} error: {e}"),
-                }
-            } else {
-                println!("{name:<15} error: no planet moon id (-xv)");
-            }
-        }
-        BodySpec::Fictitious => {
-            if let Some(body) = parse_int_arg(&args.fictitious).and_then(make_fictitious_body) {
-                match eph.calc(tjd_tt, body, iflag) {
-                    Ok(result) => {
-                        let d = &result.data;
-                        println!(
-                            "{name:<15} {:.7}  {:.7}  {:.7}  {:.7}  {:.7}  {:.7}",
-                            d[0], d[1], d[2], d[3], d[4], d[5],
-                        );
-                    }
-                    Err(e) => println!("{name:<15} error: {e}"),
-                }
-            } else {
-                println!("{name:<15} error: no fictitious id (-xz)");
-            }
-        }
-        BodySpec::EclipticNutation => {
-            match eph.calc(tjd_tt, Body::EclipticNutation, CalcFlags::empty()) {
-                Ok(result) => {
-                    let d = &result.data;
-                    println!(
-                        "{name:<15} {:.7}  {:.7}  {:.7}  {:.7}  {:.7}  {:.7}",
-                        d[0], d[1], d[2], d[3], d[4], d[5],
-                    );
-                }
-                Err(e) => println!("{name:<15} error: {e}"),
-            }
-        }
-        BodySpec::Labels => {}
+        BodySpec::Labels => return,
         BodySpec::DeltaT => {
             let dt = swisseph::deltat::calc_deltat(tjd_ut, eph.config());
             let dt_sec = dt * 86400.0;
             println!("{name:<15} {dt_sec:.6} sec");
+            return;
         }
-        BodySpec::TimeEquation => match eph.time_equ(tjd_ut) {
-            Ok(e) => {
-                let e_sec = e * 86400.0;
-                let sign = if e_sec < 0.0 { "-" } else { "" };
-                let abs_sec = e_sec.abs();
-                let m = (abs_sec / 60.0) as i32;
-                let s = abs_sec - m as f64 * 60.0;
-                println!("{name:<15} {sign}{m}m {s:.2}s");
+        BodySpec::TimeEquation => {
+            match eph.time_equ(tjd_ut) {
+                Ok(e) => {
+                    let e_sec = e * 86400.0;
+                    let sign = if e_sec < 0.0 { "-" } else { "" };
+                    let abs_sec = e_sec.abs();
+                    let m = (abs_sec / 60.0) as i32;
+                    let s = abs_sec - m as f64 * 60.0;
+                    println!("{name:<15} {sign}{m}m {s:.2}s");
+                }
+                Err(e) => println!("{name:<15} error: {e}"),
             }
-            Err(e) => println!("{name:<15} error: {e}"),
-        },
+            return;
+        }
         BodySpec::SiderealTime => {
             let sidt = swisseph::sidereal_time::sidereal_time(tjd_ut, eph.config());
             println!("{name:<15} {}", format_time(sidt));
+            return;
         }
-        BodySpec::Ayanamsha => match eph.get_ayanamsa_ex(tjd_tt, iflag) {
-            Ok(aya) => println!("{name:<15} {aya:.7}"),
-            Err(e) => println!("{name:<15} error: {e}"),
-        },
+        BodySpec::Ayanamsha => {
+            match eph.get_ayanamsa_ex(tjd_tt, iflag) {
+                Ok(aya) => println!("{name:<15} {aya:.7}"),
+                Err(e) => println!("{name:<15} error: {e}"),
+            }
+            return;
+        }
+        _ => {}
     }
+
+    // For bodies that go through the format engine
+    let is_fixstar = matches!(spec, BodySpec::FixedStar);
+    let star_name = if is_fixstar {
+        args.star_name.as_deref()
+    } else {
+        None
+    };
+
+    // Primary computation
+    let (calc_name, data) = if is_fixstar {
+        if let Some(ref star) = args.star_name {
+            match eph.fixstar2(star, tjd_tt, iflag) {
+                Ok((canonical, result)) => (canonical, result.data),
+                Err(e) => {
+                    println!("{name:<15} error: {e}");
+                    return;
+                }
+            }
+        } else {
+            println!("{name:<15} error: no star name (-xf)");
+            return;
+        }
+    } else if let Some(body) = resolve_body(spec, args) {
+        match eph.calc(tjd_tt, body, iflag) {
+            Ok(result) => (name.clone(), result.data),
+            Err(e) => {
+                println!("{name:<15} error: {e}");
+                return;
+            }
+        }
+    } else {
+        println!("{name:<15} error: invalid body specification");
+        return;
+    };
+
+    let body = resolve_body(spec, args);
+
+    // Supplementary computations
+    let (xequ, xaz, xcart, xecart, hpos, hposj, armc, attr) = if let Some(b) = body {
+        compute_supplementary(eph, b, star_name, tjd_tt, tjd_ut, iflag, needs, args)
+    } else {
+        (None, None, None, None, None, None, None, None)
+    };
+
+    let ipl = match spec {
+        BodySpec::Planet(b) => body_to_ipl(*b),
+        BodySpec::Asteroid => parse_int_arg(&args.asteroid_number).unwrap_or(0),
+        BodySpec::PlanetMoon => parse_int_arg(&args.planet_moon).unwrap_or(0),
+        BodySpec::Fictitious => parse_int_arg(&args.fictitious).unwrap_or(0),
+        _ => 0,
+    };
+
+    let ctx = FormatContext {
+        name: calc_name,
+        ipl,
+        body,
+        jd: if info.is_ut { tjd_ut } else { tjd_tt },
+        tjd_ut,
+        tjd_tt,
+        year: info.year,
+        month: info.month,
+        day: info.day,
+        hour: info.hour,
+        cal: info.cal,
+        is_ut: info.is_ut,
+        data,
+        xequ,
+        xaz,
+        xcart,
+        xecart,
+        hpos,
+        hposj,
+        armc,
+        attr,
+        args,
+        is_label: false,
+    };
+
+    println!("{}", format::format_line(&ctx, eph));
 }
 
 pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
     let iflag = args.build_iflag();
     let config = eph.config();
     let start = resolve_start_jd(args, config);
+    let needs = format::scan_format_needs(&args.format);
 
     let step_count = if args.step_count == 0 {
         20
@@ -510,7 +700,7 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
 
         let bodies = args.body_specs();
         for spec in &bodies {
-            compute_body(eph, spec, args, tjd_tt, tjd_ut, iflag);
+            compute_body(eph, spec, args, tjd_tt, tjd_ut, iflag, &needs, &info);
         }
 
         if istep < step_count {

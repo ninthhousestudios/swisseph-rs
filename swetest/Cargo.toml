@@ -6,4 +6,5 @@ description = "CLI test harness for the swisseph Rust ephemeris library"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+bitflags = "2"
 swisseph = { path = ".." }
