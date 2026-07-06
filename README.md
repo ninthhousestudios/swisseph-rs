@@ -1,4 +1,4 @@
-# swisseph
+# swisseph-rs
 
 Pure-Rust, stateless port of the [Swiss Ephemeris](https://www.astro.com/swisseph/)
 astronomical calculation library.
@@ -13,8 +13,10 @@ port deliberately replicates (see `docs/swisseph-c-potential-bugs.md`).
 
 ```toml
 [dependencies]
-swisseph = "0.1"
+swisseph = { package = "swisseph-rs", version = "0.1" }
 ```
+
+The Rust crate name is `swisseph`, so `use swisseph::...` works directly.
 
 ### Feature flags
 
@@ -28,7 +30,7 @@ swisseph = "0.1"
 Disable both `swisseph-files` and `jpl` for a zero-file-IO, pure-Moshier build:
 
 ```toml
-swisseph = { version = "0.1", default-features = false }
+swisseph = { package = "swisseph-rs", version = "0.1", default-features = false }
 ```
 
 The Moshier backend is always available and requires no data files. For higher precision
@@ -65,6 +67,23 @@ let config = EphemerisConfig {
 let eph = Ephemeris::new(config).unwrap();
 let result = eph.calc_ut(2451545.0, Body::Moon, CalcFlags::SPEED).unwrap();
 ```
+
+## swetest CLI
+
+The workspace includes a `swetest` binary — a port of the C `swetest` test harness.
+It aims to be feature-complete with the C original and supports all the same flags
+for body selection, time input, output formatting, eclipses, rise/set, heliacal events,
+houses, sidereal modes, differential/midpoint modes, and more.
+
+Not ported (intentionally):
+- **Interactive REPL mode** — C's stdin-driven `Date ?` loop when no `-b` is given.
+  The Rust CLI requires explicit date input.
+- **`-nut`** — `swe_set_interpolate_nut` is a stateful cache optimization with no
+  meaning in a stateless architecture
+- **`-tpm`** — internal debug flag for raw planetary-moon file testing
+- **`-glp`**, **`-clink`** — Astrodienst-internal debug/web-embedding aids
+- **Granular help topics** (`-hcmd`, `-hplan`, `-hform`, etc.) — Rust prints one
+  unified help block
 
 ## Design: stateless vs the C original
 
@@ -154,9 +173,6 @@ Every method carries a `#[doc(alias = "swe_...")]` attribute, so
 |---------|--------|
 | EP4 compressed ephemeris reader | Not planned — standard `.se1` files cover all use cases |
 | `swe_set_interpolate_nut` | Inherently a stateful cache optimization — intentionally unsupported |
-| `swe_get_current_file_data` | Stateful / not applicable to this design |
-| `swe_get_library_path` | Stateful / not applicable |
-| `swe_fixstar` (v1 API) | Deprecated upstream; v2 (`fixstar2`) is ported |
 
 ## Examples
 

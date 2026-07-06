@@ -2,14 +2,18 @@
 members = [".", "swisseph-ffi", "swetest"]
 
 [package]
-name = "swisseph"
+name = "swisseph-rs"
 version = "0.1.0"
 edition = "2024"
-description = "Pure-Rust port of the Swiss Ephemeris astronomical calculation library"
+description = "Pure, stateless Rust port of the Swiss Ephemeris astronomical calculation library"
 license = "AGPL-3.0-or-later"
 readme = "README.md"
+repository = "https://github.com/ninthhousestudios/swisseph-rs"
 keywords = ["astronomy", "ephemeris", "astrology", "swisseph"]
 categories = ["science"]
+
+[lib]
+name = "swisseph"
 
 [features]
 default = ["swisseph-files", "jpl"]

@@ -7,4 +7,4 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 bitflags = "2"
-swisseph = { path = ".." }
+swisseph = { path = "..", package = "swisseph-rs" }

@@ -831,11 +831,19 @@ name = "swetest"
 version = "0.1.0"
 dependencies = [
  "bitflags",
- "swisseph",
+ "swisseph-rs",
 ]
 
 [[package]]
-name = "swisseph"
+name = "swisseph-ffi"
+version = "0.2.0"
+dependencies = [
+ "cbindgen",
+ "swisseph-rs",
+]
+
+[[package]]
+name = "swisseph-rs"
 version = "0.1.0"
 dependencies = [
  "bitflags",
@@ -845,14 +853,6 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
-]
-
-[[package]]
-name = "swisseph-ffi"
-version = "0.2.0"
-dependencies = [
- "cbindgen",
- "swisseph",
 ]
 
 [[package]]

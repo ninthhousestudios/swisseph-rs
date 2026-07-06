@@ -9,7 +9,7 @@ license = "AGPL-3.0-or-later"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-swisseph = { path = ".." }
+swisseph = { path = "..", package = "swisseph-rs" }
 
 [dev-dependencies]
 cbindgen = "0.29"
