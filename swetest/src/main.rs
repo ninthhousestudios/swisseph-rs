@@ -1,5 +1,5 @@
-#[allow(dead_code)]
 mod args;
+mod compute;
 
 use std::process;
 
@@ -155,15 +155,10 @@ fn main() {
     };
 
     let config = parsed.to_ephemeris_config();
-    let iflag = parsed.build_iflag();
 
     match Ephemeris::new(config) {
         Ok(eph) => {
-            eprintln!(
-                "swetest: Ephemeris constructed, iflag={iflag:?}, bodies=[{}]",
-                parsed.planet_selection,
-            );
-            drop(eph);
+            compute::run(&parsed, &eph);
         }
         Err(e) => {
             eprintln!("swetest: failed to construct Ephemeris: {e}");

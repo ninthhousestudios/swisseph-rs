@@ -51,6 +51,7 @@ pub enum DiffMode {
     DiffHelio,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SiderealArgs {
     pub mode: i32,
@@ -59,6 +60,7 @@ pub struct SiderealArgs {
     pub user_ut: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HouseArgs {
     pub longitude: f64,
