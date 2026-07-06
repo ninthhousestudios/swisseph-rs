@@ -507,6 +507,24 @@ fn compute_supplementary(
     (xequ, xaz, xcart, xecart, hpos, hposj, armc_val, attr)
 }
 
+fn apply_diff(x: &mut [f64; 6], x2: &[f64; 6], mode: DiffMode) {
+    match mode {
+        DiffMode::Diff | DiffMode::DiffHelio => {
+            x[0] = swisseph::math::diff_degrees(x[0], x2[0]);
+            for i in 1..6 {
+                x[i] -= x2[i];
+            }
+        }
+        DiffMode::DiffAbs => {
+            x[0] = swisseph::math::midpoint_degrees(x[0], x2[0]);
+            for i in 1..6 {
+                x[i] = (x[i] + x2[i]) / 2.0;
+            }
+        }
+        DiffMode::None => {}
+    }
+}
+
 fn compute_body(
     eph: &Ephemeris,
     spec: &BodySpec,
@@ -565,7 +583,7 @@ fn compute_body(
     };
 
     // Primary computation
-    let (calc_name, data) = if is_fixstar {
+    let (calc_name, mut data) = if is_fixstar {
         if let Some(ref star) = args.star_name {
             match eph.fixstar2(star, tjd_tt, iflag) {
                 Ok((canonical, result)) => (canonical, result.data),
@@ -594,10 +612,107 @@ fn compute_body(
     let body = resolve_body(spec, args);
 
     // Supplementary computations
-    let (xequ, xaz, xcart, xecart, hpos, hposj, armc, attr) = if let Some(b) = body {
-        compute_supplementary(eph, b, star_name, tjd_tt, tjd_ut, iflag, needs, args)
+    let (mut xequ, mut xaz, mut xcart, mut xecart, mut hpos, mut hposj, armc, attr) =
+        if let Some(b) = body {
+            compute_supplementary(eph, b, star_name, tjd_tt, tjd_ut, iflag, needs, args)
+        } else {
+            (None, None, None, None, None, None, None, None)
+        };
+
+    // Differential/midpoint mode
+    let calc_name = if args.diff_mode != DiffMode::None {
+        let diff_spec = crate::args::letter_to_body(args.diff_planet);
+        if let Some(ref_body) = resolve_body(&diff_spec, args) {
+            let diff_iflag = if args.diff_mode == DiffMode::DiffHelio {
+                iflag | CalcFlags::HELCTR
+            } else {
+                iflag
+            };
+            if let Ok(ref_result) = eph.calc(tjd_tt, ref_body, diff_iflag) {
+                let x2 = ref_result.data;
+                match args.diff_mode {
+                    DiffMode::Diff | DiffMode::DiffHelio => {
+                        data[0] = swisseph::math::diff_degrees(data[0], x2[0]);
+                        for i in 1..6 {
+                            data[i] -= x2[i];
+                        }
+                    }
+                    DiffMode::DiffAbs => {
+                        data[0] = swisseph::math::midpoint_degrees(data[0], x2[0]);
+                        for i in 1..6 {
+                            data[i] = (data[i] + x2[i]) / 2.0;
+                        }
+                    }
+                    DiffMode::None => unreachable!(),
+                }
+                if let Some(ref mut eq) = xequ {
+                    let eq2_iflag = diff_iflag | CalcFlags::EQUATORIAL;
+                    if let Ok(r2) = eph.calc(tjd_tt, ref_body, eq2_iflag) {
+                        apply_diff(eq, &r2.data, args.diff_mode);
+                    }
+                }
+                if let Some(ref mut cart) = xcart {
+                    let c2_iflag = diff_iflag | CalcFlags::XYZ;
+                    if let Ok(r2) = eph.calc(tjd_tt, ref_body, c2_iflag) {
+                        apply_diff(cart, &r2.data, args.diff_mode);
+                    }
+                }
+                if let Some(ref mut ecart) = xecart {
+                    let e2_iflag = diff_iflag | CalcFlags::XYZ | CalcFlags::EQUATORIAL;
+                    if let Ok(r2) = eph.calc(tjd_tt, ref_body, e2_iflag) {
+                        apply_diff(ecart, &r2.data, args.diff_mode);
+                    }
+                }
+                if let Some(ref mut az) = xaz {
+                    let az2_iflag = diff_iflag
+                        & (CalcFlags::SWIEPH | CalcFlags::JPLEPH | CalcFlags::MOSEPH)
+                        | CalcFlags::EQUATORIAL
+                        | CalcFlags::TOPOCTR;
+                    if let Ok(r2) = eph.calc(tjd_tt, ref_body, az2_iflag) {
+                        let geopos = [args.geo_longitude, args.geo_latitude, args.geo_elevation];
+                        let xin2 = [r2.data[0], r2.data[1]];
+                        let az2 = eph.azalt(
+                            tjd_ut,
+                            swisseph::azalt::AzAltDir::EquToHor,
+                            geopos,
+                            args.atmosphere[0],
+                            args.atmosphere[1],
+                            0.0,
+                            xin2,
+                        );
+                        match args.diff_mode {
+                            DiffMode::Diff | DiffMode::DiffHelio => {
+                                az[0] = swisseph::math::diff_degrees(az[0], az2[0]);
+                                az[1] -= az2[1];
+                                az[2] -= az2[2];
+                            }
+                            DiffMode::DiffAbs => {
+                                az[0] = swisseph::math::midpoint_degrees(az[0], az2[0]);
+                                az[1] = (az[1] + az2[1]) / 2.0;
+                                az[2] = (az[2] + az2[2]) / 2.0;
+                            }
+                            DiffMode::None => unreachable!(),
+                        }
+                    }
+                }
+                if let Some(hp) = hpos {
+                    hpos = Some(0.0);
+                    hposj = Some(0.0);
+                    let _ = hp;
+                }
+            }
+        }
+        let ref_name = body_name(eph, &crate::args::letter_to_body(args.diff_planet), args);
+        let pn = &calc_name[..calc_name.len().min(3)];
+        let rn = &ref_name[..ref_name.len().min(3)];
+        match args.diff_mode {
+            DiffMode::Diff => format!("{pn}-{rn}"),
+            DiffMode::DiffAbs => format!("{pn}/{rn}"),
+            DiffMode::DiffHelio => format!("{pn}-{rn}Hel"),
+            DiffMode::None => unreachable!(),
+        }
     } else {
-        (None, None, None, None, None, None, None, None)
+        calc_name
     };
 
     let ipl = match spec {
