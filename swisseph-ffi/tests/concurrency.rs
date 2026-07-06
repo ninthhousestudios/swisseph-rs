@@ -205,3 +205,54 @@ fn handle_as_int_roundtrip() {
 
     unsafe { swisseph_ffi::swisseph_free(recovered) };
 }
+
+#[test]
+fn concurrent_shared_handles_with_interleaved_free() {
+    let original = unsafe { make_handle() };
+    let baseline = unsafe { compute_all_ffi(original) };
+
+    let n = 8usize;
+    let handles: Vec<*mut SweEphemeris> = (0..n)
+        .map(|_| unsafe {
+            let mut shared: *mut SweEphemeris = ptr::null_mut();
+            let mut err = [0u8; 256];
+            let ret = swisseph_ffi::swisseph_share(
+                original,
+                &mut shared,
+                err.as_mut_ptr() as *mut c_char,
+                err.len(),
+            );
+            assert_eq!(ret, SweErrorCode::Ok as i32);
+            shared
+        })
+        .collect();
+
+    // Free the original — all shared handles remain valid
+    unsafe { swisseph_ffi::swisseph_free(original) };
+
+    // Cast to usize for Send (raw pointers aren't Send)
+    let handle_ints: Vec<usize> = handles.iter().map(|h| *h as usize).collect();
+
+    // Each thread computes on its own shared handle then frees it
+    std::thread::scope(|s| {
+        let threads: Vec<_> = handle_ints
+            .into_iter()
+            .enumerate()
+            .map(|(i, h_int)| {
+                s.spawn(move || {
+                    let h = h_int as *mut SweEphemeris;
+                    let results = unsafe { compute_all_ffi(h) };
+                    unsafe { swisseph_ffi::swisseph_free(h) };
+                    (i, results)
+                })
+            })
+            .collect();
+        for t in threads {
+            let (i, results) = t.join().expect("thread panicked");
+            assert_eq!(
+                results, baseline,
+                "shared handle thread {i} diverged from baseline"
+            );
+        }
+    });
+}

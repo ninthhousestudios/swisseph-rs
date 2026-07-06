@@ -264,7 +264,7 @@ fn version_not_null() {
     let ptr = swisseph_ffi::swisseph_version();
     assert!(!ptr.is_null());
     let cstr = unsafe { std::ffi::CStr::from_ptr(ptr) };
-    assert_eq!(cstr.to_str().unwrap(), "0.1.0");
+    assert_eq!(cstr.to_str().unwrap(), "0.2.0");
 }
 
 #[test]
@@ -424,5 +424,207 @@ fn get_file_data_null_handle() {
             err_buf.len(),
         );
         assert_eq!(ret, SweErrorCode::InvalidArg as i32);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// swisseph_share tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn share_and_free_original_first() {
+    unsafe {
+        let config = default_config();
+        let mut handle: *mut SweEphemeris = ptr::null_mut();
+        let mut err = [0u8; 256];
+        swisseph_ffi::swisseph_new(
+            &config,
+            &mut handle,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+
+        let mut shared: *mut SweEphemeris = ptr::null_mut();
+        let ret = swisseph_ffi::swisseph_share(
+            handle,
+            &mut shared,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+        assert_eq!(ret, SweErrorCode::Ok as i32);
+        assert!(!shared.is_null());
+
+        swisseph_ffi::swisseph_free(handle);
+
+        let mut xx = [0.0f64; 6];
+        let mut flags_used: i32 = 0;
+        let ret = swisseph_ffi::swisseph_calc_ut(
+            shared,
+            2451545.0,
+            0,
+            256,
+            ptr::null(),
+            ptr::null(),
+            xx.as_mut_ptr(),
+            &mut flags_used,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+        assert_eq!(ret, 0);
+        assert!(xx[0] != 0.0, "Sun longitude should be nonzero");
+
+        swisseph_ffi::swisseph_free(shared);
+    }
+}
+
+#[test]
+fn share_and_free_shared_first() {
+    unsafe {
+        let config = default_config();
+        let mut handle: *mut SweEphemeris = ptr::null_mut();
+        let mut err = [0u8; 256];
+        swisseph_ffi::swisseph_new(
+            &config,
+            &mut handle,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+
+        let mut shared: *mut SweEphemeris = ptr::null_mut();
+        swisseph_ffi::swisseph_share(
+            handle,
+            &mut shared,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+
+        swisseph_ffi::swisseph_free(shared);
+
+        let mut xx = [0.0f64; 6];
+        let mut flags_used: i32 = 0;
+        let ret = swisseph_ffi::swisseph_calc_ut(
+            handle,
+            2451545.0,
+            0,
+            256,
+            ptr::null(),
+            ptr::null(),
+            xx.as_mut_ptr(),
+            &mut flags_used,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+        assert_eq!(ret, 0);
+        assert!(xx[0] != 0.0);
+
+        swisseph_ffi::swisseph_free(handle);
+    }
+}
+
+#[test]
+fn share_produces_identical_results() {
+    unsafe {
+        let config = default_config();
+        let mut handle: *mut SweEphemeris = ptr::null_mut();
+        let mut err = [0u8; 256];
+        swisseph_ffi::swisseph_new(
+            &config,
+            &mut handle,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+
+        let mut shared: *mut SweEphemeris = ptr::null_mut();
+        swisseph_ffi::swisseph_share(
+            handle,
+            &mut shared,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+
+        let mut xx_orig = [0.0f64; 6];
+        let mut xx_shared = [0.0f64; 6];
+        let mut flags_orig: i32 = 0;
+        let mut flags_shared: i32 = 0;
+
+        swisseph_ffi::swisseph_calc_ut(
+            handle,
+            2451545.0,
+            1,
+            256,
+            ptr::null(),
+            ptr::null(),
+            xx_orig.as_mut_ptr(),
+            &mut flags_orig,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+        swisseph_ffi::swisseph_calc_ut(
+            shared,
+            2451545.0,
+            1,
+            256,
+            ptr::null(),
+            ptr::null(),
+            xx_shared.as_mut_ptr(),
+            &mut flags_shared,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+
+        for i in 0..6 {
+            assert_eq!(
+                xx_orig[i].to_bits(),
+                xx_shared[i].to_bits(),
+                "xx[{i}] diverged: orig={} shared={}",
+                xx_orig[i],
+                xx_shared[i]
+            );
+        }
+        assert_eq!(flags_orig, flags_shared);
+
+        swisseph_ffi::swisseph_free(handle);
+        swisseph_ffi::swisseph_free(shared);
+    }
+}
+
+#[test]
+fn share_null_handle_returns_invalid_arg() {
+    unsafe {
+        let mut out: *mut SweEphemeris = ptr::null_mut();
+        let mut err = [0u8; 256];
+        let ret = swisseph_ffi::swisseph_share(
+            ptr::null(),
+            &mut out,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+        assert_eq!(ret, SweErrorCode::InvalidArg as i32);
+        assert!(out.is_null());
+    }
+}
+
+#[test]
+fn share_null_out_returns_invalid_arg() {
+    unsafe {
+        let config = default_config();
+        let mut handle: *mut SweEphemeris = ptr::null_mut();
+        let mut err = [0u8; 256];
+        swisseph_ffi::swisseph_new(
+            &config,
+            &mut handle,
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+
+        let ret = swisseph_ffi::swisseph_share(
+            handle,
+            ptr::null_mut(),
+            err.as_mut_ptr() as *mut c_char,
+            err.len(),
+        );
+        assert_eq!(ret, SweErrorCode::InvalidArg as i32);
+
+        swisseph_ffi::swisseph_free(handle);
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "swisseph-ffi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "C ABI (cdylib) for the swisseph Rust ephemeris library"
 license = "AGPL-3.0-or-later"

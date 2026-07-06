@@ -161,10 +161,27 @@ int32_t swisseph_new(const struct SweConfig *config,
 
 // Free an ephemeris handle. Null-safe (no-op on NULL).
 //
+// If this is the last handle sharing the engine (created via `swisseph_new` or
+// `swisseph_share`), the engine memory is released. Otherwise, only the refcount
+// is decremented. Handles may be freed in any order.
+//
 // # Safety
-// `handle` must be NULL or a pointer previously returned by `swisseph_new` that has not
-// already been freed.
+// `handle` must be NULL or a pointer previously returned by `swisseph_new` or
+// `swisseph_share` that has not already been freed.
 void swisseph_free(SweEphemeris *handle);
+
+// Clone a handle's refcount. Returns a new handle that shares the same engine.
+// Both handles must be freed independently via `swisseph_free`; the engine is
+// released when the last handle is freed. Order of frees does not matter.
+//
+// # Safety
+// - `handle` must be a valid, non-NULL handle from `swisseph_new` or `swisseph_share`.
+// - `out` must point to a writable `*mut SweEphemeris`.
+// - `err_buf` may be NULL; if non-NULL, `err_cap` bytes must be writable.
+int32_t swisseph_share(const SweEphemeris *handle,
+                       SweEphemeris **out,
+                       char *err_buf,
+                       uintptr_t err_cap);
 
 // Return the resolved tidal acceleration (arcsec/century^2).
 // NAN when unresolved (e.g. Moshier without explicit override).

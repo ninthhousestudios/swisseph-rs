@@ -8,6 +8,7 @@ pub mod pheno;
 pub mod util;
 
 use std::ffi::c_char;
+use std::sync::Arc;
 
 use swisseph::Ephemeris;
 use swisseph::config::{EphemerisConfig, TopoPosition};
@@ -17,8 +18,10 @@ use swisseph::types::{Body, SiderealMode};
 use crate::config::SweConfig;
 use crate::error::{SweErrorCode, error_code, ffi_guard, write_err};
 
-/// Opaque handle wrapping an `Ephemeris`. Never `#[repr(C)]` — Dart/C sees only `*mut SweEphemeris`.
-pub struct SweEphemeris(Ephemeris);
+/// Opaque handle wrapping a refcounted `Ephemeris`. Never `#[repr(C)]` — Dart/C sees only
+/// `*mut SweEphemeris`. Multiple handles can share the same engine via `swisseph_share`;
+/// the engine is released when the last handle is freed.
+pub struct SweEphemeris(Arc<Ephemeris>);
 
 /// Per-call sidereal mode override. Nullable in all FFI signatures — NULL means
 /// "use the handle's configured sidereal mode".
@@ -100,7 +103,7 @@ pub(crate) unsafe fn cstr_to_str<'a>(ptr: *const c_char) -> Result<&'a str, &'st
 /// Return the library version as a static NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
 pub extern "C" fn swisseph_version() -> *const c_char {
-    static VERSION: &[u8] = b"0.1.0\0";
+    static VERSION: &[u8] = b"0.2.0\0";
     VERSION.as_ptr() as *const c_char
 }
 
@@ -136,7 +139,7 @@ pub unsafe extern "C" fn swisseph_new(
 
         match Ephemeris::new(rust_config) {
             Ok(eph) => {
-                let boxed = Box::new(SweEphemeris(eph));
+                let boxed = Box::new(SweEphemeris(Arc::new(eph)));
                 unsafe { *out = Box::into_raw(boxed) };
                 SweErrorCode::Ok as i32
             }
@@ -151,14 +154,45 @@ pub unsafe extern "C" fn swisseph_new(
 
 /// Free an ephemeris handle. Null-safe (no-op on NULL).
 ///
+/// If this is the last handle sharing the engine (created via `swisseph_new` or
+/// `swisseph_share`), the engine memory is released. Otherwise, only the refcount
+/// is decremented. Handles may be freed in any order.
+///
 /// # Safety
-/// `handle` must be NULL or a pointer previously returned by `swisseph_new` that has not
-/// already been freed.
+/// `handle` must be NULL or a pointer previously returned by `swisseph_new` or
+/// `swisseph_share` that has not already been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn swisseph_free(handle: *mut SweEphemeris) {
     if !handle.is_null() {
         drop(unsafe { Box::from_raw(handle) });
     }
+}
+
+/// Clone a handle's refcount. Returns a new handle that shares the same engine.
+/// Both handles must be freed independently via `swisseph_free`; the engine is
+/// released when the last handle is freed. Order of frees does not matter.
+///
+/// # Safety
+/// - `handle` must be a valid, non-NULL handle from `swisseph_new` or `swisseph_share`.
+/// - `out` must point to a writable `*mut SweEphemeris`.
+/// - `err_buf` may be NULL; if non-NULL, `err_cap` bytes must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn swisseph_share(
+    handle: *const SweEphemeris,
+    out: *mut *mut SweEphemeris,
+    err_buf: *mut c_char,
+    err_cap: usize,
+) -> i32 {
+    ffi_guard!(err_buf, err_cap, {
+        if handle.is_null() || out.is_null() {
+            unsafe { write_err(err_buf, err_cap, "null pointer argument") };
+            return SweErrorCode::InvalidArg as i32;
+        }
+        let arc_clone = unsafe { (*handle).0.clone() };
+        let boxed = Box::new(SweEphemeris(arc_clone));
+        unsafe { *out = Box::into_raw(boxed) };
+        SweErrorCode::Ok as i32
+    })
 }
 
 /// Return the resolved tidal acceleration (arcsec/century^2).

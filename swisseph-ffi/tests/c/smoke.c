@@ -129,6 +129,57 @@ static int test_free_null(void) {
     return 0;
 }
 
+static int test_share(void) {
+    SweConfig config;
+    swisseph_config_default(&config);
+
+    SweEphemeris *handle = NULL;
+    char err[256] = {0};
+    int32_t ret = swisseph_new(&config, &handle, err, sizeof(err));
+    if (ret != 0) {
+        fprintf(stderr, "FAIL: swisseph_new returned %d: %s\n", ret, err);
+        return 1;
+    }
+
+    /* Share the handle */
+    SweEphemeris *shared = NULL;
+    memset(err, 0, sizeof(err));
+    ret = swisseph_share(handle, &shared, err, sizeof(err));
+    if (ret != 0) {
+        fprintf(stderr, "FAIL: swisseph_share returned %d: %s\n", ret, err);
+        swisseph_free(handle);
+        return 1;
+    }
+    if (shared == NULL) {
+        fprintf(stderr, "FAIL: swisseph_share returned OK but shared is NULL\n");
+        swisseph_free(handle);
+        return 1;
+    }
+
+    /* Free original first */
+    swisseph_free(handle);
+
+    /* Shared handle must still work */
+    double xx[6] = {0};
+    int32_t flags_used = 0;
+    memset(err, 0, sizeof(err));
+    ret = swisseph_calc_ut(shared, 2451545.0, 0, 256, NULL, NULL, xx, &flags_used, err, sizeof(err));
+    if (ret != 0) {
+        fprintf(stderr, "FAIL: calc_ut on shared handle returned %d: %s\n", ret, err);
+        swisseph_free(shared);
+        return 1;
+    }
+    if (xx[0] < 270.0 || xx[0] > 290.0) {
+        fprintf(stderr, "FAIL: shared Sun longitude %.6f out of range\n", xx[0]);
+        swisseph_free(shared);
+        return 1;
+    }
+    printf("  shared Sun@J2000 lon=%.6f\n", xx[0]);
+
+    swisseph_free(shared);
+    return 0;
+}
+
 static int test_julday_revjul(void) {
     double jd = swisseph_julday(2000, 1, 1, 12.0, 1);
     if (fabs(jd - 2451545.0) > 1e-10) {
@@ -179,6 +230,9 @@ int main(void) {
 
     printf("  test_degnorm...\n");
     failures += test_degnorm();
+
+    printf("  test_share...\n");
+    failures += test_share();
 
     if (failures > 0) {
         fprintf(stderr, "\n%d test(s) FAILED\n", failures);

@@ -221,7 +221,7 @@ pub unsafe extern "C" fn swisseph_utc_to_jd(
             minute: min,
             second: sec,
         };
-        match date::utc_to_jd(&utc, cal, eph.leap_seconds(), eph) {
+        match date::utc_to_jd(&utc, cal, eph.leap_seconds(), &**eph) {
             Ok(result) => {
                 unsafe {
                     *dret = result.tt.0;
@@ -265,7 +265,7 @@ pub unsafe extern "C" fn swisseph_jdet_to_utc(
     } else {
         CalendarType::Gregorian
     };
-    let utc = date::jdet_to_utc(JdTt(tjd_et), cal, eph.leap_seconds(), eph);
+    let utc = date::jdet_to_utc(JdTt(tjd_et), cal, eph.leap_seconds(), &**eph);
     unsafe {
         if !year.is_null() {
             *year = utc.year;
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn swisseph_jdut1_to_utc(
     } else {
         CalendarType::Gregorian
     };
-    let utc = date::jdut1_to_utc(JdUt1(tjd_ut), cal, eph.leap_seconds(), eph);
+    let utc = date::jdut1_to_utc(JdUt1(tjd_ut), cal, eph.leap_seconds(), &**eph);
     unsafe {
         if !year.is_null() {
             *year = utc.year;
