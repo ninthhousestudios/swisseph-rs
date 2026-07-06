@@ -633,16 +633,116 @@ fn compute_body(
         args,
         is_label: false,
         is_house: false,
+        is_ayanamsa: false,
     };
 
     println!("{}", format::format_line(&ctx, eph));
 }
+
+fn print_houses(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: CalcFlags) {
+    let hsys = swisseph::types::HouseSystem::try_from(args.house_system as u8)
+        .unwrap_or(swisseph::types::HouseSystem::Placidus);
+    let nhouses: usize = if args.house_system == 'G' { 36 } else { 12 };
+
+    let result = match eph.houses_ex2(
+        info.tjd_ut,
+        iflag,
+        args.geo_latitude,
+        args.geo_longitude,
+        hsys,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("Houses error: {e}");
+            return;
+        }
+    };
+
+    let ascmc_arr = result.ascmc.as_array();
+    let ascmc_speed_arr = result.ascmc_speeds.as_array();
+
+    for ipl in 1..=(nhouses + 8) {
+        let (name, lon, spd) = if ipl <= nhouses {
+            (
+                format!("house {:>2}", ipl),
+                result.cusps[ipl],
+                result.cusp_speeds[ipl],
+            )
+        } else {
+            let idx = ipl - nhouses - 1;
+            (
+                ASCMC_NAMES[idx].to_owned(),
+                ascmc_arr[idx],
+                ascmc_speed_arr[idx],
+            )
+        };
+
+        let mut data = [0.0_f64; 6];
+        data[0] = lon;
+        data[1] = 0.0;
+        data[2] = 1.0;
+        data[3] = spd;
+
+        let xequ = if ipl > nhouses && (ipl - nhouses - 1) == 2 {
+            // ARMC is already equatorial — copy directly
+            Some(data)
+        } else {
+            None
+        };
+
+        let ctx = FormatContext {
+            name,
+            ipl: ipl as i32,
+            body: None,
+            jd: if info.is_ut { info.tjd_ut } else { info.tjd_tt },
+            tjd_ut: info.tjd_ut,
+            tjd_tt: info.tjd_tt,
+            year: info.year,
+            month: info.month,
+            day: info.day,
+            hour: info.hour,
+            cal: info.cal,
+            is_ut: info.is_ut,
+            data,
+            xequ,
+            xaz: None,
+            xcart: None,
+            xecart: None,
+            hpos: None,
+            hposj: None,
+            armc: None,
+            attr: None,
+            args,
+            is_label: false,
+            is_house: true,
+            is_ayanamsa: false,
+        };
+
+        println!("{}", format::format_line(&ctx, eph));
+    }
+}
+
+const ASCMC_NAMES: [&str; 8] = [
+    "Ascendant",
+    "MC",
+    "ARMC",
+    "Vertex",
+    "equat. Asc.",
+    "co-Asc. W.Koch",
+    "co-Asc Munkasey",
+    "Polar Asc.",
+];
 
 pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
     let iflag = args.build_iflag();
     let config = eph.config();
     let start = resolve_start_jd(args, config);
     let needs = format::scan_format_needs(&args.format);
+    let mut do_houses = args.do_houses;
+    if do_houses && !start.is_ut {
+        println!("option -house requires option -ut for Universal Time");
+        do_houses = false;
+    }
 
     let step_count = if args.step_count == 0 {
         20
@@ -733,7 +833,8 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
                         attr: None,
                         args,
                         is_label: false,
-                        is_house: true,
+                        is_house: false,
+                        is_ayanamsa: true,
                     };
                     println!("{}", format::format_line(&ctx, eph));
                 }
@@ -745,6 +846,10 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
         let bodies = args.body_specs();
         for spec in &bodies {
             compute_body(eph, spec, args, tjd_tt, tjd_ut, iflag, &needs, &info);
+        }
+
+        if do_houses {
+            print_houses(args, eph, &info, iflag);
         }
 
         if istep < step_count {

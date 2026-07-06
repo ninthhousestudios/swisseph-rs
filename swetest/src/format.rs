@@ -50,6 +50,7 @@ pub struct FormatContext<'a> {
     pub args: &'a SweTestArgs,
     pub is_label: bool,
     pub is_house: bool,
+    pub is_ayanamsa: bool,
 }
 
 pub struct FormatNeeds {
@@ -270,12 +271,10 @@ fn format_char(
     if ctx.is_label {
         return Some(label_for(ch));
     }
-    if ctx.is_house
+    if (ctx.is_house || ctx.is_ayanamsa)
         && matches!(
             ch,
             'b' | 'B'
-                | 's'
-                | 'S'
                 | 'r'
                 | 'R'
                 | 'x'
@@ -295,6 +294,9 @@ fn format_char(
                 | '='
         )
     {
+        return None;
+    }
+    if ctx.is_ayanamsa && matches!(ch, 's' | 'S') {
         return None;
     }
     match ch {
@@ -683,7 +685,7 @@ fn format_speed(
                     if ctx.is_label {
                         "lon/day".into()
                     } else {
-                        dms(ctx.data[3], rflag, ep)
+                        dms(ctx.data[3], rflag | DmsFlags::ALLOW_361, ep)
                     }
                 }
                 'l' => {
@@ -697,7 +699,7 @@ fn format_speed(
                     if ctx.is_label {
                         "lat/day".into()
                     } else {
-                        dms(ctx.data[4], rflag, ep)
+                        dms(ctx.data[4], rflag | DmsFlags::ALLOW_361, ep)
                     }
                 }
                 'b' => {
@@ -711,7 +713,11 @@ fn format_speed(
                     if ctx.is_label {
                         "RA/day".into()
                     } else if let Some(ref xequ) = ctx.xequ {
-                        dms(xequ[3] / 15.0, rflag | DmsFlags::EQUATORIAL, ep)
+                        dms(
+                            xequ[3] / 15.0,
+                            rflag | DmsFlags::EQUATORIAL | DmsFlags::ALLOW_361,
+                            ep,
+                        )
                     } else {
                         "  --RA--".into()
                     }
@@ -729,7 +735,7 @@ fn format_speed(
                     if ctx.is_label {
                         "dcl/day".into()
                     } else if let Some(ref xequ) = ctx.xequ {
-                        dms(xequ[4], rflag, ep)
+                        dms(xequ[4], rflag | DmsFlags::ALLOW_361, ep)
                     } else {
                         "  --dec--".into()
                     }
@@ -795,7 +801,7 @@ fn format_speed(
         }
         Some(parts.join(gap))
     } else if ch == 'S' {
-        Some(dms(ctx.data[3], rflag, ep))
+        Some(dms(ctx.data[3], rflag | DmsFlags::ALLOW_361, ep))
     } else {
         // 's'
         Some(fmt_decimal(ctx.data[3], ep))
