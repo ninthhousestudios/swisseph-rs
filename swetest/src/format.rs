@@ -51,6 +51,7 @@ pub struct FormatContext<'a> {
     pub is_label: bool,
     pub is_house: bool,
     pub is_ayanamsa: bool,
+    pub is_first: bool,
 }
 
 pub struct FormatNeeds {
@@ -297,6 +298,9 @@ fn format_char(
         return None;
     }
     if ctx.is_ayanamsa && matches!(ch, 's' | 'S') {
+        return None;
+    }
+    if ctx.args.horizontal && !ctx.is_first && matches!(ch, 'y' | 'Y' | 'J' | 'T' | 't') {
         return None;
     }
     match ch {

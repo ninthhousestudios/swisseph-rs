@@ -543,6 +543,7 @@ fn compute_body(
     iflag: CalcFlags,
     needs: &FormatNeeds,
     info: &EpochInfo,
+    is_first: bool,
 ) {
     let name = body_name(eph, spec, args);
 
@@ -758,9 +759,17 @@ fn compute_body(
         is_label: false,
         is_house: false,
         is_ayanamsa: false,
+        is_first,
     };
 
-    println!("{}", format::format_line(&ctx, eph));
+    if args.horizontal {
+        if !is_first {
+            print!("{}", args.gap);
+        }
+        print!("{}", format::format_line(&ctx, eph));
+    } else {
+        println!("{}", format::format_line(&ctx, eph));
+    }
 }
 
 fn print_houses(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: CalcFlags) {
@@ -840,6 +849,7 @@ fn print_houses(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
             is_label: false,
             is_house: true,
             is_ayanamsa: false,
+            is_first: true,
         };
 
         println!("{}", format::format_line(&ctx, eph));
@@ -959,6 +969,7 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
                         is_label: false,
                         is_house: false,
                         is_ayanamsa: true,
+                        is_first: true,
                     };
                     println!("{}", format::format_line(&ctx, eph));
                 }
@@ -968,8 +979,21 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
         }
 
         let bodies = args.body_specs();
-        for spec in &bodies {
-            compute_body(eph, spec, args, tjd_tt, tjd_ut, iflag, &needs, &info);
+        for (bi, spec) in bodies.iter().enumerate() {
+            compute_body(
+                eph,
+                spec,
+                args,
+                tjd_tt,
+                tjd_ut,
+                iflag,
+                &needs,
+                &info,
+                bi == 0,
+            );
+        }
+        if args.horizontal {
+            println!();
         }
 
         if do_houses {
