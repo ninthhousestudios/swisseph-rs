@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
 use swisseph::flags::CalcFlags;
+use swisseph::types::{
+    AstroModels, BiasModel, DeltaTModel, JplHorMode, JplHoraMode, NutationModel, PrecessionModel,
+    SiderealTimeModel,
+};
 use swisseph::{Body, EphemerisConfig, EphemerisSource, TopoPosition};
 
 const PLSEL_D: &str = "0123456789mtA";
@@ -329,6 +333,103 @@ fn parse_comma_f64s(s: &str, out: &mut [f64]) {
         if let Ok(v) = part.trim().parse::<f64>() {
             out[i] = v;
         }
+    }
+}
+
+fn parse_astro_models(s: &str) -> AstroModels {
+    let mut m = AstroModels::default();
+    let vals: Vec<i32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    if let Some(&v) = vals.first() {
+        if v > 0 {
+            m.delta_t = match v {
+                1 => DeltaTModel::StephensonMorrison1984,
+                2 => DeltaTModel::Stephenson1997,
+                3 => DeltaTModel::StephensonMorrison2004,
+                4 => DeltaTModel::EspenakMeeus2006,
+                5 => DeltaTModel::StephensonEtc2016,
+                _ => m.delta_t,
+            };
+        }
+    }
+    if let Some(&v) = vals.get(1) {
+        if v > 0 {
+            if let Some(p) = prec_model(v) {
+                m.prec_longterm = p;
+            }
+        }
+    }
+    if let Some(&v) = vals.get(2) {
+        if v > 0 {
+            if let Some(p) = prec_model(v) {
+                m.prec_shortterm = p;
+            }
+        }
+    }
+    if let Some(&v) = vals.get(3) {
+        if v > 0 {
+            m.nutation = match v {
+                1 => NutationModel::IAU1980,
+                2 => NutationModel::IAUCorr1987,
+                3 => NutationModel::IAU2000A,
+                4 => NutationModel::IAU2000B,
+                5 => NutationModel::Woolard,
+                _ => m.nutation,
+            };
+        }
+    }
+    if let Some(&v) = vals.get(4) {
+        if v > 0 {
+            m.bias = match v {
+                1 => BiasModel::None,
+                2 => BiasModel::IAU2000,
+                3 => BiasModel::IAU2006,
+                _ => m.bias,
+            };
+        }
+    }
+    if let Some(&v) = vals.get(5) {
+        if v > 0 && v == 1 {
+            m.jplhor_mode = JplHorMode::LongAgreement;
+        }
+    }
+    if let Some(&v) = vals.get(6) {
+        if v > 0 {
+            m.jplhora_mode = match v {
+                1 => JplHoraMode::V1,
+                2 => JplHoraMode::V2,
+                3 => JplHoraMode::V3,
+                _ => m.jplhora_mode,
+            };
+        }
+    }
+    if let Some(&v) = vals.get(7) {
+        if v > 0 {
+            m.sidereal_time = match v {
+                1 => SiderealTimeModel::IAU1976,
+                2 => SiderealTimeModel::IAU2006,
+                3 => SiderealTimeModel::IersConv2010,
+                4 => SiderealTimeModel::Longterm,
+                _ => m.sidereal_time,
+            };
+        }
+    }
+    m
+}
+
+fn prec_model(v: i32) -> Option<PrecessionModel> {
+    match v {
+        1 => Some(PrecessionModel::IAU1976),
+        2 => Some(PrecessionModel::Laskar1986),
+        3 => Some(PrecessionModel::WillEpsLask),
+        4 => Some(PrecessionModel::Williams1994),
+        5 => Some(PrecessionModel::Simon1994),
+        6 => Some(PrecessionModel::IAU2000),
+        7 => Some(PrecessionModel::Bretagnon2003),
+        8 => Some(PrecessionModel::IAU2006),
+        9 => Some(PrecessionModel::Vondrak2011),
+        10 => Some(PrecessionModel::Owen1990),
+        11 => Some(PrecessionModel::Newcomb),
+        _ => None,
     }
 }
 
@@ -860,6 +961,10 @@ impl SweTestArgs {
 
         if let Some(tid_acc) = self.tidal_acc {
             config.tidal_acceleration = Some(tid_acc);
+        }
+
+        if let Some(ref amod) = self.astro_models {
+            config.astro_models = parse_astro_models(amod);
         }
 
         config
