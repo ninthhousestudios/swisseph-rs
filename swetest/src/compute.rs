@@ -479,15 +479,36 @@ fn compute_supplementary(
                 eph.calc(tjd_tt, body, iflag).ok().map(|r| r.data)
             };
             if let Some(xsv) = xsv {
-                let xpin = [xsv[0], xsv[1]];
-                if let Ok(hp) =
-                    swisseph::houses::house_pos(armc, args.geo_latitude, xobl, hsys, xpin, None)
-                {
-                    hposj = Some(hp);
-                    if hsys == swisseph::types::HouseSystem::Gauquelin {
+                if args.hpos_method >= 2 && hsys == swisseph::types::HouseSystem::Gauquelin {
+                    let geopos = [args.geo_longitude, args.geo_latitude, args.geo_elevation];
+                    let starname = star.filter(|_| star.is_some());
+                    if let Ok(hp) = eph.gauquelin_sector(
+                        tjd_ut,
+                        body,
+                        starname,
+                        iflag,
+                        args.hpos_method,
+                        geopos,
+                        0.0,
+                        0.0,
+                    ) {
+                        hposj = Some(hp);
                         hpos = Some((hp - 1.0) * 10.0);
-                    } else {
-                        hpos = Some((hp - 1.0) * 30.0);
+                    }
+                } else {
+                    let mut xpin = [xsv[0], xsv[1]];
+                    if args.hpos_method == 1 {
+                        xpin[1] = 0.0;
+                    }
+                    if let Ok(hp) =
+                        swisseph::houses::house_pos(armc, args.geo_latitude, xobl, hsys, xpin, None)
+                    {
+                        hposj = Some(hp);
+                        if hsys == swisseph::types::HouseSystem::Gauquelin {
+                            hpos = Some((hp - 1.0) * 10.0);
+                        } else {
+                            hpos = Some((hp - 1.0) * 30.0);
+                        }
                     }
                 }
             }
@@ -544,6 +565,7 @@ fn compute_body(
     needs: &FormatNeeds,
     info: &EpochInfo,
     is_first: bool,
+    show_file_limit: &mut bool,
 ) {
     let name = body_name(eph, spec, args);
 
@@ -620,6 +642,30 @@ fn compute_body(
     };
 
     let body = resolve_body(spec, args);
+
+    if *show_file_limit {
+        if let Some(b) = body {
+            if let Some(fd) = eph.file_data_for_body(b, tjd_tt) {
+                let cal = calendar_for_jd(fd.start_jd);
+                let (y0, m0, d0, _) = swisseph::date::revjul(fd.start_jd, cal);
+                let (y1, m1, d1, _) = swisseph::date::revjul(fd.end_jd, cal);
+                println!(
+                    "range {}: {:.1} = {}.{:02}.{:04} to {:.1} = {}.{:02}.{:04} de={}",
+                    fd.path.display(),
+                    fd.start_jd,
+                    d0,
+                    m0,
+                    y0,
+                    fd.end_jd,
+                    d1,
+                    m1,
+                    y1,
+                    fd.denum
+                );
+                *show_file_limit = false;
+            }
+        }
+    }
 
     // Supplementary computations
     let (mut xequ, mut xaz, mut xcart, mut xecart, mut hpos, mut hposj, armc, attr) =
@@ -884,6 +930,8 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
         args.step_count
     };
 
+    let mut show_file_limit = args.show_file_limit;
+
     for istep in 1..=step_count {
         let tjd_step = step_jd(
             args,
@@ -990,6 +1038,7 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
                 &needs,
                 &info,
                 bi == 0,
+                &mut show_file_limit,
             );
         }
         if args.horizontal {

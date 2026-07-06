@@ -143,6 +143,8 @@ pub struct SweTestArgs {
     pub truepos: bool,
     pub j2000: bool,
     pub icrs: bool,
+    pub jplhor: bool,
+    pub jplhora: bool,
     pub center_of_body: bool,
     pub topocentric: bool,
     pub equatorial: bool,
@@ -256,6 +258,8 @@ impl Default for SweTestArgs {
             truepos: false,
             j2000: false,
             icrs: false,
+            jplhor: false,
+            jplhora: false,
             center_of_body: false,
             topocentric: false,
             equatorial: false,
@@ -496,9 +500,9 @@ pub fn parse_args(args: &[String]) -> Result<SweTestArgs, String> {
             a.sidereal = true;
             a.sid_mode = rest.parse::<i32>().unwrap_or(0);
         } else if arg == "-jplhora" {
-            // SEFLG_JPLHOR_APPROX — internal, store as force_iflag overlay
+            a.jplhora = true;
         } else if arg == "-jplhor" {
-            // SEFLG_JPLHOR — internal
+            a.jplhor = true;
         } else if let Some(rest) = arg.strip_prefix("-j") {
             // -jNNNN → Julian day as begin_date (note: begin_date includes the 'j' prefix)
             a.begin_date = Some(format!("j{rest}"));
@@ -893,6 +897,12 @@ impl SweTestArgs {
         }
         if self.sidereal {
             flags |= CalcFlags::SIDEREAL;
+        }
+        if self.jplhor {
+            flags |= CalcFlags::DPSIDEPS_1980;
+        }
+        if self.jplhora {
+            flags |= CalcFlags::JPLHOR_APPROX;
         }
         if self.center_of_body {
             flags |= CalcFlags::CENTER_BODY;

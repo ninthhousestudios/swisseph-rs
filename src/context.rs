@@ -3238,6 +3238,80 @@ impl Ephemeris {
         }
     }
 
+    /// File data for a specific body at `jd`. Unlike [`file_data`](Self::file_data),
+    /// this handles individual asteroids and planet-moons by looking up the
+    /// body's own `.se1` file.
+    pub fn file_data_for_body(&self, body: Body, jd: f64) -> Option<crate::types::FileData> {
+        match body {
+            Body::Sun
+            | Body::Mercury
+            | Body::Venus
+            | Body::Earth
+            | Body::Mars
+            | Body::Jupiter
+            | Body::Saturn
+            | Body::Uranus
+            | Body::Neptune
+            | Body::Pluto
+            | Body::MeanNode
+            | Body::TrueNode
+            | Body::MeanApogee
+            | Body::OscuApogee
+            | Body::EclipticNutation => self.file_data_planet(jd),
+            Body::Moon => self.file_data(crate::types::FileDataKind::Moon, jd),
+            Body::Chiron | Body::Pholus | Body::Ceres | Body::Pallas | Body::Juno | Body::Vesta => {
+                self.file_data(crate::types::FileDataKind::MainAsteroid, jd)
+            }
+            Body::Asteroid(_) => self.file_data_asteroid(body, jd),
+            Body::PlanetMoon(_) => self.file_data_planet_moon(body, jd),
+            Body::IntpApogee | Body::IntpPerigee => self.file_data_planet(jd),
+            Body::Fictitious(_) => None,
+        }
+    }
+
+    #[cfg(feature = "swisseph-files")]
+    fn file_data_asteroid(&self, body: Body, jd: f64) -> Option<crate::types::FileData> {
+        self.asteroid_file_for(body, jd).ok().map(|(f, _)| {
+            let h = f.header();
+            crate::types::FileData {
+                path: f.path().to_path_buf(),
+                start_jd: h.time_range.0,
+                end_jd: h.time_range.1,
+                denum: h.denum,
+            }
+        })
+    }
+
+    #[cfg(not(feature = "swisseph-files"))]
+    fn file_data_asteroid(&self, _body: Body, _jd: f64) -> Option<crate::types::FileData> {
+        None
+    }
+
+    #[cfg(feature = "swisseph-files")]
+    fn file_data_planet_moon(&self, body: Body, jd: f64) -> Option<crate::types::FileData> {
+        let id = match body {
+            Body::PlanetMoon(id) => id,
+            _ => return None,
+        };
+        let moon_id = crate::constants::PLMOON_OFFSET + id.encoded();
+        self.planet_moon_file_for(body, moon_id, jd)
+            .ok()
+            .map(|(f, _)| {
+                let h = f.header();
+                crate::types::FileData {
+                    path: f.path().to_path_buf(),
+                    start_jd: h.time_range.0,
+                    end_jd: h.time_range.1,
+                    denum: h.denum,
+                }
+            })
+    }
+
+    #[cfg(not(feature = "swisseph-files"))]
+    fn file_data_planet_moon(&self, _body: Body, _jd: f64) -> Option<crate::types::FileData> {
+        None
+    }
+
     fn file_data_planet(&self, jd: f64) -> Option<crate::types::FileData> {
         #[cfg(feature = "jpl")]
         if self.config.ephemeris_source == EphemerisSource::Jpl {

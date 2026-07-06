@@ -1,4 +1,5 @@
 use swisseph::Ephemeris;
+use swisseph::flags::CalcFlags;
 use swisseph::math::normalize_degrees;
 use swisseph::types::{Body, CalendarType};
 
@@ -391,9 +392,27 @@ fn format_char(
         'W' => Some(format!("{:>14.9}", ctx.data[2] * AUNIT_TO_LIGHTYEAR)),
         'w' => Some(format!("{:>14.9}", ctx.data[2] * AUNIT_TO_KM)),
         'q' => {
-            // relative distance — would need get_geocentric_relative_distance
-            // stub for now
-            Some(format!("{:>5}", 0))
+            if ctx.is_label {
+                return Some("reldist".into());
+            }
+            let body = ctx.body?;
+            let iflagi = ctx.args.build_iflag()
+                & (CalcFlags::SWIEPH
+                    | CalcFlags::JPLEPH
+                    | CalcFlags::MOSEPH
+                    | CalcFlags::HELCTR
+                    | CalcFlags::BARYCTR);
+            let dar = match eph.orbit_max_min_true_distance(ctx.tjd_tt, body, iflagi) {
+                Ok((dmax, dmin, dtrue)) => {
+                    if (dmax - dmin).abs() < f64::EPSILON {
+                        0
+                    } else {
+                        ((1.0 - (dtrue - dmin) / (dmax - dmin)) * 1000.0 + 0.5) as i32
+                    }
+                }
+                Err(_) => 0,
+            };
+            Some(format!("{dar:>5}"))
         }
         'A' => {
             if let Some(ref xequ) = ctx.xequ {
