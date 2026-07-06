@@ -217,13 +217,22 @@ fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
         "jul."
     };
     let time_str = format_time(info.hour);
-    let time_label = if info.is_ut { "UT" } else { "ET" };
+    let time_label = match args.time_mode {
+        TimeMode::LMT => "LMT",
+        TimeMode::LAT => "LAT",
+        _ if info.is_ut => "UT",
+        _ => "ET",
+    };
     println!(
         "date (dmy) {}.{}.{} {cal_str}   {time_str} {time_label}        version {VERSION}",
         info.day, info.month, info.year,
     );
 
     if info.is_ut {
+        if args.time_mode == TimeMode::LMT {
+            let tjd_lmt = info.tjd_ut + args.geo_longitude / 360.0;
+            println!("LMT: {:.7}", tjd_lmt);
+        }
         let dt_sec = (info.tjd_tt - info.tjd_ut) * 86400.0;
         println!("UT: {:.7}     delta t: {:.6} sec", info.tjd_ut, dt_sec);
         let tt_time = info.hour + dt_sec / 3600.0;
