@@ -587,10 +587,51 @@ fn format_char(
                 Some("  --ZD--".into())
             }
         }
-        'N' | 'n' | 'F' | 'f' | 'c' | 'e' | 'o' => {
-            // nodes, apsides, and misc — stub, produce no output
-            None
+        'N' | 'n' => {
+            let body = ctx.body?;
+            let imeth = if ch == 'n' {
+                swisseph::nodaps::NodApsMethod::MEAN
+            } else {
+                swisseph::nodaps::NodApsMethod::OSCU
+            };
+            let result = eph
+                .nod_aps(ctx.tjd_tt, body, ctx.args.build_iflag(), imeth)
+                .ok()?;
+            let use_dms_here = ctx.args.dms;
+            let mut s = if use_dms_here {
+                dms(result.ascending[0], rflag | DmsFlags::ZODIAC, ep)
+            } else {
+                fmt_decimal(result.ascending[0], ep)
+            };
+            s.push_str(gap);
+            if use_dms_here {
+                s.push_str(&dms(result.descending[0], rflag | DmsFlags::ZODIAC, ep));
+            } else {
+                s.push_str(&fmt_decimal(result.descending[0], ep));
+            }
+            Some(s)
         }
+        'F' | 'f' => {
+            let body = ctx.body?;
+            let imeth = if ch == 'f' {
+                swisseph::nodaps::NodApsMethod::MEAN
+            } else {
+                swisseph::nodaps::NodApsMethod::OSCU
+            };
+            let iflag = ctx.args.build_iflag();
+            let result = eph.nod_aps(ctx.tjd_tt, body, iflag, imeth).ok()?;
+            let mut s = fmt_decimal(result.perihelion[0], ep);
+            s.push_str(gap);
+            s.push_str(&fmt_decimal(result.aphelion[0], ep));
+            // focal point
+            let imeth_foc = imeth | swisseph::nodaps::NodApsMethod::FOPOINT;
+            if let Ok(foc) = eph.nod_aps(ctx.tjd_tt, body, iflag, imeth_foc) {
+                s.push_str(gap);
+                s.push_str(&fmt_decimal(foc.aphelion[0], ep));
+            }
+            Some(s)
+        }
+        'c' | 'e' | 'o' => None,
         _ => None,
     }
 }
