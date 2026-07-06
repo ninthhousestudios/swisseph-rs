@@ -1,6 +1,7 @@
 mod args;
 mod compute;
 mod format;
+mod special;
 
 use std::process;
 
@@ -159,7 +160,11 @@ fn main() {
 
     match Ephemeris::new(config) {
         Ok(eph) => {
-            compute::run(&parsed, &eph);
+            if parsed.special_event.is_some() || parsed.orbital_elements {
+                special::run(&parsed, &eph);
+            } else {
+                compute::run(&parsed, &eph);
+            }
         }
         Err(e) => {
             eprintln!("swetest: failed to construct Ephemeris: {e}");

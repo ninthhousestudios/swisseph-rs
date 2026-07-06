@@ -6,9 +6,9 @@ use crate::args::{BodySpec, StepUnit, SweTestArgs, TimeMode};
 use crate::format::{self, FormatContext, FormatNeeds};
 
 const VERSION: &str = "0.1.0";
-const GREG_BOUNDARY_JD: f64 = 2299161.0; // 15 Oct 1582
+pub(crate) const GREG_BOUNDARY_JD: f64 = 2299161.0; // 15 Oct 1582
 
-fn calendar_for_jd(jd: f64) -> CalendarType {
+pub(crate) fn calendar_for_jd(jd: f64) -> CalendarType {
     if jd < GREG_BOUNDARY_JD {
         CalendarType::Julian
     } else {
@@ -82,18 +82,18 @@ fn parse_time_string(s: &str) -> f64 {
     h + m / 60.0 + sec / 3600.0
 }
 
-struct EpochInfo {
-    tjd_ut: f64,
-    tjd_tt: f64,
-    year: i32,
-    month: i32,
-    day: i32,
-    hour: f64,
-    cal: CalendarType,
-    is_ut: bool,
+pub(crate) struct EpochInfo {
+    pub(crate) tjd_ut: f64,
+    pub(crate) tjd_tt: f64,
+    pub(crate) year: i32,
+    pub(crate) month: i32,
+    pub(crate) day: i32,
+    pub(crate) hour: f64,
+    pub(crate) cal: CalendarType,
+    pub(crate) is_ut: bool,
 }
 
-fn resolve_start_jd(args: &SweTestArgs, config: &EphemerisConfig) -> EpochInfo {
+pub(crate) fn resolve_start_jd(args: &SweTestArgs, config: &EphemerisConfig) -> EpochInfo {
     let thour = parse_time_string(&args.time_input);
     let is_ut = matches!(
         args.time_mode,
@@ -188,7 +188,7 @@ fn step_jd(
     }
 }
 
-fn format_time(hour: f64) -> String {
+pub(crate) fn format_time(hour: f64) -> String {
     let mut total_sec = (hour * 3600.0).round() as i64;
     if total_sec < 0 {
         total_sec += 86400;
@@ -266,11 +266,11 @@ fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
     println!();
 }
 
-fn parse_int_arg(s: &Option<String>) -> Option<i32> {
+pub(crate) fn parse_int_arg(s: &Option<String>) -> Option<i32> {
     s.as_ref().and_then(|v| v.parse::<i32>().ok())
 }
 
-fn make_asteroid_body(num: i32) -> Option<Body> {
+pub(crate) fn make_asteroid_body(num: i32) -> Option<Body> {
     swisseph::types::AsteroidId::new(num)
         .ok()
         .map(Body::Asteroid)
@@ -286,7 +286,7 @@ fn make_fictitious_body(id: i32) -> Option<Body> {
     Body::fictitious(id).ok()
 }
 
-fn body_to_ipl(body: Body) -> i32 {
+pub(crate) fn body_to_ipl(body: Body) -> i32 {
     match body {
         Body::Sun => 0,
         Body::Moon => 1,
@@ -318,7 +318,7 @@ fn body_to_ipl(body: Body) -> i32 {
     }
 }
 
-fn body_name(eph: &Ephemeris, spec: &BodySpec, args: &SweTestArgs) -> String {
+pub(crate) fn body_name(eph: &Ephemeris, spec: &BodySpec, args: &SweTestArgs) -> String {
     match spec {
         BodySpec::Planet(body) => eph.get_planet_name(*body),
         BodySpec::Asteroid => {
@@ -352,7 +352,7 @@ fn body_name(eph: &Ephemeris, spec: &BodySpec, args: &SweTestArgs) -> String {
     }
 }
 
-fn resolve_body(spec: &BodySpec, args: &SweTestArgs) -> Option<Body> {
+pub(crate) fn resolve_body(spec: &BodySpec, args: &SweTestArgs) -> Option<Body> {
     match spec {
         BodySpec::Planet(body) => Some(*body),
         BodySpec::Asteroid => parse_int_arg(&args.asteroid_number).and_then(make_asteroid_body),
