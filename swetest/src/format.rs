@@ -49,6 +49,7 @@ pub struct FormatContext<'a> {
     pub attr: Option<[f64; 6]>,
     pub args: &'a SweTestArgs,
     pub is_label: bool,
+    pub is_house: bool,
 }
 
 pub struct FormatNeeds {
@@ -268,6 +269,33 @@ fn format_char(
 ) -> Option<String> {
     if ctx.is_label {
         return Some(label_for(ch));
+    }
+    if ctx.is_house
+        && matches!(
+            ch,
+            'b' | 'B'
+                | 's'
+                | 'S'
+                | 'r'
+                | 'R'
+                | 'x'
+                | 'X'
+                | 'u'
+                | 'U'
+                | 'Q'
+                | 'n'
+                | 'N'
+                | 'f'
+                | 'F'
+                | 'j'
+                | '+'
+                | '-'
+                | '*'
+                | '/'
+                | '='
+        )
+    {
+        return None;
     }
     match ch {
         'y' => Some(format!("{}", ctx.year)),

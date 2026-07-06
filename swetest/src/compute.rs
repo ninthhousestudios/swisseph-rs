@@ -2,7 +2,7 @@ use swisseph::flags::CalcFlags;
 use swisseph::types::{Body, CalendarType};
 use swisseph::{Ephemeris, EphemerisConfig};
 
-use crate::args::{BodySpec, StepUnit, SweTestArgs, TimeMode};
+use crate::args::{BodySpec, DiffMode, StepUnit, SweTestArgs, TimeMode};
 use crate::format::{self, FormatContext, FormatNeeds};
 
 const VERSION: &str = "0.1.0";
@@ -199,6 +199,13 @@ pub(crate) fn format_time(hour: f64) -> String {
     format!("{h:>2}:{m:02}:{s:02}")
 }
 
+fn sidereal_mode_name(sid_mode: i32) -> String {
+    swisseph::types::SiderealMode::try_from(sid_mode)
+        .ok()
+        .and_then(|m| m.name().map(|s| s.to_owned()))
+        .unwrap_or_else(|| format!("mode {sid_mode}"))
+}
+
 fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: CalcFlags) {
     if !args.with_header {
         return;
@@ -241,10 +248,7 @@ fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
 
     if args.sidereal {
         if let Ok(aya) = eph.get_ayanamsa_ex(info.tjd_tt, iflag) {
-            let mode_name = swisseph::types::SiderealMode::try_from(args.sid_mode as i32)
-                .ok()
-                .and_then(|m| m.name().map(|s| s.to_owned()))
-                .unwrap_or_else(|| format!("mode {}", args.sid_mode));
+            let mode_name = sidereal_mode_name(args.sid_mode);
             println!("Ayanamsa ({mode_name})   {aya:.7}");
         }
     }
@@ -628,6 +632,7 @@ fn compute_body(
         attr,
         args,
         is_label: false,
+        is_house: false,
     };
 
     println!("{}", format::format_line(&ctx, eph));
@@ -696,6 +701,45 @@ pub fn run(args: &SweTestArgs, eph: &Ephemeris) {
 
         if istep == 1 || args.with_header_always {
             print_header(args, eph, &info, iflag);
+        }
+
+        if args.do_ayanamsa && !args.sidereal {
+            match eph.get_ayanamsa_ex(tjd_tt, iflag) {
+                Ok(aya) => {
+                    let name = format!("Ayanamsha {}", sidereal_mode_name(args.sid_mode));
+                    let mut data = [0.0_f64; 6];
+                    data[0] = aya;
+                    let ctx = FormatContext {
+                        name,
+                        ipl: -1,
+                        body: None,
+                        jd: if info.is_ut { tjd_ut } else { tjd_tt },
+                        tjd_ut,
+                        tjd_tt,
+                        year: info.year,
+                        month: info.month,
+                        day: info.day,
+                        hour: info.hour,
+                        cal: info.cal,
+                        is_ut: info.is_ut,
+                        data,
+                        xequ: None,
+                        xaz: None,
+                        xcart: None,
+                        xecart: None,
+                        hpos: None,
+                        hposj: None,
+                        armc: None,
+                        attr: None,
+                        args,
+                        is_label: false,
+                        is_house: true,
+                    };
+                    println!("{}", format::format_line(&ctx, eph));
+                }
+                Err(e) => println!("Ayanamsha       error: {e}"),
+            }
+            continue;
         }
 
         let bodies = args.body_specs();
