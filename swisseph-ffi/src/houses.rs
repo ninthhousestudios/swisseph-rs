@@ -602,6 +602,7 @@ pub unsafe extern "C" fn swisseph_gauquelin_sector(
 /// - `geopos`: [longitude, latitude, height], 3 `f64` values
 /// - `atpress`: atmospheric pressure (hPa) — 0 auto-estimates from `geopos[2]` altitude
 /// - `attemp`: atmospheric temperature (°C)
+/// - `lapse_rate`: atmospheric lapse rate (K/m) — 0.0 uses the standard atmosphere (0.0065 K/m)
 /// - `xin`: input [longitude/RA, latitude/declination], 2 `f64` values
 /// - `xaz`: out [azimuth, true altitude, apparent altitude], 3 `f64` values
 ///
@@ -619,6 +620,7 @@ pub unsafe extern "C" fn swisseph_azalt(
     geopos: *const f64,
     atpress: f64,
     attemp: f64,
+    lapse_rate: f64,
     xin: *const f64,
     xaz: *mut f64,
 ) {
@@ -636,7 +638,7 @@ pub unsafe extern "C" fn swisseph_azalt(
         let gp = unsafe { [*geopos, *geopos.add(1), *geopos.add(2)] };
         let xi = unsafe { [*xin, *xin.add(1)] };
 
-        let result = eph.azalt(tjd_ut, dir, gp, atpress, attemp, 0.0, xi);
+        let result = eph.azalt(tjd_ut, dir, gp, atpress, attemp, lapse_rate, xi);
         unsafe {
             *xaz = result[0];
             *xaz.add(1) = result[1];
