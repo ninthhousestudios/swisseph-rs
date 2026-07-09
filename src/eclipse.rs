@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Solar eclipse geometry and shared eclipse/occultation helpers.
 //!
 //! Port of `swecl.c`. `eclipse_where`, `eclipse_how`, and `calc_planet_star` are shared verbatim

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Obliquity of the ecliptic — 11 models (IAU 1976/2000/2006, Vondrák, Owen,
 //! Laskar, etc.) ported from the C `swi_epsiln`.
 //!

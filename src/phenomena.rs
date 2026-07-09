@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Planetary phenomena: phase angle, illuminated fraction, elongation, apparent diameter,
 //! apparent magnitude, and (Moon only) horizontal parallax. Port of `swe_pheno` / `swe_pheno_ut`
 //! (swecl.c:3802-4142). See `docs/c-ref-phenomena.md`.

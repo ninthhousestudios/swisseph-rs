@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Nutation model router: dispatches to IAU 1980, IAU 2000A/B, or Woolard series.
 //!
 //! Low-level internals; exposed for golden tests and advanced use.

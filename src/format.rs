@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Degree/time string formatting (centisecond precision).
 //!
 //! Low-level internals; exposed for golden tests and advanced use.

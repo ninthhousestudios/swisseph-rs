@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Relativistic corrections: aberration of light, gravitational light deflection,
 //! and effective mass lookup for the deflection calculation.
 //!

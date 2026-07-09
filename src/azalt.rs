@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Atmospheric refraction and horizontal-coordinate transforms.
 //!
 //! Port of `swe_refrac`, `swe_refrac_extended`, `swe_azalt`, `swe_azalt_rev`, and their shared

@@ -3,7 +3,7 @@ members = [".", "swisseph-ffi", "swetest"]
 
 [package]
 name = "swisseph-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Pure, stateless Rust port of the Swiss Ephemeris astronomical calculation library"
 license = "AGPL-3.0-or-later"

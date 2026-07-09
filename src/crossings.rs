@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Longitude and latitude crossing search — find the instant a body reaches a
 //! given ecliptic longitude or zero latitude (node crossing).
 

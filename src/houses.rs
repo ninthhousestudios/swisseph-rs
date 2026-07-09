@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Port of `swehouse.c`: house systems (`CalcH`) and the ARMC-based driver
 //! (`swe_houses_armc_ex2`). See `docs/c-ref-houses.md`.
 

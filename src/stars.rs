@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Fixed-star catalog — loading, searching, and the 8 built-in ayanamsa
 //! reference stars.
 

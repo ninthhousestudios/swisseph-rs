@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! GCRS ↔ J2000 frame rotation (IERS 2006 frame bias matrix, `swi_bias`).
 //!
 //! Low-level internals; exposed for golden tests and advanced use.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Swiss Ephemeris `.se1` binary file reader.
 //!
 //! Low-level internals; exposed for golden tests and advanced use.

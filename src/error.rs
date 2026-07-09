@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Error types for the Swiss Ephemeris calculation pipeline.
 
 use std::fmt;

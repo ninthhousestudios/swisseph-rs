@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Precession models — 3 algorithm families (Vondrak, Williams, Owen) across
 //! 11 models, ported from the C `swi_precess`.
 //!

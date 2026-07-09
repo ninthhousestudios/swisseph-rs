@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Core value types: body identifiers, house systems, calendar/sidereal/model enums,
 //! Julian Day newtypes, and small result structs shared across the crate's public API.
 

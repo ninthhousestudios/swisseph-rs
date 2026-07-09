@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Julian Day ↔ calendar conversion, delta-T dispatch, and UTC ↔ JD with
 //! leap-second handling.
 

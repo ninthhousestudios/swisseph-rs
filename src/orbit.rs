@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Osculating (Keplerian) orbital elements and geocentric distance extrema —
 //! `swe_get_orbital_elements` / `swe_orbit_max_min_true_distance`.
 //!

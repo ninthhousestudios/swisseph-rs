@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Rise / set / meridian transit. Port of `swe_rise_trans_true_hor` and `calc_mer_trans`
 //! (`swecl.c`). See `docs/c-ref-riseset.md`. The fast-path optimization (`rise_set_fast`) and
 //! the top-level `swe_rise_trans` dispatcher are a separate module (RSE 4).

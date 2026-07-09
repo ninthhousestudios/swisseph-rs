@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Read-only ephemeris configuration types (`EphemerisConfig`, `TopoPosition`). Leaf module —
 //! depends only on `flags`/`types`, so `calc`/`ayanamsa`/etc. can import config without cycling
 //! back through `context`.

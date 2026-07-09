@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Pure math utilities: angle normalization, coordinate transforms (cartesian ↔
 //! polar, ecliptic ↔ equatorial), Chebyshev evaluation, polynomial evaluation,
 //! and degree splitting.

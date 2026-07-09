@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Nodes & apsides — `swe_nod_aps` / `swe_nod_aps_ut`.
 //!
 //! Standalone public API for the ascending/descending nodes and the

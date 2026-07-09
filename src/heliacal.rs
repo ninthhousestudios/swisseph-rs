@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Heliacal visibility: first/last sightings of a body near the Sun.
 //!
 //! Pure-Rust port of the Swiss Ephemeris heliacal module (`swehel.c`): visual

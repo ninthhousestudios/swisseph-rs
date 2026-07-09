@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Physical, astronomical, and conversion constants used throughout the crate.
 //!
 //! Mirrors the constants defined in the C Swiss Ephemeris headers (`sweph.h`,

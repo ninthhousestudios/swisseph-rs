@@ -10,6 +10,8 @@ The original Swiss Ephemeris is distributed under a dual licensing system:
   (a) GNU Affero General Public License (AGPL), version 3 or any later version
   (b) Swiss Ephemeris Professional License (commercial, from Astrodienst AG)
 
+This Rust port is Copyright (C) 2026 Ninth House Studios LLC.
+
 This Rust port is distributed under the GNU Affero General Public License,
 version 3 or any later version. See the full license text below.
 

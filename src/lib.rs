@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 #![warn(missing_docs)]
 //! Pure-Rust, stateless port of the [Swiss Ephemeris](https://www.astro.com/swisseph/)
 //! astronomical calculation library (C version 2.10.03).

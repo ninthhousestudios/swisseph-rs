@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Ninth House Studios LLC
+
 //! Primary API — [`Ephemeris`] construction, configuration dispatch, and all
 //! public calculation entry points ([`calc`](Ephemeris::calc),
 //! [`houses`](Ephemeris::houses), eclipses, rise/set, heliacal, etc.).
