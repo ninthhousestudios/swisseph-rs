@@ -16,7 +16,7 @@ const AUNIT_TO_KM: f64 = 1.495978707e8;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct DmsFlags: u32 {
+    pub(crate) struct DmsFlags: u32 {
         const ROUND_SEC  = 1;
         const ROUND_MIN  = 2;
         const ZODIAC     = 4;
@@ -108,7 +108,7 @@ pub fn scan_format_needs(fmt: &str) -> FormatNeeds {
     needs
 }
 
-fn dms(xv: f64, flags: DmsFlags, extra_prec: bool) -> String {
+pub(crate) fn dms(xv: f64, flags: DmsFlags, extra_prec: bool) -> String {
     if xv.is_nan() {
         return "nan".into();
     }

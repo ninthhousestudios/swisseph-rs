@@ -221,7 +221,7 @@ fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
         TimeMode::LMT => "LMT",
         TimeMode::LAT => "LAT",
         _ if info.is_ut => "UT",
-        _ => "ET",
+        _ => "TT",
     };
     println!(
         "date (dmy) {}.{}.{} {cal_str}   {time_str} {time_label}        version {VERSION}",
@@ -233,26 +233,19 @@ fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
             let tjd_lmt = info.tjd_ut + args.geo_longitude / 360.0;
             println!("LMT: {:.7}", tjd_lmt);
         }
-        let dt_sec = (info.tjd_tt - info.tjd_ut) * 86400.0;
-        println!("UT: {:.7}     delta t: {:.6} sec", info.tjd_ut, dt_sec);
-        let tt_time = info.hour + dt_sec / 3600.0;
-        println!("ET: {:.7}     {}", info.tjd_tt, format_time(tt_time));
-    } else {
-        println!("ET: {:.7}", info.tjd_tt);
-        let dt_sec = (info.tjd_tt - info.tjd_ut) * 86400.0;
-        let ut_time = info.hour - dt_sec / 3600.0;
-        println!(
-            "UT: {:.7}     delta t: {:.6} sec    {}",
-            info.tjd_ut,
-            dt_sec,
-            format_time(ut_time),
-        );
     }
+    let dt_sec = (info.tjd_tt - info.tjd_ut) * 86400.0;
+    println!("UT: {:.7}     delta t: {:.6} sec", info.tjd_ut, dt_sec);
+    println!("TT: {:.7}", info.tjd_tt);
 
     if let Ok(ecl_nut) = eph.calc(info.tjd_tt, Body::EclipticNutation, CalcFlags::empty()) {
         let d = &ecl_nut.data;
-        println!("Epsilon (true, mean)   {:.7}   {:.7}", d[0], d[1]);
-        println!("Nutation               {:.7}   {:.7}", d[2], d[3]);
+        let eps_t = format::dms(d[0], format::DmsFlags::empty(), false);
+        let eps_m = format::dms(d[1], format::DmsFlags::empty(), false);
+        let nut_d = format::dms(d[2], format::DmsFlags::empty(), false);
+        let nut_o = format::dms(d[3], format::DmsFlags::empty(), false);
+        println!("Epsilon (t/m)  {eps_t}  {eps_m}");
+        println!("Nutation       {nut_d}  {nut_o}");
     }
 
     if args.sidereal
