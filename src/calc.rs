@@ -2608,6 +2608,7 @@ impl<P: PositionProvider> PositionProvider for PlanetMoonProvider<'_, P> {
         let mut pos = self.inner.positions(self.parent, jd, need_speed)?;
         let n = if need_speed { 6 } else { 3 };
         let (offset, _) = evaluate_body(self.moon_file, self.moon_id, jd, need_speed)?;
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n {
             pos.planet_bary[i] += offset[i];
         }

@@ -13,6 +13,7 @@ const PLSEL_H: &str = "JKLMNOPQRSTUVWXYZw";
 const PLSEL_A: &str = "0123456789mtABCcgDEFGHIJKLMNOPQRSTUVWXYZw";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum TimeMode {
     ET,
     UT,
@@ -925,7 +926,7 @@ impl SweTestArgs {
             config.jpl_filename = Some(self.jpl_file.clone());
         }
 
-        if (self.topocentric || self.have_geopos) && self.topocentric {
+        if self.topocentric && self.have_geopos {
             config.topographic = Some(TopoPosition {
                 longitude: self.geo_longitude,
                 latitude: self.geo_latitude,

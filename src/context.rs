@@ -21,6 +21,9 @@ use crate::error::Error;
 use crate::flags::{CalcFlags, EclipseFlags, SiderealBits};
 use crate::types::{Body, DeltaT, EphemerisSource, JdUt1};
 
+/// Represents barycentric state of body, sun and earth
+type BarycentricState = ([f64; 6], [f64; 6], [f64; 6]);
+
 #[cfg(not(feature = "swisseph-files"))]
 #[allow(dead_code)]
 pub(crate) struct AsteroidMetaStub {
@@ -759,7 +762,7 @@ impl Ephemeris {
 
     /// Solar eclipse shadow geometry at `tjd_ut` (UT1): geographic position of greatest eclipse
     /// + core/penumbra shadow diameters, geocentric. Local circumstances come from
-    /// [`sol_eclipse_how`](Self::sol_eclipse_how).
+    ///   [`sol_eclipse_how`](Self::sol_eclipse_how).
     #[doc(alias = "swe_sol_eclipse_where")]
     pub fn sol_eclipse_where(
         &self,
@@ -1199,7 +1202,7 @@ impl Ephemeris {
         not(any(feature = "swisseph-files", feature = "jpl")),
         allow(unused_variables)
     )]
-    fn pctr_bary_state(&self, t: f64, body: Body) -> Result<([f64; 6], [f64; 6], [f64; 6]), Error> {
+    fn pctr_bary_state(&self, t: f64, body: Body) -> Result<BarycentricState, Error> {
         let eps_j2000 = crate::obliquity::obliquity(
             crate::constants::J2000,
             CalcFlags::empty(),
@@ -1239,7 +1242,7 @@ impl Ephemeris {
         t: f64,
         body: Body,
         _eps_j2000: &crate::types::Epsilon,
-    ) -> Result<([f64; 6], [f64; 6], [f64; 6]), Error> {
+    ) -> Result<BarycentricState, Error> {
         match body {
             Body::Moon => {
                 let moon_geo = provider.moon_geo(t, true)?;
@@ -2757,6 +2760,7 @@ impl Ephemeris {
     ///   Moshier passes zero (Sun at origin). SWIEPH/JPL pass the actual barycentric Sun.
     ///   Used to compute earth_helio = xobs - sun_bary for step 8 (deflection), replicating
     ///   C's swi_deflect_light which internally computes e = earth_bary - sun_bary.
+    #[allow(clippy::too_many_arguments)]
     fn calc_fixstar_inner(
         &self,
         star: &crate::stars::Star,

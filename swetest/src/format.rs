@@ -31,6 +31,7 @@ pub struct FormatContext<'a> {
     pub ipl: i32,
     pub body: Option<Body>,
     pub jd: f64,
+    #[allow(dead_code)] // tjd_ut is assigned to in compute.rs, but never actually used
     pub tjd_ut: f64,
     pub tjd_tt: f64,
     pub year: i32,
@@ -266,6 +267,7 @@ pub fn format_line(ctx: &FormatContext, eph: &Ephemeris) -> String {
     parts.join(gap)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn format_char(
     ch: char,
     chars: &[char],

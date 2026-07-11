@@ -169,6 +169,7 @@ pub fn default_heliacal_parameters(
         dobs[1] = 1.0;
     }
     if !helflag.contains(HeliacalFlags::OPTICAL_PARAMS) {
+        #[allow(clippy::needless_range_loop)]
         for i in 2..=5 {
             dobs[i] = 0.0;
         }

@@ -222,11 +222,9 @@ fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
         info.day, info.month, info.year,
     );
 
-    if info.is_ut {
-        if args.time_mode == TimeMode::LMT {
-            let tjd_lmt = info.tjd_ut + args.geo_longitude / 360.0;
-            println!("LMT: {:.7}", tjd_lmt);
-        }
+    if info.is_ut && args.time_mode == TimeMode::LMT {
+        let tjd_lmt = info.tjd_ut + args.geo_longitude / 360.0;
+        println!("LMT: {:.7}", tjd_lmt);
     }
     let dt_sec = (info.tjd_tt - info.tjd_ut) * 86400.0;
     println!("UT: {:.7}     delta t: {:.6} sec", info.tjd_ut, dt_sec);
@@ -363,6 +361,8 @@ pub(crate) fn resolve_body(spec: &BodySpec, args: &SweTestArgs) -> Option<Body> 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 fn compute_supplementary(
     eph: &Ephemeris,
     body: Body,
@@ -373,6 +373,7 @@ fn compute_supplementary(
     needs: &FormatNeeds,
     args: &SweTestArgs,
 ) -> (
+    // (xequ, xaz, xcart, xecart, hpos, hposj, armc_val, attr)
     Option<[f64; 6]>,
     Option<[f64; 3]>,
     Option<[f64; 6]>,
@@ -558,6 +559,7 @@ fn apply_diff(x: &mut [f64; 6], x2: &[f64; 6], mode: DiffMode) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_body(
     eph: &Ephemeris,
     spec: &BodySpec,
