@@ -73,7 +73,7 @@ pub struct HouseArgs {
     pub hpos_method: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EclipseFilters {
     pub total: bool,
     pub annular: bool,
@@ -85,23 +85,6 @@ pub struct EclipseFilters {
     pub local: bool,
     pub how: bool,
     pub hocal: bool,
-}
-
-impl Default for EclipseFilters {
-    fn default() -> Self {
-        Self {
-            total: false,
-            annular: false,
-            annular_total: false,
-            partial: false,
-            penumbral: false,
-            central: false,
-            noncentral: false,
-            local: false,
-            how: false,
-            hocal: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -343,79 +326,78 @@ fn parse_comma_f64s(s: &str, out: &mut [f64]) {
 fn parse_astro_models(s: &str) -> AstroModels {
     let mut m = AstroModels::default();
     let vals: Vec<i32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-    if let Some(&v) = vals.first() {
-        if v > 0 {
-            m.delta_t = match v {
-                1 => DeltaTModel::StephensonMorrison1984,
-                2 => DeltaTModel::Stephenson1997,
-                3 => DeltaTModel::StephensonMorrison2004,
-                4 => DeltaTModel::EspenakMeeus2006,
-                5 => DeltaTModel::StephensonEtc2016,
-                _ => m.delta_t,
-            };
-        }
+    if let Some(&v) = vals.first()
+        && v > 0
+    {
+        m.delta_t = match v {
+            1 => DeltaTModel::StephensonMorrison1984,
+            2 => DeltaTModel::Stephenson1997,
+            3 => DeltaTModel::StephensonMorrison2004,
+            4 => DeltaTModel::EspenakMeeus2006,
+            5 => DeltaTModel::StephensonEtc2016,
+            _ => m.delta_t,
+        };
     }
-    if let Some(&v) = vals.get(1) {
-        if v > 0 {
-            if let Some(p) = prec_model(v) {
-                m.prec_longterm = p;
-            }
-        }
+    if let Some(&v) = vals.get(1)
+        && v > 0
+        && let Some(p) = prec_model(v)
+    {
+        m.prec_longterm = p;
     }
-    if let Some(&v) = vals.get(2) {
-        if v > 0 {
-            if let Some(p) = prec_model(v) {
-                m.prec_shortterm = p;
-            }
-        }
+    if let Some(&v) = vals.get(2)
+        && v > 0
+        && let Some(p) = prec_model(v)
+    {
+        m.prec_shortterm = p;
     }
-    if let Some(&v) = vals.get(3) {
-        if v > 0 {
-            m.nutation = match v {
-                1 => NutationModel::IAU1980,
-                2 => NutationModel::IAUCorr1987,
-                3 => NutationModel::IAU2000A,
-                4 => NutationModel::IAU2000B,
-                5 => NutationModel::Woolard,
-                _ => m.nutation,
-            };
-        }
+    if let Some(&v) = vals.get(3)
+        && v > 0
+    {
+        m.nutation = match v {
+            1 => NutationModel::IAU1980,
+            2 => NutationModel::IAUCorr1987,
+            3 => NutationModel::IAU2000A,
+            4 => NutationModel::IAU2000B,
+            5 => NutationModel::Woolard,
+            _ => m.nutation,
+        };
     }
-    if let Some(&v) = vals.get(4) {
-        if v > 0 {
-            m.bias = match v {
-                1 => BiasModel::None,
-                2 => BiasModel::IAU2000,
-                3 => BiasModel::IAU2006,
-                _ => m.bias,
-            };
-        }
+    if let Some(&v) = vals.get(4)
+        && v > 0
+    {
+        m.bias = match v {
+            1 => BiasModel::None,
+            2 => BiasModel::IAU2000,
+            3 => BiasModel::IAU2006,
+            _ => m.bias,
+        };
     }
-    if let Some(&v) = vals.get(5) {
-        if v > 0 && v == 1 {
-            m.jplhor_mode = JplHorMode::LongAgreement;
-        }
+    if let Some(&v) = vals.get(5)
+        && v > 0
+        && v == 1
+    {
+        m.jplhor_mode = JplHorMode::LongAgreement;
     }
-    if let Some(&v) = vals.get(6) {
-        if v > 0 {
-            m.jplhora_mode = match v {
-                1 => JplHoraMode::V1,
-                2 => JplHoraMode::V2,
-                3 => JplHoraMode::V3,
-                _ => m.jplhora_mode,
-            };
-        }
+    if let Some(&v) = vals.get(6)
+        && v > 0
+    {
+        m.jplhora_mode = match v {
+            1 => JplHoraMode::V1,
+            2 => JplHoraMode::V2,
+            3 => JplHoraMode::V3,
+            _ => m.jplhora_mode,
+        };
     }
-    if let Some(&v) = vals.get(7) {
-        if v > 0 {
-            m.sidereal_time = match v {
-                1 => SiderealTimeModel::IAU1976,
-                2 => SiderealTimeModel::IAU2006,
-                3 => SiderealTimeModel::IersConv2010,
-                4 => SiderealTimeModel::Longterm,
-                _ => m.sidereal_time,
-            };
-        }
+    if let Some(&v) = vals.get(7)
+        && v > 0
+    {
+        m.sidereal_time = match v {
+            1 => SiderealTimeModel::IAU1976,
+            2 => SiderealTimeModel::IAU2006,
+            3 => SiderealTimeModel::IersConv2010,
+            4 => SiderealTimeModel::Longterm,
+            _ => m.sidereal_time,
+        };
     }
     m
 }
@@ -538,10 +520,10 @@ pub fn parse_args(args: &[String]) -> Result<SweTestArgs, String> {
             if parts.len() > 1 {
                 a.geo_latitude = parts[1].parse::<f64>().unwrap_or(0.0);
             }
-            if parts.len() > 2 {
-                if let Some(c) = parts[2].chars().next() {
-                    a.house_system = c;
-                }
+            if parts.len() > 2
+                && let Some(c) = parts[2].chars().next()
+            {
+                a.house_system = c;
             }
             a.do_houses = true;
             a.have_geopos = true;
@@ -913,10 +895,11 @@ impl SweTestArgs {
         }
 
         // C's post-parse logic: if format contains S/s/Q and no SPEED3 and not no_speed, add SPEED
-        if self.format.contains('S') || self.format.contains('s') || self.format.contains('Q') {
-            if !flags.contains(CalcFlags::SPEED3) && !self.no_speed {
-                flags |= CalcFlags::SPEED;
-            }
+        if (self.format.contains('S') || self.format.contains('s') || self.format.contains('Q'))
+            && !flags.contains(CalcFlags::SPEED3)
+            && !self.no_speed
+        {
+            flags |= CalcFlags::SPEED;
         }
 
         flags
@@ -942,14 +925,12 @@ impl SweTestArgs {
             config.jpl_filename = Some(self.jpl_file.clone());
         }
 
-        if self.topocentric || self.have_geopos {
-            if self.topocentric {
-                config.topographic = Some(TopoPosition {
-                    longitude: self.geo_longitude,
-                    latitude: self.geo_latitude,
-                    altitude: self.geo_elevation,
-                });
-            }
+        if (self.topocentric || self.have_geopos) && self.topocentric {
+            config.topographic = Some(TopoPosition {
+                longitude: self.geo_longitude,
+                latitude: self.geo_latitude,
+                altitude: self.geo_elevation,
+            });
         }
 
         if self.sidereal || self.do_ayanamsa {

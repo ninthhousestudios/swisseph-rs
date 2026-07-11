@@ -197,11 +197,11 @@ fn dms(xv: f64, flags: DmsFlags, extra_prec: bool) -> String {
 }
 
 fn insert_negative_sign(s: &mut String) {
-    if let Some(pos) = s.find(|c: char| c.is_ascii_digit()) {
-        if pos > 0 {
-            let byte_pos = s.char_indices().nth(pos - 1).map(|(i, _)| i).unwrap_or(0);
-            s.replace_range(byte_pos..byte_pos + 1, "-");
-        }
+    if let Some(pos) = s.find(|c: char| c.is_ascii_digit())
+        && pos > 0
+    {
+        let byte_pos = s.char_indices().nth(pos - 1).map(|(i, _)| i).unwrap_or(0);
+        s.replace_range(byte_pos..byte_pos + 1, "-");
     }
 }
 

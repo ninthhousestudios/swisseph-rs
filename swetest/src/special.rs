@@ -110,7 +110,7 @@ fn dms_round_sec(deg: f64) -> String {
     let sf = (mf - mm as f64) * 60.0;
     let ss = sf as i32;
     let sdeg = if negative {
-        format!("{:>4}", -(dd as i32))
+        format!("{:>4}", -dd)
     } else {
         format!(" {:>3}", dd)
     };

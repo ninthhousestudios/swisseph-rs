@@ -31,7 +31,7 @@ fn parse_date_string(s: &str) -> (i32, i32, i32) {
             let d = parts[0].parse::<i32>().unwrap_or(1);
             let m = parts[1].parse::<i32>().unwrap_or(1);
             let mut y = parts[2].parse::<i32>().unwrap_or(2000);
-            if y >= 0 && y < 100 {
+            if (0..100).contains(&y) {
                 y += 2000;
             }
             (y, m, d)
@@ -43,7 +43,7 @@ fn parse_date_string(s: &str) -> (i32, i32, i32) {
         }
         1 => {
             let mut y = parts[0].parse::<i32>().unwrap_or(2000);
-            if y >= 0 && y < 100 {
+            if (0..100).contains(&y) {
                 y += 2000;
             }
             (y, 1, 1)
@@ -255,11 +255,11 @@ fn print_header(args: &SweTestArgs, eph: &Ephemeris, info: &EpochInfo, iflag: Ca
         println!("Nutation               {:.7}   {:.7}", d[2], d[3]);
     }
 
-    if args.sidereal {
-        if let Ok(aya) = eph.get_ayanamsa_ex(info.tjd_tt, iflag) {
-            let mode_name = sidereal_mode_name(args.sid_mode);
-            println!("Ayanamsa ({mode_name})   {aya:.7}");
-        }
+    if args.sidereal
+        && let Ok(aya) = eph.get_ayanamsa_ex(info.tjd_tt, iflag)
+    {
+        let mode_name = sidereal_mode_name(args.sid_mode);
+        println!("Ayanamsa ({mode_name})   {aya:.7}");
     }
 
     if args.topocentric || args.have_geopos {
@@ -438,21 +438,21 @@ fn compute_supplementary(
             );
             xaz = Some(az_result);
         }
-    } else if needs.zenith {
-        if let Some(ref eq) = xequ {
-            let geopos = [args.geo_longitude, args.geo_latitude, args.geo_elevation];
-            let xin = [eq[0], eq[1]];
-            let az_result = eph.azalt(
-                tjd_ut,
-                swisseph::azalt::AzAltDir::EquToHor,
-                geopos,
-                args.atmosphere[0],
-                args.atmosphere[1],
-                0.0,
-                xin,
-            );
-            xaz = Some(az_result);
-        }
+    } else if needs.zenith
+        && let Some(ref eq) = xequ
+    {
+        let geopos = [args.geo_longitude, args.geo_latitude, args.geo_elevation];
+        let xin = [eq[0], eq[1]];
+        let az_result = eph.azalt(
+            tjd_ut,
+            swisseph::azalt::AzAltDir::EquToHor,
+            geopos,
+            args.atmosphere[0],
+            args.atmosphere[1],
+            0.0,
+            xin,
+        );
+        xaz = Some(az_result);
     }
 
     if needs.ecl_cartesian {
@@ -536,17 +536,18 @@ fn compute_supplementary(
         ));
     }
 
-    if needs.phenomena && star.is_none() {
-        if let Ok(pheno) = eph.pheno(tjd_tt, body, iflag) {
-            attr = Some([
-                pheno.0.phase_angle,
-                pheno.0.phase,
-                pheno.0.elongation,
-                pheno.0.apparent_diameter,
-                pheno.0.apparent_magnitude,
-                pheno.0.horizontal_parallax,
-            ]);
-        }
+    if needs.phenomena
+        && star.is_none()
+        && let Ok(pheno) = eph.pheno(tjd_tt, body, iflag)
+    {
+        attr = Some([
+            pheno.0.phase_angle,
+            pheno.0.phase,
+            pheno.0.elongation,
+            pheno.0.apparent_diameter,
+            pheno.0.apparent_magnitude,
+            pheno.0.horizontal_parallax,
+        ]);
     }
 
     (xequ, xaz, xcart, xecart, hpos, hposj, armc_val, attr)
@@ -658,28 +659,27 @@ fn compute_body(
 
     let body = resolve_body(spec, args);
 
-    if *show_file_limit {
-        if let Some(b) = body {
-            if let Some(fd) = eph.file_data_for_body(b, tjd_tt) {
-                let cal = calendar_for_jd(fd.start_jd);
-                let (y0, m0, d0, _) = swisseph::date::revjul(fd.start_jd, cal);
-                let (y1, m1, d1, _) = swisseph::date::revjul(fd.end_jd, cal);
-                println!(
-                    "range {}: {:.1} = {}.{:02}.{:04} to {:.1} = {}.{:02}.{:04} de={}",
-                    fd.path.display(),
-                    fd.start_jd,
-                    d0,
-                    m0,
-                    y0,
-                    fd.end_jd,
-                    d1,
-                    m1,
-                    y1,
-                    fd.denum
-                );
-                *show_file_limit = false;
-            }
-        }
+    if *show_file_limit
+        && let Some(b) = body
+        && let Some(fd) = eph.file_data_for_body(b, tjd_tt)
+    {
+        let cal = calendar_for_jd(fd.start_jd);
+        let (y0, m0, d0, _) = swisseph::date::revjul(fd.start_jd, cal);
+        let (y1, m1, d1, _) = swisseph::date::revjul(fd.end_jd, cal);
+        println!(
+            "range {}: {:.1} = {}.{:02}.{:04} to {:.1} = {}.{:02}.{:04} de={}",
+            fd.path.display(),
+            fd.start_jd,
+            d0,
+            m0,
+            y0,
+            fd.end_jd,
+            d1,
+            m1,
+            y1,
+            fd.denum
+        );
+        *show_file_limit = false;
     }
 
     // Supplementary computations
