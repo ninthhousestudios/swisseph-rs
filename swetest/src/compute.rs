@@ -30,10 +30,7 @@ fn parse_date_string(s: &str) -> (i32, i32, i32) {
         3 => {
             let d = parts[0].parse::<i32>().unwrap_or(1);
             let m = parts[1].parse::<i32>().unwrap_or(1);
-            let mut y = parts[2].parse::<i32>().unwrap_or(2000);
-            if (0..100).contains(&y) {
-                y += 2000;
-            }
+            let y = parts[2].parse::<i32>().unwrap_or(2000);
             (y, m, d)
         }
         2 => {
@@ -42,10 +39,7 @@ fn parse_date_string(s: &str) -> (i32, i32, i32) {
             (2000, m, d)
         }
         1 => {
-            let mut y = parts[0].parse::<i32>().unwrap_or(2000);
-            if (0..100).contains(&y) {
-                y += 2000;
-            }
+            let y = parts[0].parse::<i32>().unwrap_or(2000);
             (y, 1, 1)
         }
         _ => (2000, 1, 1),
