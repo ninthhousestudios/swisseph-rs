@@ -58,6 +58,7 @@ pub struct FormatContext<'a> {
 pub struct FormatNeeds {
     pub equatorial: bool,
     pub azalt: bool,
+    pub zenith: bool,
     pub ecl_cartesian: bool,
     pub equ_cartesian: bool,
     pub house_pos: bool,
@@ -69,6 +70,7 @@ pub fn scan_format_needs(fmt: &str) -> FormatNeeds {
     let mut needs = FormatNeeds {
         equatorial: false,
         azalt: false,
+        zenith: false,
         ecl_cartesian: false,
         equ_cartesian: false,
         house_pos: false,
@@ -78,7 +80,11 @@ pub fn scan_format_needs(fmt: &str) -> FormatNeeds {
     let has_double_s = fmt.contains("SS") || fmt.contains("ss");
     for ch in fmt.chars() {
         match ch {
-            'A' | 'a' | 'D' | 'd' | 'Q' | 'm' | 'z' => needs.equatorial = true,
+            'A' | 'a' | 'D' | 'd' | 'Q' | 'm' => needs.equatorial = true,
+            'z' => {
+                needs.equatorial = true;
+                needs.zenith = true;
+            }
             'I' | 'i' | 'H' | 'h' | 'K' | 'k' => needs.azalt = true,
             'U' | 'X' => needs.ecl_cartesian = true,
             'u' | 'x' => needs.equ_cartesian = true,

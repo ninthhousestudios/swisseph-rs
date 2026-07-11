@@ -438,6 +438,21 @@ fn compute_supplementary(
             );
             xaz = Some(az_result);
         }
+    } else if needs.zenith {
+        if let Some(ref eq) = xequ {
+            let geopos = [args.geo_longitude, args.geo_latitude, args.geo_elevation];
+            let xin = [eq[0], eq[1]];
+            let az_result = eph.azalt(
+                tjd_ut,
+                swisseph::azalt::AzAltDir::EquToHor,
+                geopos,
+                args.atmosphere[0],
+                args.atmosphere[1],
+                0.0,
+                xin,
+            );
+            xaz = Some(az_result);
+        }
     }
 
     if needs.ecl_cartesian {
