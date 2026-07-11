@@ -3233,9 +3233,9 @@ impl Ephemeris {
 
         match kind {
             FileDataKind::Planet => self.file_data_planet(jd),
-            FileDataKind::Moon => self.file_data_sweph(&self.sweph_moon_files(), jd),
+            FileDataKind::Moon => self.file_data_sweph(self.sweph_moon_files(), jd),
             FileDataKind::MainAsteroid => {
-                self.file_data_sweph(&self.sweph_main_asteroid_files(), jd)
+                self.file_data_sweph(self.sweph_main_asteroid_files(), jd)
             }
             FileDataKind::Asteroid | FileDataKind::PlanetMoon => None,
         }
@@ -3317,20 +3317,20 @@ impl Ephemeris {
 
     fn file_data_planet(&self, jd: f64) -> Option<crate::types::FileData> {
         #[cfg(feature = "jpl")]
-        if self.config.ephemeris_source == EphemerisSource::Jpl {
-            if let Some(ref jf) = self.jpl_file {
-                let h = jf.header();
-                if jd >= h.ss[0] && jd <= h.ss[1] {
-                    return Some(crate::types::FileData {
-                        path: jf.path().to_path_buf(),
-                        start_jd: h.ss[0],
-                        end_jd: h.ss[1],
-                        denum: h.denum,
-                    });
-                }
+        if self.config.ephemeris_source == EphemerisSource::Jpl
+            && let Some(ref jf) = self.jpl_file
+        {
+            let h = jf.header();
+            if jd >= h.ss[0] && jd <= h.ss[1] {
+                return Some(crate::types::FileData {
+                    path: jf.path().to_path_buf(),
+                    start_jd: h.ss[0],
+                    end_jd: h.ss[1],
+                    denum: h.denum,
+                });
             }
         }
-        self.file_data_sweph(&self.sweph_planet_files(), jd)
+        self.file_data_sweph(self.sweph_planet_files(), jd)
     }
 
     #[cfg(feature = "swisseph-files")]
