@@ -116,13 +116,14 @@ const EFF_ARR: [(f64, f64); 101] = [
 /// the impact-parameter ratio `r` (`sin(a)/sin(a_sun)`), interpolated from the `EFF_ARR` table.
 /// Port of C `meff`.
 pub fn meff(r: f64) -> f64 {
-    if r <= 0.0 {
+    if r <= 0.0 || r.is_nan() {
         return 0.0;
     }
     if r >= 1.0 {
         return 1.0;
     }
-    let i = EFF_ARR.iter().position(|(ri, _)| *ri <= r).unwrap();
+    let i = EFF_ARR.iter().position(|(ri, _)| *ri <= r).expect("EFF_ARR (corrections.rs) corrupted; codebase badly misconfigured.");
+    // since we return 1.0 is r >= 1.0, .position() will never return 0, thus i - 1 is safe from underflow
     let (r0, m0) = EFF_ARR[i - 1];
     let (r1, m1) = EFF_ARR[i];
     let f = (r - r0) / (r1 - r0);
