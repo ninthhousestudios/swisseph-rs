@@ -1222,16 +1222,20 @@ impl Ephemeris {
                 self.pctr_bary_from_provider(&provider, t, body, &eps_j2000)
             }
             #[cfg(not(feature = "swisseph-files"))]
-            EphemerisSource::Swiss => unreachable!(),
+            EphemerisSource::Swiss => {
+                unreachable!(".se1 file support not compiled into swisseph-rs")
+            }
             #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let provider = JplProvider {
-                    file: self.jpl_file.as_ref().unwrap(),
+                    file: self.jpl_file.as_ref().expect(
+                        "JPL file must be initialized into Ephemeris upon calling Ephemeris::new()",
+                    ),
                 };
                 self.pctr_bary_from_provider(&provider, t, body, &eps_j2000)
             }
             #[cfg(not(feature = "jpl"))]
-            EphemerisSource::Jpl => unreachable!(),
+            EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
         }
     }
 
@@ -1317,11 +1321,15 @@ impl Ephemeris {
                 })
             }
             #[cfg(not(feature = "swisseph-files"))]
-            EphemerisSource::Swiss => unreachable!(),
+            EphemerisSource::Swiss => {
+                unreachable!(".se1 file support not compiled into swisseph-rs")
+            }
             #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let provider = JplProvider {
-                    file: self.jpl_file.as_ref().unwrap(),
+                    file: self.jpl_file.as_ref().expect(
+                        "JPL file must be initialized into Ephemeris upon calling Ephemeris::new()",
+                    ),
                 };
                 let pos = provider.positions(Body::Sun, t, true)?;
                 Ok(crate::nodaps::ObsFrame {
@@ -1331,7 +1339,7 @@ impl Ephemeris {
                 })
             }
             #[cfg(not(feature = "jpl"))]
-            EphemerisSource::Jpl => unreachable!(),
+            EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
         }
     }
 
@@ -1391,18 +1399,22 @@ impl Ephemeris {
                 nodaps_osc_frame(&pos, ipli, want_bary)
             }
             #[cfg(not(feature = "swisseph-files"))]
-            EphemerisSource::Swiss => unreachable!(),
+            EphemerisSource::Swiss => {
+                unreachable!(".se1 file support not compiled into swisseph-rs")
+            }
             #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let provider = JplProvider {
-                    file: self.jpl_file.as_ref().unwrap(),
+                    file: self.jpl_file.as_ref().expect(
+                        "JPL file must be initialized into Ephemeris upon calling Ephemeris::new()",
+                    ),
                 };
                 let query = if ipli == Body::Earth { Body::Sun } else { ipli };
                 let pos = provider.positions(query, t, true)?;
                 nodaps_osc_frame(&pos, ipli, want_bary)
             }
             #[cfg(not(feature = "jpl"))]
-            EphemerisSource::Jpl => unreachable!(),
+            EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
         };
 
         if ipli == Body::Earth {
@@ -1868,7 +1880,9 @@ impl Ephemeris {
                     }
                 }
                 #[cfg(not(feature = "swisseph-files"))]
-                EphemerisSource::Swiss => unreachable!(),
+                EphemerisSource::Swiss => {
+                    unreachable!(".se1 file support not compiled into swisseph-rs")
+                }
                 #[cfg(feature = "jpl")]
                 EphemerisSource::Jpl => {
                     let jpl = self.jpl_file.as_ref().ok_or(Error::EphemerisNotAvailable {
@@ -1881,7 +1895,7 @@ impl Ephemeris {
                     Ok((xr, x2000, flags))
                 }
                 #[cfg(not(feature = "jpl"))]
-                EphemerisSource::Jpl => unreachable!(),
+                EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
                 EphemerisSource::Moshier => {
                     if flags.contains(CalcFlags::BARYCTR) {
                         return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
@@ -1963,7 +1977,7 @@ impl Ephemeris {
                     Ok((xr, x2000, flags))
                 }
                 #[cfg(not(feature = "jpl"))]
-                EphemerisSource::Jpl => unreachable!(),
+                EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
                 EphemerisSource::Moshier => {
                     if flags.contains(CalcFlags::BARYCTR) {
                         return Err(Error::UnsupportedFlags(CalcFlags::BARYCTR));
@@ -1997,7 +2011,9 @@ impl Ephemeris {
                 }
             }
             #[cfg(not(feature = "swisseph-files"))]
-            EphemerisSource::Swiss => unreachable!(),
+            EphemerisSource::Swiss => {
+                unreachable!(".se1 file support not compiled into swisseph-rs")
+            }
             #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let (xr, x2000) =
@@ -2005,7 +2021,7 @@ impl Ephemeris {
                 Ok((xr, x2000, flags))
             }
             #[cfg(not(feature = "jpl"))]
-            EphemerisSource::Jpl => unreachable!(),
+            EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
             EphemerisSource::Moshier => {
                 let (xr, x2000) =
                     self.calc_body_moshier(jd_tt, body, &eps_j2000, flags, models, config)?;
@@ -2203,7 +2219,10 @@ impl Ephemeris {
         models: &crate::types::AstroModels,
         config: &EphemerisConfig,
     ) -> Result<([f64; 24], [f64; 6]), Error> {
-        let file = self.jpl_file.as_ref().unwrap();
+        let file = self
+            .jpl_file
+            .as_ref()
+            .expect("JPL file must be initialized into Ephemeris upon calling Ephemeris::new()");
         match body {
             Body::Sun | Body::Earth => {
                 crate::calc::calc_sun_jpl(jd_tt, file, flags, config, models, body == Body::Earth)
@@ -2263,13 +2282,18 @@ impl Ephemeris {
             #[cfg(feature = "swisseph-files")]
             EphemerisSource::Swiss => crate::calc::raw_osc_moon_sweph(&self.moon_files, t),
             #[cfg(not(feature = "swisseph-files"))]
-            EphemerisSource::Swiss => unreachable!(),
-            #[cfg(feature = "jpl")]
-            EphemerisSource::Jpl => {
-                crate::calc::raw_osc_moon_jpl(self.jpl_file.as_ref().unwrap(), t)
+            EphemerisSource::Swiss => {
+                unreachable!(".se1 file support not compiled into swisseph-rs")
             }
+            #[cfg(feature = "jpl")]
+            EphemerisSource::Jpl => crate::calc::raw_osc_moon_jpl(
+                self.jpl_file.as_ref().expect(
+                    "JPL file must be initialized into Ephemeris upon calling Ephemeris::new()",
+                ),
+                t,
+            ),
             #[cfg(not(feature = "jpl"))]
-            EphemerisSource::Jpl => unreachable!(),
+            EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
         }
     }
 
@@ -2356,7 +2380,9 @@ impl Ephemeris {
                 }
             }
             #[cfg(not(feature = "swisseph-files"))]
-            EphemerisSource::Swiss => unreachable!(),
+            EphemerisSource::Swiss => {
+                unreachable!(".se1 file support not compiled into swisseph-rs")
+            }
             #[cfg(feature = "jpl")]
             EphemerisSource::Jpl => {
                 let si = crate::constants::NODE_CALC_INTV;
@@ -2371,7 +2397,7 @@ impl Ephemeris {
                 Ok((s, istart, si, EphemerisSource::Jpl))
             }
             #[cfg(not(feature = "jpl"))]
-            EphemerisSource::Jpl => unreachable!(),
+            EphemerisSource::Jpl => unreachable!("JPL support not compiled into swisseph-rs"),
             EphemerisSource::Moshier => {
                 let si = crate::constants::NODE_CALC_INTV_MOSH;
                 let s = self.fetch_osc_samples(
@@ -2609,11 +2635,15 @@ impl Ephemeris {
                 self.calc_fixstar_sweph(star, jd, flags, config)
             }
             #[cfg(not(feature = "swisseph-files"))]
-            crate::types::EphemerisSource::Swiss => unreachable!(),
+            crate::types::EphemerisSource::Swiss => {
+                unreachable!(".se1 file support not compiled into swisseph-rs")
+            }
             #[cfg(feature = "jpl")]
             crate::types::EphemerisSource::Jpl => self.calc_fixstar_jpl(star, jd, flags, config),
             #[cfg(not(feature = "jpl"))]
-            crate::types::EphemerisSource::Jpl => unreachable!(),
+            crate::types::EphemerisSource::Jpl => {
+                unreachable!("JPL support not compiled into swisseph-rs")
+            }
             crate::types::EphemerisSource::Moshier => {
                 self.calc_fixstar_moshier(star, jd, flags, config)
             }
@@ -3131,7 +3161,9 @@ impl Ephemeris {
     }
 
     fn build_leap_seconds(config: &EphemerisConfig) -> crate::Result<Vec<i32>> {
-        let last_hardcoded = *LEAP_SECONDS.last().unwrap();
+        let last_hardcoded = *LEAP_SECONDS.last().expect(
+            "LEAP_SECONDS constant array is empty; the codebase has been critically misconfigured",
+        );
         let mut table: Vec<i32> = LEAP_SECONDS.to_vec();
         // Merge extra entries from config
         for &entry in &config.extra_leap_seconds {
