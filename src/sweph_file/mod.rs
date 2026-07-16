@@ -206,7 +206,7 @@ pub fn open_ephemeris_files(dir: &Path, prefix: &str) -> Result<Vec<SwissEphFile
             .time_range
             .0
             .partial_cmp(&b.header().time_range.0)
-            .unwrap()
+            .unwrap_or_else(|| panic!("time_range comparsion between files {} and {} failed. some ephemeris files are corrupted", a.path.display(), b.path.display()))
     });
     Ok(files)
 }
