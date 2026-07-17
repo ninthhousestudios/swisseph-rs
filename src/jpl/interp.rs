@@ -25,7 +25,10 @@ fn read_record(file: &JplFile, nr: usize) -> Vec<f64> {
     let mut buf = Vec::with_capacity(ncoeffs);
     for k in 0..ncoeffs {
         let bo = offset + k * 8;
-        let b: [u8; 8] = bytes[bo..bo + 8].try_into().unwrap();
+        let b: [u8; 8] = bytes.get(bo..bo + 8)
+            .unwrap_or_else(|| panic!("jpl file {} corrupted", file.path.display()))
+            .try_into()
+            .unwrap_or_else(|error| panic!("jpl file {} corrupted due to this error: {}", file.path.display(), error));
         buf.push(order.read_f64(b));
     }
     buf
