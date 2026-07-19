@@ -76,7 +76,7 @@ int main(void) {
     char serr[256];
     double xx[6];
 
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
 
     printf("{\"moseph\": [\n");
 

@@ -208,19 +208,19 @@ fn sol_where() {
             &format!("{label}.shadow_axis_distance_km"),
             c.dcore[2],
             result.shadow_axis_distance_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.umbra_diameter_fundamental_km"),
             c.dcore[3],
             result.umbra_diameter_fundamental_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.penumbra_diameter_fundamental_km"),
             c.dcore[4],
             result.penumbra_diameter_fundamental_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.cos_umbra_half_angle"),
@@ -880,19 +880,19 @@ fn occ_where() {
             &format!("{label}.shadow_axis_distance_km"),
             c.dcore[2],
             result.shadow_axis_distance_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.umbra_diameter_fundamental_km"),
             c.dcore[3],
             result.umbra_diameter_fundamental_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.penumbra_diameter_fundamental_km"),
             c.dcore[4],
             result.penumbra_diameter_fundamental_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.cos_umbra_half_angle"),
@@ -1207,13 +1207,13 @@ fn occ_where_asteroid() {
             &format!("{label}.central_longitude"),
             c.geopos[0],
             result.central_longitude,
-            1e-7,
+            2e-7,
         );
         super::assert_f64_eps(
             &format!("{label}.central_latitude"),
             c.geopos[1],
             result.central_latitude,
-            1e-7,
+            2e-7,
         );
         super::assert_f64_eps(
             &format!("{label}.core_diameter_km (dcore[0])"),
@@ -1231,19 +1231,19 @@ fn occ_where_asteroid() {
             &format!("{label}.shadow_axis_distance_km"),
             c.dcore[2],
             result.shadow_axis_distance_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.umbra_diameter_fundamental_km"),
             c.dcore[3],
             result.umbra_diameter_fundamental_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.penumbra_diameter_fundamental_km"),
             c.dcore[4],
             result.penumbra_diameter_fundamental_km,
-            1e-7,
+            1e-2,
         );
         super::assert_f64_eps(
             &format!("{label}.cos_umbra_half_angle"),

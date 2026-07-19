@@ -103,7 +103,7 @@ static void reset_state(void) {
      * over between test cases. This gives deterministic, stateless golden
      * data that matches our stateless Rust implementation. */
     swe_close();
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
     swe_set_topo(8.55, 47.37, 500.0);
 }
 
@@ -141,7 +141,7 @@ static int emit_row(int body, double jd, int flags, const char *flag_name) {
 }
 
 int main(void) {
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
     swe_set_topo(8.55, 47.37, 500.0);
 
     printf("[\n");

@@ -140,7 +140,7 @@ int main(void) {
                     /* Reset C library state before each call so file caching does not
                      * carry over between test cases (matches gen_calc_sweph.c). */
                     swe_close();
-                    swe_set_ephe_path("../../../swisseph/ephe");
+                    swe_set_ephe_path("../../ephe");
                     swe_set_topo(observers_reduced[io].lon, observers_reduced[io].lat,
                                  observers_reduced[io].alt);
                     int flags = SEFLG_SWIEPH | flag_shapes[is].flag;
@@ -165,7 +165,7 @@ int main(void) {
             for (int ie = 0; ie < NEPOCHS_REDUCED; ie++) {
                 for (int is = 0; is < NSHAPES; is++) {
                     swe_close();
-                    swe_set_ephe_path("../../../swisseph/ephe");
+                    swe_set_ephe_path("../../ephe");
                     swe_set_jpl_file("de441.eph");
                     swe_set_topo(observers_reduced[io].lon, observers_reduced[io].lat,
                                  observers_reduced[io].alt);

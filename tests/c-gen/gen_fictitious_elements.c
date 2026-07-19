@@ -28,7 +28,7 @@ static void comma(void) {
 
 int main(void) {
     char serr[256];
-    swe_set_ephe_path("../../../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
 
     double epochs[] = {2451545.0, 2415020.0, 2460600.5, 2378506.5, 2500000.5, 1720010.5};
     int n_epochs = (int)(sizeof(epochs) / sizeof(epochs[0]));

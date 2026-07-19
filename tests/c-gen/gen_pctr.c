@@ -124,7 +124,7 @@ static double sid_epochs[] = { 2451545.0, 2460600.0 };
 #define NSIDEPOCHS 2
 
 int main(void) {
-    swe_set_ephe_path("../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
 
     printf("{\n");
     printf("\"pctr\": [");

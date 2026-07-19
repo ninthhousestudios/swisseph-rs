@@ -78,7 +78,7 @@ static void run_case_optic(int *first, double tjd, const char *obj,
 }
 
 int main(void) {
-    swe_set_ephe_path("../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
     int first = 1;
     printf("{\"vis_limit\": [\n");
 

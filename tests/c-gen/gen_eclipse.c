@@ -77,7 +77,7 @@ int main(void) {
     /* Explicit path (rather than NULL's compiled-in default) so the occ_where/occ_when_glob
      * Aldebaran cases can find sefstars.txt (swisseph-rs/78) -- everything else in this file only
      * uses SEFLG_MOSEPH, which needs no ephemeris files. */
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
 
     printf("{\n");
 

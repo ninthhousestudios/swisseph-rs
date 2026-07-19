@@ -60,7 +60,7 @@ int main(void) {
                 memset(xx, 0, sizeof(xx));
 
                 swe_close();
-                swe_set_ephe_path("ephe");
+                swe_set_ephe_path("../../ephe");
 
                 int rc = swe_calc(epochs[ie], bodies[ib], flags, xx, serr);
                 if (rc < 0) {

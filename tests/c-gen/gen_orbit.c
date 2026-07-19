@@ -113,7 +113,7 @@ static void run_maxmin(double jd, int body, const char *body_name, int flags,
 }
 
 int main(void) {
-    swe_set_ephe_path("../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
 
     /* --- elements --- */
     /* Battery A: the full Mercury..Pluto range (SE_MERCURY..SE_PLUTO) + Earth. */

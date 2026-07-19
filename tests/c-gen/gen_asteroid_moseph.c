@@ -49,7 +49,7 @@ int main(void) {
     char serr[256];
     int first = 1;
 
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
 
     printf("[\n");
     for (int ib = 0; ib < NBODIES; ib++) {

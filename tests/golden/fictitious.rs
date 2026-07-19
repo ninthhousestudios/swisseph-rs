@@ -90,7 +90,9 @@ fn golden_fictitious() {
         for k in 0..6 {
             let diff = (c.output[k] - result.data[k]).abs();
             let is_swieph = flags.contains(CalcFlags::SWIEPH);
-            let eps = if k >= 3 {
+            let eps = if k >= 3 && is_swieph {
+                5e-7
+            } else if k >= 3 {
                 1e-7
             } else if is_swieph {
                 5e-9

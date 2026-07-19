@@ -13,7 +13,7 @@ int main(void) {
     char serr[256];
     double jd = 2378496.5;
 
-    swe_set_ephe_path("../../../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
 
     /* Process earlier epochs (like gen_calc_sweph order) */
     for (int ie = 0; ie < 4; ie++) {

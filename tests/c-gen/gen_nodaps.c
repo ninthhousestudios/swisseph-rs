@@ -190,7 +190,7 @@ static void run_case(double jd, int body, const char *body_name, int flags,
 }
 
 int main(void) {
-    swe_set_ephe_path("../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
     printf("{\n\"mean\": [\n");
     for (int ib = 0; ib < NBODIES; ib++) {
         for (int ie = 0; ie < NEPOCHS; ie++) {

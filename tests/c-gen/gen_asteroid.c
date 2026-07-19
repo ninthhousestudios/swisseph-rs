@@ -54,7 +54,7 @@ int main(void) {
     char pname[AS_MAXCH];
     int first = 1;
 
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
     swe_set_topo(8.55, 47.37, 500.0);
 
     printf("[\n");
@@ -70,7 +70,7 @@ int main(void) {
                  * stateless golden data that matches our stateless Rust
                  * implementation. */
                 swe_close();
-                swe_set_ephe_path("ephe");
+                swe_set_ephe_path("../../ephe");
                 swe_set_topo(8.55, 47.37, 500.0);
 
                 int rc = swe_calc(epochs[ie], bodies[ib], flags, xx, serr);

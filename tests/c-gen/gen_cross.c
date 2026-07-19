@@ -32,7 +32,7 @@ int main(void) {
     int n_x2cross = 3;
     int n_starts = 3;
 
-    swe_set_ephe_path("../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
 
     printf("{\n");
 

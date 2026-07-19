@@ -88,7 +88,7 @@ static void emit_case(int *first, double tjd, int ipl, const char *name,
 
 int main(void) {
     char serr[256];
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
     int first = 1;
     printf("[\n");
 

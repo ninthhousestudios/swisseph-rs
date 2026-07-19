@@ -52,7 +52,7 @@ static struct flag_combo flag_combos[] = {
 
 int main(void) {
     char serr[256];
-    swe_set_ephe_path("../../../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
     int first = 1;
     printf("[\n");
     for (int ib = 0; ib < NBODIES; ib++) {

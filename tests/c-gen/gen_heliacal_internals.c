@@ -547,7 +547,7 @@ static void print_search(void) {
 /* ── Main ────────────────────────────────────────────────────────── */
 
 int main(void) {
-    swe_set_ephe_path("../../../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
 
     double dgeo_topo[3] = {31.25, 30.1, 30.0};
     swe_set_topo(dgeo_topo[0], dgeo_topo[1], dgeo_topo[2]);

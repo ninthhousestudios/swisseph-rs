@@ -63,7 +63,7 @@ int main(void) {
     int i, j, k;
     int first;
 
-    swe_set_ephe_path("../../../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
     swe_set_jpl_file("de441.eph");
 
     printf("{\n");

@@ -39,7 +39,7 @@ int main(void) {
     int i, j;
     int first_outer;
 
-    swe_set_ephe_path("../../../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
 
     printf("{\n");
 

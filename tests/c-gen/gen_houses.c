@@ -802,7 +802,7 @@ int main(void) {
          * swe_fixstar strcpy()s into its starname argument, so use a local char[].
          * Set ephe_path here (not at top) so sefstars.txt is findable without
          * contaminating earlier Sunshine (I/i) cases that rely on Moshier fallback. */
-        swe_set_ephe_path("../swisseph/ephe");
+        swe_set_ephe_path("../../ephe");
         {
             int star_triples[] = { 0, 1 };
             int star_imeths[] = { 0, 1, 2 };

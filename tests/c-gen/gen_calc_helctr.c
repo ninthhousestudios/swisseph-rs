@@ -129,7 +129,7 @@ int main(void) {
                         swe_set_ephe_path("../../ephe");
                         swe_set_jpl_file("de441.eph");
                     } else {
-                        swe_set_ephe_path("../../../swisseph/ephe");
+                        swe_set_ephe_path("../../ephe");
                     }
                     int saved = suppress_stdout();
                     int rc = swe_calc(epochs[ie], bodies[ib], flags, xx, serr);

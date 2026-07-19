@@ -34,7 +34,7 @@ static const char *rsmi_names[] = { "RISE", "SET", "MTRANSIT" };
 
 int main(void) {
     int first;
-    swe_set_ephe_path("ephe");
+    swe_set_ephe_path("../../ephe");
 
     printf("{\n");
     printf("  \"full\": [\n");

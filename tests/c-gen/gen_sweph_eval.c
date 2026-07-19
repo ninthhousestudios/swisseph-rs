@@ -52,7 +52,7 @@ int main(void) {
              * carry over between test cases. This gives deterministic, stateless
              * golden data matching our stateless Rust implementation. */
             swe_close();
-            swe_set_ephe_path("../../../swisseph/ephe");
+            swe_set_ephe_path("../../ephe");
             /* Force file loading and segment caching */
             int ret = swe_calc(jd, se_body, SEFLG_SWIEPH | SEFLG_SPEED, xx, serr);
             if (ret < 0) {

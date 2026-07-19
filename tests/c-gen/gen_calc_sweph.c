@@ -70,7 +70,7 @@ int main(void) {
                  * carry over between test cases. This gives deterministic, stateless
                  * golden data that matches our stateless Rust implementation. */
                 swe_close();
-                swe_set_ephe_path("../../../swisseph/ephe");
+                swe_set_ephe_path("../../ephe");
                 int rc = swe_calc(epochs[ie], bodies[ib], flags, xx, serr);
                 if (rc < 0) {
                     fprintf(stderr, "skipping: %s body=%d jd=%.1f flags=0x%x\n",

@@ -99,7 +99,7 @@ static void emit(int body, const char *body_name, double jd, int flags,
 
 int main(void) {
     char serr[256];
-    swe_set_ephe_path("../swisseph/ephe");
+    swe_set_ephe_path("../../ephe");
     printf("[\n");
     /* Tropical cases (sid_mode = 0). */
     for (int ib = 0; ib < NBODIES; ib++) {
