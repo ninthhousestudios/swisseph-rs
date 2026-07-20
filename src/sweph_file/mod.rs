@@ -317,6 +317,36 @@ mod tests {
     }
 
     #[test]
+    fn asteroid_quaoar_se1() {
+        let path = ephe_dir().join("ast50/se50000s.se1");
+        if !path.exists() {
+            return;
+        }
+        let f = SwissEphFile::open(&path).unwrap();
+        assert_eq!(f.header().file_type, FileType::Asteroid);
+        assert_eq!(f.planets()[0].body_id, 60000);
+        let meta = f.header().asteroid.as_ref().unwrap();
+        assert!(meta.name.contains("Quaoar"), "name was: {}", meta.name);
+    }
+
+    #[test]
+    fn ephemeris_calc_quaoar() {
+        let dir = ephe_dir();
+        if !dir.join("ast50/se50000s.se1").exists() {
+            return;
+        }
+        let config = crate::config::EphemerisConfig {
+            ephe_path: Some(dir),
+            asteroid_numbers: vec![50000],
+            ..Default::default()
+        };
+        let eph = crate::context::Ephemeris::new(config).unwrap();
+        let body = crate::types::Body::Asteroid(crate::types::AsteroidId::new(50000).unwrap());
+        let result = eph.calc_ut(2460000.5, body, crate::flags::CalcFlags::SPEED);
+        assert!(result.is_ok(), "Quaoar calc failed: {:?}", result.err());
+    }
+
+    #[test]
     fn ephemeris_new_missing_asteroid_errors() {
         let dir = ephe_dir();
         let config = crate::config::EphemerisConfig {

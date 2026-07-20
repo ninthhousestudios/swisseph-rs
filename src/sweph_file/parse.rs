@@ -295,7 +295,7 @@ pub(super) fn parse_file(
         let id = if nbytes_ipl == 4 {
             r.read_i32()?
         } else {
-            r.read_i16()? as i32
+            r.read_i16()? as u16 as i32
         };
         ipl.push(id);
     }
