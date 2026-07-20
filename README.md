@@ -138,6 +138,11 @@ covering all backends (Moshier, Swiss, JPL), flag combinations, and edge cases. 
 math is bitwise-exact; iterative searches use documented epsilons. See
 `docs/golden-testing.md`.
 
+The golden test data and epsilons are tuned to `.se1` files generated from JPL's
+**DE441** ephemeris. Using `.se1` files based on a different JPL ephemeris (e.g. DE431)
+will produce small numerical differences that may cause test failures — the values are
+still astronomically correct, but the golden comparisons expect DE441 coefficients.
+
 ## API mapping
 
 The most-used C functions and their Rust equivalents:
