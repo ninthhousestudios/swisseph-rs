@@ -31,6 +31,7 @@ mod nutation;
 mod obliquity_bias;
 mod orbit;
 mod pctr;
+mod pctr_asteroid_smoke;
 mod pheno;
 mod plmoon;
 mod precession;

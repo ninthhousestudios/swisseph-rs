@@ -1438,6 +1438,7 @@ pub(crate) fn raw_osc_moon_sweph(moon_files: &[SwissEphFile], t: f64) -> Result<
     SwephProvider {
         planet_files: &[],
         moon_files,
+        main_asteroid_files: &[],
     }
     .moon_geo(t, true)
 }
@@ -1552,6 +1553,7 @@ pub(crate) trait PositionProvider {
 pub(crate) struct SwephProvider<'a> {
     pub(crate) planet_files: &'a [SwissEphFile],
     pub(crate) moon_files: &'a [SwissEphFile],
+    pub(crate) main_asteroid_files: &'a [SwissEphFile],
 }
 
 /// Days of slop allowed past a file's per-body coverage before declaring a jd
@@ -1604,21 +1606,57 @@ impl<'a> PositionProvider for SwephProvider<'a> {
             body,
             source: EphemerisSource::Swiss,
         })?;
-        let planet_file = find_file_or_nearest(self.planet_files, body_id, jd).ok_or(
-            Error::BeyondEphemerisLimits {
-                jd_tt: jd,
-                start: 0.0,
-                end: 0.0,
-            },
-        )?;
-        let moon_file = find_file_or_nearest(self.moon_files, SEI_MOON, jd).ok_or(
-            Error::BeyondEphemerisLimits {
-                jd_tt: jd,
-                start: 0.0,
-                end: 0.0,
-            },
-        )?;
-        sweph_positions(planet_file, moon_file, body_id, jd, need_speed)
+        let is_main_asteroid = matches!(
+            body,
+            Body::Chiron | Body::Pholus | Body::Ceres | Body::Pallas | Body::Juno | Body::Vesta
+        );
+        if is_main_asteroid {
+            let ast_file = find_file_or_nearest(self.main_asteroid_files, body_id, jd).ok_or(
+                Error::BeyondEphemerisLimits {
+                    jd_tt: jd,
+                    start: 0.0,
+                    end: 0.0,
+                },
+            )?;
+            let planet_file = find_file_or_nearest(self.planet_files, 0, jd).ok_or(
+                Error::BeyondEphemerisLimits {
+                    jd_tt: jd,
+                    start: 0.0,
+                    end: 0.0,
+                },
+            )?;
+            let moon_file = find_file_or_nearest(self.moon_files, SEI_MOON, jd).ok_or(
+                Error::BeyondEphemerisLimits {
+                    jd_tt: jd,
+                    start: 0.0,
+                    end: 0.0,
+                },
+            )?;
+            let mut pos = sweph_positions(planet_file, moon_file, 0, jd, need_speed)?;
+            let n = if need_speed { 6 } else { 3 };
+            let (mut ast, _) = evaluate_body(ast_file, body_id, jd, need_speed)?;
+            for i in 0..n {
+                ast[i] += pos.sun_bary[i];
+            }
+            pos.planet_bary = ast;
+            Ok(pos)
+        } else {
+            let planet_file = find_file_or_nearest(self.planet_files, body_id, jd).ok_or(
+                Error::BeyondEphemerisLimits {
+                    jd_tt: jd,
+                    start: 0.0,
+                    end: 0.0,
+                },
+            )?;
+            let moon_file = find_file_or_nearest(self.moon_files, SEI_MOON, jd).ok_or(
+                Error::BeyondEphemerisLimits {
+                    jd_tt: jd,
+                    start: 0.0,
+                    end: 0.0,
+                },
+            )?;
+            sweph_positions(planet_file, moon_file, body_id, jd, need_speed)
+        }
     }
 
     fn moon_geo(&self, jd: f64, need_speed: bool) -> Result<[f64; 6], Error> {
@@ -2228,6 +2266,7 @@ pub fn calc_planet_sweph(
     let p = SwephProvider {
         planet_files,
         moon_files,
+        main_asteroid_files: &[],
     };
     apparent_planet(&p, jd, body, _eps_j2000, flags, config, models)
 }
@@ -2247,6 +2286,7 @@ pub fn calc_sun_sweph(
     let p = SwephProvider {
         planet_files,
         moon_files,
+        main_asteroid_files: &[],
     };
     apparent_sun(&p, jd, flags, config, models, is_earth)
 }
@@ -2265,6 +2305,7 @@ pub fn calc_moon_sweph(
     let p = SwephProvider {
         planet_files,
         moon_files,
+        main_asteroid_files: &[],
     };
     apparent_moon(&p, jd, flags, config, models)
 }
@@ -2532,6 +2573,7 @@ pub(crate) fn calc_asteroid_sweph(
     let inner = SwephProvider {
         planet_files,
         moon_files,
+        main_asteroid_files: &[],
     };
     let p = AsteroidProvider {
         inner: &inner,
@@ -2665,6 +2707,7 @@ pub(crate) fn calc_plmoon_sweph(
     let inner = SwephProvider {
         planet_files,
         moon_files,
+        main_asteroid_files: &[],
     };
     let p = PlanetMoonProvider {
         inner: &inner,
@@ -2914,6 +2957,7 @@ pub(crate) fn calc_fictitious_sweph(
     let p = SwephProvider {
         planet_files,
         moon_files,
+        main_asteroid_files: &[],
     };
     apparent_fictitious(&p, jd, catalog, ipl, flags, config, models)
 }

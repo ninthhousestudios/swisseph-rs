@@ -1218,6 +1218,7 @@ impl Ephemeris {
                 let provider = SwephProvider {
                     planet_files: &self.planet_files,
                     moon_files: &self.moon_files,
+                    main_asteroid_files: &self.main_asteroid_files,
                 };
                 self.pctr_bary_from_provider(&provider, t, body, &eps_j2000)
             }
@@ -1312,6 +1313,7 @@ impl Ephemeris {
                 let provider = SwephProvider {
                     planet_files: &self.planet_files,
                     moon_files: &self.moon_files,
+                    main_asteroid_files: &self.main_asteroid_files,
                 };
                 let pos = provider.positions(Body::Sun, t, true)?;
                 Ok(crate::nodaps::ObsFrame {
@@ -1393,6 +1395,7 @@ impl Ephemeris {
                 let provider = SwephProvider {
                     planet_files: &self.planet_files,
                     moon_files: &self.moon_files,
+                    main_asteroid_files: &self.main_asteroid_files,
                 };
                 let query = if ipli == Body::Earth { Body::Sun } else { ipli };
                 let pos = provider.positions(query, t, true)?;
