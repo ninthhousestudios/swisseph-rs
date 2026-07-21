@@ -1123,6 +1123,8 @@ impl Ephemeris {
         center: Body,
         flags: CalcFlags,
     ) -> Result<CalcResult, Error> {
+        let body = crate::calc::normalize_asteroid_aliases(body);
+        let center = crate::calc::normalize_asteroid_aliases(center);
         if body == center {
             return Err(Error::CError(
                 "ipl and iplctr must not be identical".to_string(),
