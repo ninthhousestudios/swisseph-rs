@@ -47,3 +47,10 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 [[bench]]
 name = "ephemeris"
 harness = false
+
+[lints.clippy]
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+indexing_slicing = "warn"
