@@ -615,6 +615,7 @@ fn azalt_round_trip() {
             geopos.as_ptr(),
             1013.25,
             15.0,
+            0.0,
             xin_ecl.as_ptr(),
             xaz.as_mut_ptr(),
         );
@@ -672,6 +673,7 @@ fn azalt_equ2hor() {
             J2000,
             1, // SE_EQU2HOR
             geopos.as_ptr(),
+            0.0,
             0.0,
             0.0,
             xin_equ.as_ptr(),

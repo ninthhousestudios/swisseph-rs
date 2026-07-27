@@ -55,6 +55,8 @@ enum SweErrorCode
   SiderealModeRequiresFixedStars = -15,
   // Error originating from C interop.
   CError = -16,
+  // An iterative search (e.g. a crossing refinement) failed to converge.
+  NoConvergence = -17,
   // A Rust panic was caught at the FFI boundary.
   Panic = -90,
   // A required argument was NULL or otherwise invalid.
@@ -1405,6 +1407,7 @@ int32_t swisseph_gauquelin_sector(const SweEphemeris *handle,
 // - `geopos`: [longitude, latitude, height], 3 `f64` values
 // - `atpress`: atmospheric pressure (hPa) — 0 auto-estimates from `geopos[2]` altitude
 // - `attemp`: atmospheric temperature (°C)
+// - `lapse_rate`: atmospheric lapse rate (K/m) — 0.0 uses the standard atmosphere (0.0065 K/m)
 // - `xin`: input [longitude/RA, latitude/declination], 2 `f64` values
 // - `xaz`: out [azimuth, true altitude, apparent altitude], 3 `f64` values
 //
@@ -1419,6 +1422,7 @@ void swisseph_azalt(const SweEphemeris *handle,
                     const double *geopos,
                     double atpress,
                     double attemp,
+                    double lapse_rate,
                     const double *xin,
                     double *xaz);
 

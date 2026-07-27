@@ -11,3 +11,6 @@ ephe/
 !.sutra/rules.toml
 !.sutra/aliases.toml
 !.sutra/owners.toml
+
+# Diff artifact written by the header_freshness test on failure.
+swisseph-ffi/include/swisseph.h.generated
