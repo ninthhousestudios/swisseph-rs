@@ -41,6 +41,8 @@ pub enum SweErrorCode {
     SiderealModeRequiresFixedStars = -15,
     /// Error originating from C interop.
     CError = -16,
+    /// An iterative search (e.g. a crossing refinement) failed to converge.
+    NoConvergence = -17,
     /// A Rust panic was caught at the FFI boundary.
     Panic = -90,
     /// A required argument was NULL or otherwise invalid.
@@ -66,6 +68,7 @@ pub fn error_code(err: &Error) -> i32 {
         Error::InvalidLeapSecond { .. } => SweErrorCode::InvalidLeapSecond,
         Error::UnsupportedEphemeris(_) => SweErrorCode::UnsupportedEphemeris,
         Error::SiderealModeRequiresFixedStars(_) => SweErrorCode::SiderealModeRequiresFixedStars,
+        Error::NoConvergence => SweErrorCode::NoConvergence,
         Error::CError(_) => SweErrorCode::CError,
     };
     code as i32
