@@ -1,5 +1,6 @@
 use serde::Deserialize;
-use swisseph::{Body, CalcFlags, Ephemeris, EphemerisConfig};
+use std::path::PathBuf;
+use swisseph::{Body, CalcFlags, Ephemeris, EphemerisConfig, EphemerisSource};
 
 #[derive(Deserialize)]
 struct LonCrossCase {
@@ -178,4 +179,38 @@ fn crossings() {
             + data.mooncross_node.len()
             + data.helio_cross.len()
     );
+}
+
+/// swisseph-rs/156: with DE441 Moon files the Newton refinement enters a stable 2-cycle
+/// straddling the crossing (C's `swe_mooncross_ut` hangs forever on these inputs). The
+/// bisection fallback must converge to the crossing at the midpoint of the cycle.
+#[test]
+fn mooncross_ut_de441_newton_cycle() {
+    let eph = Ephemeris::new(EphemerisConfig {
+        ephemeris_source: EphemerisSource::Swiss,
+        ephe_path: Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("swisseph")
+                .join("ephe"),
+        ),
+        ..EphemerisConfig::default()
+    })
+    .expect("Ephemeris::new");
+    let x2cross = 353.29103440827396;
+    let jd_start = 2283500.8126717205;
+    let jd = eph
+        .mooncross_ut(x2cross, jd_start, CalcFlags::SWIEPH)
+        .expect("mooncross_ut should converge via bisection fallback");
+    // The 2-cycle oscillated between jd=2283528.074218570 and jd=2283528.074227818;
+    // the true crossing sits between them.
+    assert!((jd - 2283528.0742232).abs() < 1e-6, "jd = {jd}");
+    let r = eph
+        .calc_ut(jd, Body::Moon, CalcFlags::SWIEPH)
+        .expect("calc_ut at crossing");
+    let dist = (x2cross - r.data[0] + 180.0).rem_euclid(360.0) - 180.0;
+    // The cycle stems from a ~0.43" longitude jump between Chebyshev segments in the
+    // DE441 semo file, so the residual cannot go below the jump size — only the crossing
+    // TIME is exact. Assert the residual is bounded by the discontinuity magnitude.
+    assert!(dist.abs() < 1.5e-4, "residual dist = {dist:.3e} deg");
 }

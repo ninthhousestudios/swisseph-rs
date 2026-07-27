@@ -75,6 +75,8 @@ pub enum Error {
     UnsupportedEphemeris(EphemerisSource),
     /// The sidereal mode requires fixed-star data that is not yet available.
     SiderealModeRequiresFixedStars(SiderealMode),
+    /// An iterative search (e.g. a crossing refinement) failed to converge.
+    NoConvergence,
     /// A catch-all for error messages ported from C's string-buffer error reporting.
     CError(String),
 }
@@ -118,6 +120,7 @@ impl fmt::Display for Error {
                     "sidereal mode {mode:?} requires the fixed-star subsystem (not yet implemented)"
                 )
             }
+            Self::NoConvergence => write!(f, "iterative search failed to converge"),
             Self::CError(msg) => write!(f, "{msg}"),
         }
     }
