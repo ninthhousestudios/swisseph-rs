@@ -1,0 +1,122 @@
+{
+  "id": "019f0126-94a5-7081-a4dc-f5beb4b34aa7",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/26",
+  "sequence_number": 26,
+  "title": "Moshier lunar ephemeris: tables, mean elements, and series evaluation",
+  "description": "Port the Moshier lunar ephemeris (ELP2000-85 adjusted to DE404) from swemmoon.c to Rust. This covers data tables, fundamental arguments, and the full series evaluation. Pure computation — no global state.\n\n## What to build\n\n### 1. Moon data tables (embedded in swemmoon.c)\n\nSmall enough to port inline (no script needed):\n\n| Table | Elements | Format |\n|-------|----------|--------|\n| LR    | 118 terms × 8 cols = 944 shorts | D, l', l, F, lon_coeff, rad_coeff per term |\n| MB    | 77 terms × 6 cols | latitude terms |\n| LRT   | 38 terms × 8 cols | T-correction longitude/radius |\n| BT    | 16 terms × 5 cols | T-correction latitude |\n| LRT2  | 25 terms × 6 cols | T²-correction longitude/radius |\n| BT2   | 12 terms × 5 cols | T²-correction latitude |\n\nPlus:\n- `z[]` — 24 DE404 fitting coefficients (doubles, transcribe exactly)\n- Mean element polynomial coefficients (in mean_elements() body)\n- Planetary longitude coefficients for perturbation terms (in mean_elements_pl())\n\nAll as `const` arrays. Use `i16` for the short tables.\n\n### 2. mean_elements() → MoonFundamentalArgs\n\nPort the fundamental argument computation (swemmoon.c ~line 1763):\n- 5 fundamental arguments: l (Moon anomaly), l' (Sun anomaly), D (elongation), F (node distance), Lp (mean longitude)\n- Each is a high-precision polynomial in T (centuries from J2000) plus secular corrections from the z[] array\n- Additional planetary longitudes (Ve, Ea, Ma, Ju, Sa) for perturbation terms\n\nReturn a struct rather than writing to static variables:\n```rust\nstruct MoonFundamentalArgs {\n    l: f64,      // Moon mean anomaly\n    l_prime: f64, // Sun mean anomaly  \n    d: f64,      // Mean elongation\n    f: f64,      // Mean distance from node\n    lp: f64,     // Mean longitude of Moon\n    // planetary longitudes for perturbation terms\n    ve: f64, ea: f64, ma: f64, ju: f64, sa: f64,\n}\n```\n\n### 3. Series evaluation: moon1–moon4 combined into moshmoon2\n\nThe C code splits across moon1()–moon4() accumulating into static TLS variables. Combine into a single function (or keep the split for readability) using a local accumulator:\n\n```rust\nstruct MoonAccum {\n    l: f64,         // longitude accumulator\n    b: f64,         // latitude accumulator  \n    moonpol: [f64; 3], // [lon, lat, dist]\n}\n```\n\nThe moon functions walk the term tables (LR, MB, etc.) and accumulate:\n- `coefficient × sin(n₁×l + n₂×l' + n₃×D + n₄×F + corrections)`\n- Polynomial-in-T amplitudes for the correction tables\n\nCore function: `moshmoon2(jd) → [f64; 3]` returning geocentric ecliptic [lon, lat, dist] in radians and AU (or Earth radii — check c-ref-moshier.md for units).\n\n### 4. Golden tests\n\nWrite a C generator (`tests/c-gen/gen_moshier_moon.c`) that:\n- Calls `swi_moshmoon2()` for the Moon at multiple test epochs\n- Test epochs: J2000, J2000±0.5yr, ±1yr, ±10yr, ±100yr, ±500yr, ±1000yr, ±3000yr\n- Outputs JSON with [{jd, lon, lat, dist}]\n- Moon moves fast, so include some closely-spaced epochs too\n\nWrite Rust golden tests in `tests/golden/moshier_moon.rs`.\nAssert bitwise-exact (deterministic math, no iteration).\n\n## Architecture notes\n\n- All functions are pure. No &self, no Ephemeris.\n- `moshmoon2(jd: f64) -> [f64; 3]` — the only public function needed.\n- The moon1-4 split is an implementation detail — keep if it aids readability, combine if it doesn't.\n- The `chewm()` helper from C may be shared with the planetary series — check c-ref-moshier.md. If identical, put in a shared location within the moshier module.\n\n## File placement\n\n- `src/moshier/moon.rs` — moshmoon2, mean_elements, series evaluation, data tables\n- If tables are large enough to warrant splitting: `src/moshier/moon_tables.rs`\n- `tests/c-gen/gen_moshier_moon.c` — C golden data generator\n- `tests/golden-data/moshier_moon.json` — generated golden data\n- `tests/golden/moshier_moon.rs` — Rust golden tests\n\n## C source reference\n- swemmoon.c:848–868 — swi_moshmoon2 entry point\n- swemmoon.c:1763–1819 — mean_elements\n- swemmoon.c:1820–1930 — mean_elements_pl\n- swemmoon.c:205–720 — data tables (LR, MB, LRT, BT, LRT2, BT2, z[])\n- swemmoon.c moon1()–moon4() — series evaluation functions\n- See docs/c-ref-moshier.md for detailed algorithm documentation\n\n## Dependencies\n- Independent of swisseph-rs/24–25 (planet tables/series). Can be implemented in parallel.\n- Uses crate::constants::STR and math utilities from Phase 0.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "All moon term tables ported as const arrays with correct element counts"
+    },
+    {
+      "done": false,
+      "text": "z[] fitting coefficients transcribed exactly (24 doubles)"
+    },
+    {
+      "done": false,
+      "text": "mean_elements returns a struct, no static/TLS state"
+    },
+    {
+      "done": false,
+      "text": "moshmoon2 implemented as pure function"
+    },
+    {
+      "done": false,
+      "text": "C golden data generator produces JSON at ≥10 test epochs"
+    },
+    {
+      "done": false,
+      "text": "Golden tests pass bitwise-exact for Moon position at all test epochs"
+    },
+    {
+      "done": false,
+      "text": "No global state anywhere in the module"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": "## Approach\n\nPort the Moshier Moon analytical ephemeris (ELP2000-85 / DE404 fit) from C `swemmoon.c` to Rust. The Moon uses a completely different table structure and evaluation algorithm from the planets: 6 harmonic coefficient tables (`i16` arrays totaling ~2000 values) evaluated by `chewm()`, plus a 25-element `z[]` DE404 fitting array, and hand-coded planetary perturbation terms in `moon1()` and `moon2()`. A `MoonState` struct replaces C's TLS globals; `mean_elements()` returns a struct.\n\n**Why codegen for tables**: The 6 harmonic tables (LR, MB, LRT, BT, LRT2, BT2) total ~2000 i16 values — large enough that hand-transcription risks errors. A Python script extracts them from swemmoon.c, matching the pattern used for planet tables (`gen_moshier_tables.py`).\n\n**Why a dedicated C-reader agent for moon1/moon2**: The `c-ref-moshier.md` fully documents mean_elements, mean_elements_pl, chewm, moon3, moon4 algorithms and the z[] coefficients, but the ~36 individual planetary perturbation amplitude expressions in `moon1()` and `moon2()` (hard-coded sin/cos terms with specific numeric amplitudes) are described only at summary level. The implementation agent will spawn a reader agent to extract these from swemmoon.c lines 1182–1442.\n\n## Files\n\n- **Create**: `scripts/gen_moshier_moon_tables.py` — codegen to extract LR/MB/LRT/BT/LRT2/BT2 + z[] from swemmoon.c → Rust\n- **Create**: `src/moshier/moon_tables.rs` — generated const arrays (do not hand-edit)\n- **Create**: `src/moshier/moon.rs` — MeanElements struct, mean_elements(), mean_elements_pl(), chewm(), sscc(), moon1–4(), pub moshmoon2()\n- **Create**: `tests/c-gen/gen_moshier_moon.c` — C golden data generator\n- **Create**: `tests/golden-data/moshier_moon.json` — generated golden reference data\n- **Create**: `tests/golden/moshier_moon.rs` — bitwise-exact golden tests\n- **Modify**: `src/moshier/mod.rs` — add `pub mod moon; pub mod moon_tables;`\n- **Modify**: `tests/golden/main.rs` — add `mod moshier_moon;`\n- **Modify**: `docs/codebase-map.md` — add moon module entries\n\n## Steps\n\n### Step 1: Codegen script for Moon tables\n\nCreate `scripts/gen_moshier_moon_tables.py` that parses `../swisseph/swemmoon.c` and extracts:\n- `LR[944]`, `MB[462]`, `LRT[304]`, `BT[80]`, `LRT2[150]`, `BT2[60]` as `i16` const arrays\n- `z[25]` as `f64` const array\n- Table size constants `NLR=118`, `NMB=77`, `NLRT=38`, `NBT=16`, `NLRT2=25`, `NBT2=12`\n\n```python\n# Pattern: extract `static const short NAME[] = { ... };` from swemmoon.c\n# Same regex approach as gen_moshier_tables.py\n\nTABLES = [\n    (\"LR\", \"short\", 944),   # 8 cols × 118 rows\n    (\"MB\", \"short\", 462),   # 6 cols × 77 rows\n    (\"LRT\", \"short\", 304),  # 8 cols × 38 rows\n    (\"BT\", \"short\", 80),    # 5 cols × 16 rows\n    (\"LRT2\", \"short\", 150), # 6 cols × 25 rows\n    (\"BT2\", \"short\", 60),   # 5 cols × 12 rows\n]\n\n# Output format (moon_tables.rs):\n# pub const LR: [i16; 944] = [ ... ];\n# pub const NLR: usize = 118;\n# pub const Z: [f64; 25] = [ ... ];\n```\n\n### Step 2: Run codegen, generate moon_tables.rs\n\n```sh\npython3 scripts/gen_moshier_moon_tables.py\ncargo check  # verify tables compile\n```\n\n### Step 3: Implement `src/moshier/moon.rs`\n\nAll computation code. Key structures and functions:\n\n**MeanElements struct** — returned by `mean_elements()`, no TLS state:\n```rust\npub struct MeanElements {\n    pub m: f64,     // solar anomaly l' (arcsec)\n    pub nf: f64,    // F (arcsec)\n    pub mp: f64,    // lunar anomaly l (arcsec)\n    pub d: f64,     // elongation (arcsec)\n    pub swelp: f64, // mean lunar longitude L (arcsec)\n}\n\npub fn mean_elements(t: f64) -> MeanElements {\n    let t2 = t * t;\n    let frac_t = t % 1.0;\n    // M: 9th-degree Laskar poly (coefficients in c-ref-moshier.md)\n    let m = mods3600(129600000.0 * frac_t - 3418.961646 * t + 1287104.76154)\n        + /* Laskar 9th-degree poly */ * t2;\n    // NF: mods3600(...) + ((Z[2]*T + Z[1])*T + Z[0]) * T²\n    // MP: mods3600(...) + ((Z[5]*T + Z[4])*T + Z[3]) * T²\n    // D:  mods3600(...) + ((Z[8]*T + Z[7])*T + Z[6]) * T²\n    // SWELP: mods3600(...) + ((Z[11]*T + Z[10])*T + Z[9]) * T²\n    MeanElements { m, nf, mp, d, swelp }\n}\n```\n\n**PlanetaryElements** — from `mean_elements_pl()`:\n```rust\nstruct PlanetaryElements { ve: f64, ea: f64, ma: f64, ju: f64, sa: f64 }\n\nfn mean_elements_pl(t: f64, t2: f64) -> PlanetaryElements {\n    // Ve: mods3600(210664136.4335482*T + 655127.283046) + 9th-degree secular poly * T²\n    // Ea: mods3600(129597742.26669231*T + 361679.214649) + 9th-degree secular poly * T²\n    // Ma: mods3600(68905077.59284*T + 1279559.78866) + quadratic\n    // Ju: mods3600(10925660.428608*T + 123665.342120) + quadratic\n    // Sa: mods3600(4399609.65932*T + 180278.89694) + cubic\n}\n```\n\n**MoonState** — stack-local struct replacing C TLS globals:\n```rust\nstruct MoonState {\n    t: f64, t2: f64, t4: f64,\n    ve: f64, ea: f64, ma: f64, ju: f64, sa: f64,\n    l: f64, l1: f64, l2: f64, l3: f64, l4: f64,\n    b: f64,\n    moonpol: [f64; 3],\n    ss: [[f64; 8]; 5],\n    cc: [[f64; 8]; 5],\n}\n```\n\n**chewm** — harmonic table evaluator:\n```rust\nfn chewm(table: &[i16], nlines: usize, nangles: usize, typflg: u8,\n         ans: &mut [f64; 3], ss: &[[f64; 8]; 5], cc: &[[f64; 8]; 5]) {\n    // For each row: build combined sin/cos from nangles columns,\n    // then dispatch on typflg:\n    //   1 → lon(×10000 packed) + rad(×10000 packed, skip if k==0)\n    //   2 → small lon + small rad\n    //   3 → lat(×10000 packed)\n    //   4 → small lat\n}\n```\n\n**sscc** — sin/cos lookup for 5×8 grid (same algorithm as planet sscc, different array dims):\n```rust\nfn sscc(k: usize, arg: f64, n: usize,\n        ss: &mut [[f64; 8]; 5], cc: &mut [[f64; 8]; 5]) {\n    // Recurrence: ss[k][i] = sin((i+1)*arg), cc[k][i] = cos((i+1)*arg)\n}\n```\n\n**moon1–4 and moshmoon2**:\n```rust\nfn moon1(state: &mut MoonState, mean: &MeanElements) {\n    // Zero ss/cc, call sscc for D(6), M(4), MP(4), NF(4)\n    // Phase A: chewm(LRT2, BT2), planetary perturbations via z[12..24], scale T²\n    // Phase B: chewm(BT, LRT), more perturbations, scale T¹\n    // NOTE: individual perturbation amplitudes extracted by reader agent from swemmoon.c\n}\nfn moon2(state: &mut MoonState, mean: &MeanElements) {\n    // ~28 longitude + ~8 latitude T^0 planetary perturbation terms\n    // Hard-coded sin/cos of Ve, Ea, Ma, Ju, Sa, SWELP, NF, D, MP combinations\n}\nfn moon3(state: &mut MoonState, mean: &MeanElements) {\n    // chewm(LR, 118, 4, 1, ...) — main longitude + radius\n    // chewm(MB, 77, 4, 3, ...)  — main latitude\n    // Assemble: moonpol[0] = SWELP + l + Horner(l1..l4,T)*1e-5 + 1e-4*moonpol[0]\n    //           moonpol[1] = 1e-4*moonpol[1] + B\n    //           moonpol[2] = 1e-4*moonpol[2] + 385000.52899\n}\nfn moon4(state: &mut MoonState) {\n    // moonpol[2] /= AUNIT/1000  (km → AU)\n    // moonpol[0] = STR * mods3600(moonpol[0])  (arcsec → rad)\n    // moonpol[1] = STR * moonpol[1]  (arcsec → rad)\n}\n\npub fn moshmoon2(jd: f64) -> [f64; 3] {\n    let t = (jd - J2000) / 36525.0;\n    let t2 = t * t;\n    let mean = mean_elements(t);\n    let pl = mean_elements_pl(t, t2);\n    let mut state = MoonState { t, t2, t4: t2*t2, /* pl fields, zeroed accumulators */ };\n    moon1(&mut state, &mean);\n    moon2(&mut state, &mean);\n    moon3(&mut state, &mean);\n    moon4(&mut state);\n    state.moonpol\n}\n```\n\n### Step 4: Wire up module tree\n\n`src/moshier/mod.rs` — add:\n```rust\npub mod moon;\npub mod moon_tables;\n```\n\n### Step 5: C golden data generator\n\n`tests/c-gen/gen_moshier_moon.c` — calls `swi_moshmoon2()` at 11 test epochs (9 matching planet tests + 2 Moon-specific: half-day offset and ~1 sidereal month):\n\n```c\nstatic double epochs[] = {\n    2451545.0 - 3000.0*365.25, 2451545.0 - 1000.0*365.25,\n    2451545.0 - 500.0*365.25,  2451545.0 - 100.0*365.25,\n    2451545.0,                  2451545.0 + 100.0*365.25,\n    2451545.0 + 500.0*365.25,  2451545.0 + 1000.0*365.25,\n    2451545.0 + 999.0*365.25,\n    2451545.0 + 0.5,            // half day offset\n    2451545.0 + 27.3,           // ~1 sidereal month\n};\n```\n\nCompile: `cc -Wall -I../../swisseph gen_moshier_moon.c ../../swisseph/libswe.a -lm`\n\n### Step 6: Generate golden data and write golden test\n\n`tests/golden/moshier_moon.rs` — deserialize JSON, call `moshmoon2()`, assert bitwise-exact on all 3 coordinates at all epochs. Add `mod moshier_moon;` to `tests/golden/main.rs`.\n\n### Step 7: Verify and update codebase map\n\nRun `cargo test`, confirm bitwise-exact. Update `docs/codebase-map.md` with:\n- `moon.rs` — moshmoon2, mean_elements, moon1–4, chewm\n- `moon_tables.rs` — generated LR/MB/LRT/BT/LRT2/BT2, z[] (do not hand-edit)\n- `moshier_moon.rs` golden test entry\n- `moshier_moon.json` golden data entry\n\n## Acceptance criteria coverage\n\n- [x] \"All moon term tables ported as const arrays with correct element counts\" → Steps 1–2 (codegen with element-count assertions)\n- [x] \"z[] fitting coefficients transcribed exactly (24 doubles)\" → Step 1 (note: z[] actually has 25 elements z[0]..z[24] per C source — follow source, flag discrepancy)\n- [x] \"mean_elements returns a struct, no static/TLS state\" → Step 3 (MeanElements struct, pure function)\n- [x] \"moshmoon2 implemented as pure function\" → Step 3 (MoonState on stack, no global state)\n- [x] \"C golden data generator produces JSON at ≥10 test epochs\" → Steps 5–6 (11 epochs)\n- [x] \"Golden tests pass bitwise-exact for Moon position at all test epochs\" → Steps 6–7\n- [x] \"No global state anywhere in the module\" → Step 3 (all state in stack-local MoonState)",
+  "execution_record": "Implemented as planned with no divergence. Three parallel agents handled: (1) codegen script for moon tables, (2) C source extraction for moon1/moon2 perturbation amplitudes, (3) golden data C generator. All 11 golden tests passed bitwise-exact on first compile — no debugging needed. The z[] array has 25 elements (z[0]..z[24]), not 24 as stated in the acceptance criteria; followed the C source.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "ddee2c4"
+    }
+  ],
+  "files": [
+    "src/moshier/moon.rs",
+    "tests/c-gen/gen_moshier_moon.c",
+    "tests/golden-data/moshier_moon.json",
+    "tests/golden/moshier_moon.rs"
+  ],
+  "tags": [
+    "wave-2",
+    "moshier"
+  ],
+  "history": [
+    {
+      "ts": 1782430733477,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 26
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782477256704,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782478166594,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review: approve. Codex adversarial review verified all perturbation amplitudes against C source, confirmed no global/mutable state, ran full test suite (99 tests pass). No material findings. Sutra structural review: risk 0.263, zero constraint violations.",
+      "ts": 1782478363196
+    }
+  ],
+  "created_at": 1782430733477,
+  "updated_at": 1782478166594,
+  "completed_at": 1782478166594,
+  "arc_id": "019efa3b-d087-7b51-96b9-40a83ea99afa",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f0127-54aa-71d0-b98e-7246757ac3e7",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/27",
+      "target": "swisseph-rs/26",
+      "note": "Backend wrappers need completed lunar ephemeris",
+      "created_at": 1782430782634
+    },
+    {
+      "id": "019f0127-7643-7331-b344-1a68efabfc20",
+      "edge_type": "refines",
+      "source": "swisseph-rs/26",
+      "target": "swisseph-rs/5",
+      "note": null,
+      "created_at": 1782430791235
+    }
+  ]
+}

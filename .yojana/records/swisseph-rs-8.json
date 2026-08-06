@@ -1,0 +1,104 @@
+{
+  "id": "019efa43-4014-7a62-9405-452a975dff3b",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/8",
+  "sequence_number": 8,
+  "title": "Plan: JPL DE backend",
+  "description": "Port swejpl.c (~958 lines). JPL DE file format reader. Optional cargo feature.\n\n## File structure (catalogue-internal §4.1)\n- Records 0-1: headers (title, constant names, epoch range ss[0]/ss[1]/ss[2], AU, Earth-Moon mass ratio, body index table ipt[39], DE version)\n- Records 2+: Chebyshev coefficients for all bodies over one segment (~32 days)\n- Body index table ipt[i×3]: start index, ncf (coefficients per component), na (sub-intervals per segment)\n- 13 bodies: Mercury–Pluto, Moon, Sun, nutations, librations\n\n## Core algorithm: interp() — Chebyshev evaluation\nSame Clenshaw recurrence as Phase 2, but with sub-interval selection:\n```\ntemp = na × t; ni = floor(temp); tc = 2×frac(temp) − 1\n```\nEvaluates position, velocity, optionally acceleration and jerk (ifl parameter).\n\n## Segment selection\n```\nnr = floor((et − ss[0]) / ss[2]) + 2    // record number\nt  = (et − (nr-2)×ss[2]) / ss[2]        // normalized [0,1]\nfseek(fp, nr × record_size, SEEK_SET)\n```\n\n## Rust design\n```rust\n#[cfg(feature = \"jpl\")]\nstruct JplReader {\n    file: BufReader<File>,\n    header: JplHeader,\n    record_size: usize,\n    cached_record: Option<(usize, Vec<f64>)>,  // (record_nr, coefficients)\n}\n```\n- Cargo feature flag: `jpl` (off by default since JPL files may not be available)\n- Reuse swi_echeb/swi_edcheb from Phase 2 (or the more general interp() with sub-intervals)\n\n## Testing\n- Only testable if JPL DE files are available. Make tests conditional on file existence.\n- Compare JPL vs Swiss Eph output for same dates (should agree very closely)\n- Test sub-interval selection edge cases\n\n## C source reference\n- swejpl.c:1-958 — swi_open_jpl_file, swi_pleph, swi_close_jpl_file, interp\n- swejpl.h:1-103 — structures and constants\n\n## Dependencies\n- Phase 0 (types), Phase 2 (Chebyshev), Phase 5 (integration into calc dispatch)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Planning task — decomposed into 4 implement-phase sub-tasks (swisseph-rs/43-46) on this arc, all ready-for-agent/AFK. Created docs/c-ref-jpl.md (the ref doc, via a dedicated sonnet agent reading swejpl.c/.h + the jplplan seam).\n\nCorrections to the original description (it predated the stateless architecture):\n- **BufReader → mmap.** Original proposed `BufReader<File>` + `cached_record: Option<(usize, Vec<f64>)>`. Replaced with mmap (mirrors the SwissEphFile/.se1 backend). Resolves the statelessness conflict: OS page cache replaces C's mutable record cache, so no `&mut self`/cache field. Also necessary for the 2.7 GB de441.eph.\n- **Cargo `jpl` feature flag dropped.** Decided with Josh: always compile JPL (memmap2 already a dep, pure Rust, codebase has zero feature flags), gate only the golden tests on de441.eph existence. Avoids #[cfg] noise across context.rs/calc.rs.\n- **Scope expanded to full end-to-end integration.** Original listed 'Phase 5 integration' as an external dependency. Decided with Josh to include EphemerisSource::Jpl wiring in this arc rather than defer (a reader nobody calls is dead code). Decomposed so the raw reader (43) and swi_pleph (44) are golden-verified against C before integration (46).\n- **Shared pipeline, not duplicated.** swisseph-rs/45 refactors calc_*_sweph to run over a PositionProvider trait so JPL reuses the same apparent-position pipeline — mirroring C's app_pos_etc_plan (shared between SWIEPH/JPLEPH). Guarded by the existing calc_sweph.rs golden suite (positions 1e-10) staying green; escape hatch falls back to parallel calc_*_jpl if the refactor moves numbers.\n- **Frame compatibility verified.** The shared pipeline consumes barycentric equatorial-J2000 cartesian (precess_and_ephem precesses equatorial directly + frame_bias GcrsToJ2000). JPL DE403+ raw output is ICRF/equatorial-J2000 — compatible. Residual risk (C's icrs2fk5 step on the JPL path) is scoped into JplProvider in task 46, not the shared pipeline.\n- **Golden data location.** de441.eph exists ONLY in swisseph-rs/ephe/ (gitignored); ../swisseph/ephe has no .eph file. C harnesses + Rust tests point at CARGO_MANIFEST_DIR/ephe/de441.eph; all JPL tests gated on its existence.\n- **DE441 ksize computed generically** (not in swejpl.c's known-ksize table) — task 43 computes it from ipt[] per fsizer.\n- **Latent constraint bug flagged:** the backend-isolation forbidden_dep constraints target src/jpl.rs; converting jpl to a directory module makes them inert (same issue already present for src/sweph_file/**). Task 43 updates the patterns to src/jpl/**.\n\nDependency graph: 44→43; 46→44, 46→45; 43/45 parallelizable. All four refine swisseph-rs/8.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "doc:path",
+      "value": "docs/c-ref-jpl.md",
+      "label": "JPL C reference doc (created during planning)"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315171860,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 8
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782740259823,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782740272046,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "opus-planner",
+      "text": "vidhi-sutra-tend pass (2026-06-29), committed 798a227. Bound: no_cycles (scope src/, blocking, 0 violations) — was deferred since Phase 1. Re-pointed: 6 backend-isolation globs (src/sweph_file.rs→src/sweph_file/** repairs 4 silently-inert rules; src/jpl.rs→src/jpl/** pre-points for swisseph-rs/43, intentionally inert until that dir lands). Re-keyed app→backend trigger to Phase 8+ (app modules still empty stubs). No max_fan_in (only foundational modules are high-fan-in). Found + restored: src/jpl.rs (empty stub) had been deleted mid-session by the ref-doc subagent — crate would not compile (lib.rs declares `pub mod jpl;`); restored via git, build confirmed green. Next tend moment: when swisseph-rs/43 lands (confirm jpl/** globs bind) or the first app module gets code (fire row 12).",
+      "ts": 1782740987988
+    }
+  ],
+  "created_at": 1782315171860,
+  "updated_at": 1782740272046,
+  "completed_at": 1782740272046,
+  "arc_id": "019efa3b-ffd4-7111-894d-963830d91b4a",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f1398-fc50-7d11-8ed2-5b51bd78d2f3",
+      "edge_type": "refines",
+      "source": "swisseph-rs/43",
+      "target": "swisseph-rs/8",
+      "note": null,
+      "created_at": 1782740221008
+    },
+    {
+      "id": "019f1398-ffeb-7703-bb06-198c19cbfded",
+      "edge_type": "refines",
+      "source": "swisseph-rs/44",
+      "target": "swisseph-rs/8",
+      "note": null,
+      "created_at": 1782740221931
+    },
+    {
+      "id": "019f1399-0595-7953-a388-bf1227ccc295",
+      "edge_type": "refines",
+      "source": "swisseph-rs/45",
+      "target": "swisseph-rs/8",
+      "note": null,
+      "created_at": 1782740223381
+    },
+    {
+      "id": "019f1399-0760-7241-a47b-e92a2d735a4e",
+      "edge_type": "refines",
+      "source": "swisseph-rs/46",
+      "target": "swisseph-rs/8",
+      "note": null,
+      "created_at": 1782740223840
+    }
+  ]
+}

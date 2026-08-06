@@ -1,0 +1,122 @@
+{
+  "id": "019f1e16-2bd4-70f3-8432-4b62115d07c6",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/68",
+  "sequence_number": 68,
+  "title": "RSE 1/12: Topocentric swe_calc support (swi_get_observer + TOPOCTR pipeline)",
+  "description": "### Summary\nImplement `SEFLG_TOPOCTR` in the calc pipeline so `calc()` returns topocentric (observer-centred) positions instead of `Err(UnsupportedFlags)`. Port `swi_get_observer` (observer geocentric position+velocity in the equatorial-J2000/ICRS frame, derived from `config.topographic`) and subtract it inside the apparent-position functions. **This is the gating prerequisite for rise/set (RSE 3) and every eclipse `_where`/`_how`/`_loc` function** — all of them call `swe_calc(... | SEFLG_TOPOCTR)`.\n\n**Architecture correction (do NOT follow the parent task's stale wording):** the port is STATELESS. There is no `swe_set_topo` global and no `swed.topd` cache. The observer is recomputed each call from `config.topographic: Option<TopoPosition>` (already present in `EphemerisConfig`, fields `longitude`/`latitude`/`altitude`). All methods stay `&self`.\n\n### Files\n- `src/topocentric.rs` (NEW) — `pub(crate) fn get_observer(jd_tt: f64, topo: &TopoPosition, config: &EphemerisConfig, models: &AstroModels) -> [f64; 6]` returning observer position+velocity in equatorial J2000.\n- `src/lib.rs` — add `pub mod topocentric;` (alphabetical).\n- `src/context.rs` — in `calc()` (line ~178) drop `TOPOCTR` from the `unsupported` mask; instead, if `flags.contains(TOPOCTR)` and `config.topographic.is_none()` return `Err(Error::CError(\"topocentric requires topographic position\".into()))`. Compute `xobs` once and pass it down.\n- `src/calc.rs` — thread the observer offset into `apparent_planet` (calc.rs:897), `apparent_sun` (1023), `apparent_moon` (1088). Add an `xobs: Option<[f64; 6]>` parameter to each (and to `calc_planet`/`calc_sun`/`calc_moon` callers), defaulting to `None` for the geocentric path.\n- `tests/c-gen/gen_calc_topo.c`, `tests/golden-data/calc_topo.json`, `tests/golden/calc_topo.rs` (all NEW); add `mod calc_topo;` to `tests/golden/main.rs`.\n- `docs/codebase-map.md` — add the `topocentric.rs` row + golden rows.\n\n### Implementation steps\nRead `docs/c-ref-topocentric.md` §1, §2, §3 (especially §3.1 and §3.2 — `SEFLG_NONUT` is always forced at these call sites, so implement ONLY the mean-frame path; the true-frame/backward-nutation branch is dead code from `calc()`'s perspective), §4, §5, §6, §7, §8 before coding.\n\n1. **`get_observer`** (§3.2): from `topo` (geographic lon °, lat °, height m) build the observer's geocentric vector: geodetic→geocentric flattening using `EARTH_RADIUS`/`EARTH_OBLATENESS` (values in §3.2 / c-ref-eclipse-solar.md §0), local sidereal time via `crate::sidereal_time::sidereal_time0`, diurnal rotation velocity, then rotate the polar (lon/lat/r) form to cartesian with `math::polar_to_cartesian_with_speed`, and precess date→J2000 (`precession::precess`/`precess_speed`, direction `DateToJ2000`) with **no nutation** (NONUT forced). Follow the exact step order and helper list in §3.2 / §9. Match C's expression grouping (FP fidelity — see §3.2 hazard notes).\n2. **Wire into `apparent_*`** (§4 plan, §5 moon, §6 sun): when `xobs` is `Some`, replace the geocentre with the observer — `xx[i] -= xobs[i]` for position and the aberration term `dx[i] -= (xobs[i] - xobs[i+3])` per §4. NOTE the asymmetry flagged in §6: the Sun path has **no** `xobs2` SPEED2 finite-difference term (planet/moon do). Moon and Sun do NOT call `deflect_light` (§7), so no topocentric deflection hookup there.\n3. **`context.rs` `calc()`**: remove TOPOCTR from `unsupported`; add the `config.topographic.is_none()` guard; compute `xobs = Some(get_observer(...))` when TOPOCTR is set and pass through `calc_inner`→`calc_planet/sun/moon`.\n\n### C reference\n`docs/c-ref-topocentric.md` — §1 (concept), §2 (stateless note), §3.1–§3.2 (get_observer, mean-frame path only), §4/§5/§6 (application per body), §7 (deflection — informational), §8 (SPEED interaction). Constants also in `docs/c-ref-eclipse-solar.md` §0.\n\n### Golden tests\n- **C harness** `tests/c-gen/gen_calc_topo.c` (model on `tests/c-gen/gen_calc.c`): for each observer in `{(8.55,47.37,500), (-74.0,40.7,10), (139.7,35.7,40)}` call `swe_set_topo(lon,lat,alt)`, then for bodies `{SE_SUN, SE_MOON, SE_MERCURY, SE_MARS, SE_VENUS}` × epochs `{2451545.0, 2378496.5, 2469807.5}` call `swe_calc(jd, body, SEFLG_MOSEPH|SEFLG_TOPOCTR|SEFLG_EQUATORIAL|SEFLG_SPEED, xx, serr)`. Emit `{lon,lat,alt,body,jd,xx:[0..6]}`. Build: `cc -O2 -I../swisseph -o tests/c-gen/gen_calc_topo tests/c-gen/gen_calc_topo.c -L../swisseph -lswe -lm && ./tests/c-gen/gen_calc_topo > tests/golden-data/calc_topo.json`.\n- **Rust test** `tests/golden/calc_topo.rs`: construct `Ephemeris` with `config.topographic = Some(TopoPosition{...})` per case, call `calc(jd, body, MOSEPH|TOPOCTR|EQUATORIAL|SPEED)`. Assert positions `assert_f64_eps(.., 1e-9)`, speeds `1e-7` (the documented stateless deflection-speed boundary applies — see CLAUDE.md `<stateless_tolerance>` §1; do NOT chase sub-mas speed deltas).\n- `cargo test --test golden calc_topo -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden calc_topo -- --nocapture` passes (positions 1e-9, speeds 1e-7).\n- Existing geocentric golden tests (`calc`) still pass (the `xobs: None` path must be behaviour-preserving).\n\n### Escape hatch\nIf positions fail > 1e-8 after two debugging attempts, STOP and report failing cases (actual vs expected) + what you tried. For FP-fidelity mismatches read `sweph.c` `swi_get_observer` + the app_pos TOPOCTR branches directly (per CLAUDE.md §c_source_budget). Speed-only deltas near 1e-7 are the documented stateless boundary — accept, don't chase. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo build + cargo clippy --all-targets clean"
+    },
+    {
+      "done": true,
+      "text": "cargo test --test golden calc_topo -- --nocapture passes (positions 1e-9, speeds 1e-7)"
+    },
+    {
+      "done": true,
+      "text": "Existing geocentric golden tests (calc, calc_sweph, calc_jpl) still pass"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Ref doc's line-number pointers (calc.rs:897/1023/1088) covered only the generic apparent_planet/apparent_sun/apparent_moon (sweph/JPL backends). The golden test uses SEFLG_MOSEPH, which routes through the *separate* Moshier-specific calc_planet/calc_sun/calc_moon pipeline (compute_pipeline, heliocentric-only, no earth_bary/sun_bary concept) — that pipeline needed the identical xobs substitution applied independently since it doesn't share code with apparent_*. Threaded a new `config: &EphemerisConfig` parameter through calc_planet/calc_sun/calc_moon, apparent_planet/apparent_sun/apparent_moon, and their calc_*_jpl/calc_*_sweph wrappers so each can call the new topo_offset()/get_observer() at both the current and (for the planet/Moon paths) independently-recomputed retarded epoch, per c-ref-topocentric.md §4/§5's xobs2 pattern. All golden tests (existing + new calc_topo, 45 cases) and clippy passed on the first full run — no debugging iteration needed.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "ad6ad34"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916197332,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 68
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782919971500,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782921124613,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: needs-attention (medium).\n\nFinding: Topocentric golden coverage only exercises the MOSEPH SPEED3 path (tests/golden/calc_topo.rs:60-62). The test hardcodes MOSEPH|TOPOCTR|EQUATORIAL|SPEED, which forces SPEED3 and validates the Moshier 3-point position path — but the generic apparent_planet/apparent_sun/apparent_moon xobs wiring shared by the SWIEPH/JPL backends is never exercised against C golden data, nor are non-SPEED3 flag shapes (e.g. TOPOCTR|SPEED|NOABERR, TRUEPOS). A regression in the generic-path xobs wiring could ship silently.\n\nRecommendation: extend the golden matrix with C-generated SWIEPH/JPL topocentric cases and at least one non-SPEED3 flag shape (TOPOCTR|SPEED|NOABERR) for Sun, Moon, and a planet, before treating TOPOCTR as verified across the full calc pipeline.\n\nCodex independently re-ran cargo build/clippy/golden tests (calc_topo, calc, calc_sweph, calc_jpl) — all passed; the acceptance-criteria claims check out for what they cover, but coverage itself is narrower than the task implies (\"Existing geocentric golden tests still pass\" doesn't establish topocentric correctness on the sweph/JPL path).\n\nFull transcript: /tmp/claude-1000/-home-josh-nhs-soft-astrology-swisseph-rs/c72926ea-dbbf-4cc8-b6e5-3c6d74b87557/scratchpad/codex-review-swisseph-rs-68.log",
+      "ts": 1782921675858
+    },
+    {
+      "author": "agent",
+      "text": "Filed follow-up swisseph-rs/80 to extend calc_topo golden coverage to SWIEPH/JPL backends and non-SPEED3 flag shapes, per the Codex review finding above.",
+      "ts": 1782921734406
+    }
+  ],
+  "created_at": 1782916197332,
+  "updated_at": 1782921124613,
+  "completed_at": 1782921124613,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-87ad-7053-bf01-83096b5fda8c",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/70",
+      "target": "swisseph-rs/68",
+      "note": null,
+      "created_at": 1782916482989
+    },
+    {
+      "id": "019f1e1a-92b1-7693-9799-2a611ff39c90",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/72",
+      "target": "swisseph-rs/68",
+      "note": null,
+      "created_at": 1782916485809
+    },
+    {
+      "id": "019f1e1a-e5e4-7a32-aa59-4f561c485d93",
+      "edge_type": "refines",
+      "source": "swisseph-rs/68",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916507108
+    },
+    {
+      "id": "019f1e6a-a674-7ef0-a0e9-2e1950a0ddaf",
+      "edge_type": "relates_to",
+      "source": "swisseph-rs/80",
+      "target": "swisseph-rs/68",
+      "note": "Follow-up: extends golden coverage gap found in Codex review of 68",
+      "created_at": 1782921733748
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "id": "019efa43-01dd-70e3-a33d-695ee5b5b408",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/7",
+  "sequence_number": 7,
+  "title": "Plan: Swiss Ephemeris .se1 file backend",
+  "description": "Port the Swiss Ephemeris binary file reader: sweph.c segment reader (~1700 lines relevant) + sweephe4.c (~702 lines). First file-based backend.\n\n## .se1 file format (Chebyshev, catalogue-internal §4.5)\n\n### Segment loading: get_new_segment() (sweph.c:4367)\n- Segment selection: iseg = (tjd − tfstart) / dseg; fpos = lndx0 + iseg×3 (3-byte offset per segment)\n- **Coefficient unpacking** — 4+2 packing modes by header byte:\n  | nsize | Format | Bytes/coeff |\n  |-------|--------|------------|\n  | 0-3 | Integer packing | 1-4 bytes |\n  | 4 | Half-byte (nibbles) | 0.5 bytes |\n  | 5 | Quarter-byte | 0.25 bytes |\n- Unpacked: coeff = ±((packed/2) / 1e9 × rmax/2)\n- Three coordinate sets (X, Y, Z) packed separately\n\n### Polynomial evaluation: sweph() (sweph.c:2285)\n```\nt = 2 × (tjd − tseg0) / dseg − 1     // normalize to [-1, 1]\nposition[i] = swi_echeb(t, segp + i×ncoe, neval)\nvelocity[i] = swi_edcheb(t, segp + i×ncoe, neval) / dseg × 2\n```\n\n### File management\n- `fidat[SEI_NEPHFILES]` (7 slots) for open files\n- Each `file_data`: filename, version, body list, time range, byte order flag, FILE pointer\n- Path resolution: check ephepath, check current dir, check compiled-in default\n\n## EP4 file format (sweephe4.c, catalogue-internal §4.2)\n- Files named `sep4_<N>`, 10,000-day coverage per file, 10-day records\n- First/second difference compression: p₀ full value, d₁ first difference, pd2[8] second differences\n- Reconstruction: dᵢ = dᵢ₋₁ + pd2[i-2]×scale; pᵢ = pᵢ₋₁ + dᵢ\n- **Everett 5th-order interpolation** (Pottenger): 6-point (n-2 through n+3), using central differences\n- Static buffer `lon[14][20]` for 20 days — needs to become part of a reader struct\n\n## Rust design\n```rust\nstruct SwissEphReader {\n    files: Vec<Option<SwissEphFile>>,   // replaces fidat[7]\n    ephe_path: PathBuf,\n}\nstruct SwissEphFile {\n    file: BufReader<File>,\n    header: FileHeader,\n    planets: Vec<PlanetFileData>,       // replaces plan_data file metadata fields\n}\nstruct PlanetFileData {\n    body: Body,\n    ncoe: usize,\n    segment_days: f64,\n    time_range: (f64, f64),\n    current_segment: Option<LoadedSegment>,\n}\nstruct LoadedSegment {\n    tseg0: f64,\n    tseg1: f64,\n    coeffs: Vec<f64>,   // 3 × ncoe\n    neval: usize,\n}\n```\n\nByte-order handling: use `byteorder` crate (ReadBytesExt).\n\n## Testing\n- setest/suite_01_calc.c with SEFLG_SWIEPH flag\n- Compare Moshier vs SwissEph output for overlapping date ranges (should agree to ~0.001\")\n- Ephemeris data files in ~/nhs/soft/astrology/swisseph/ephe/ (sepl_*.se1, semo_*.se1, seas_*.se1)\n\n## C source reference\n- sweph.c:2285 — sweph() main entry for Swiss Eph file evaluation\n- sweph.c:4367 — get_new_segment() segment loading + coefficient unpacking\n- sweephe4.c:1-702 — EP4 format reader, Everett interpolation (inpolq function)\n- sweephe4.h:1-239 — EP4 data structures\n\n## Dependencies\n- Phase 0 (types), Phase 2 (Chebyshev evaluation), Phase 5 (integration into calc dispatch)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Decomposed into 4 sub-tasks (swisseph-rs/37-40) on arc ~7 implement phase.\n\n**Stale assumptions corrected from original description:**\n\n1. **Mutable state in proposed design**: The draft `SwissEphReader` with `BufReader<File>` and `current_segment: Option<LoadedSegment>` violates stateless design (Ephemeris takes &self only). Replaced with memory-mapped files (`memmap2` crate) providing immutable `&[u8]` access. SwissEphFile is Send+Sync.\n\n2. **File management slots**: The C-style `files: Vec<Option<SwissEphFile>>` (7 mutable file descriptor slots) replaced with immutable files opened at construction time. No mutable file cursors.\n\n3. **Segment caching**: The original description implied per-body segment caching inside the backend. Per architecture, caching is a dispatcher concern (swisseph-rs/6), not the file backend. Segments are loaded on demand from mmap'd bytes as pure functions.\n\n4. **Light-time iteration**: Not mentioned in original but critical — SwissEph uses niter=1 (Newton step, re-evaluate at retarded time) vs Moshier's niter=0 (linear approximation). Sub-task 39 includes refactoring calc_planet/calc_sun/calc_moon to support this.\n\n5. **EMB→Earth**: Not in original design. .se1 files store EMB, not Earth. Earth = EMB - Moon/(EARTH_MOON_MRAT+1). Requires reading both sepl and semo files for any geocentric calculation.\n\n6. **EP4 deprioritized**: No EP4 files available in ephe directory. Sub-task 40 tagged low-priority and depends on obtaining test files.\n\n**Sub-task chain:**\n- swisseph-rs/37: SE1 types, header parsing, mmap (no deps)\n- swisseph-rs/38: Segment unpacking + position eval (depends on 37)\n- swisseph-rs/39: File manager + sweplan + calc pipeline integration (depends on 38)\n- swisseph-rs/40: EP4 format reader (depends on 39, low priority)",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315155933,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 7
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782565510371,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782565518847,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315155933,
+  "updated_at": 1782565518847,
+  "completed_at": 1782565518847,
+  "arc_id": "019efa3b-f28b-7c61-ad8d-9a44bb98cae3",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f092e-a1a0-7d40-8c57-a5a59797c6c1",
+      "edge_type": "refines",
+      "source": "swisseph-rs/37",
+      "target": "swisseph-rs/7",
+      "note": null,
+      "created_at": 1782565478816
+    },
+    {
+      "id": "019f092e-a582-7401-ae16-5eeba4db52ea",
+      "edge_type": "refines",
+      "source": "swisseph-rs/38",
+      "target": "swisseph-rs/7",
+      "note": null,
+      "created_at": 1782565479810
+    },
+    {
+      "id": "019f092e-a982-7963-8bcd-8a9e033e15bd",
+      "edge_type": "refines",
+      "source": "swisseph-rs/39",
+      "target": "swisseph-rs/7",
+      "note": null,
+      "created_at": 1782565480834
+    },
+    {
+      "id": "019f092e-ad44-70e1-8b12-ebe2299884c8",
+      "edge_type": "refines",
+      "source": "swisseph-rs/40",
+      "target": "swisseph-rs/7",
+      "note": null,
+      "created_at": 1782565481796
+    }
+  ]
+}

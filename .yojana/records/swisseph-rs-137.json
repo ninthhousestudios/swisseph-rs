@@ -1,0 +1,85 @@
+{
+  "id": "019f2f7f-5a68-7e00-8794-eb40253f8897",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/137",
+  "sequence_number": 137,
+  "title": "FFI 7/8: heliacal family — events, phenomena, visibility limit, heliacal angle",
+  "description": "### Summary\nFFI wrappers for the heliacal-visibility surface (swehel.c family). The C API's conventions here are idiosyncratic — dgeo[3]/datm[4]/dobs[6] input arrays, big dret output arrays, object name as string — and the Dart binding already speaks them; mirror C's array shapes. Slot meanings are documented on the Rust structs (src/heliacal.rs) and docs/c-ref-heliacal*.md. Read docs/ffi-design.md and the established swisseph-ffi patterns first.\n\n### Files\n- `swisseph-ffi/src/heliacal.rs` (new module), header regen, `swisseph-ffi/tests/heliacal.rs`\n\n### Functions to add\n1. `swisseph_heliacal_ut(h, tjd_start, dgeo: *const f64 /*[3]*/, datm: *const f64 /*[4]*/, dobs: *const f64 /*[6]*/, object_name: *const c_char, event_type: i32, helflag: i32, dret: *mut f64 /*[50]*/) -> i32` (context.rs:899). HeliacalEvent {start_visible, optimum_visibility, end_visible} → dret[0..2], rest zeroed.\n2. `swisseph_heliacal_pheno_ut(..., darr: *mut f64 /*[50]*/)` (context.rs:871). HeliacalPheno's 28 fields → darr[0..27] in C's documented slot order — take the order from the HeliacalPheno struct field docs (they were written to mirror C's darr indices; verify against docs/c-ref-heliacal*.md, not from memory).\n3. `swisseph_vis_limit_mag(h, tjd_ut, dgeo, datm, dobs, object_name, dret: *mut f64 /*[8]*/) -> i32` (context.rs:801). VisLimitResult → dret[0..7]; the return code carries the vision-flags bits (positive), mirroring C.\n4. `swisseph_heliacal_angle(h, tjd_ut, dgeo, datm, dobs, helflag, mag, azi_obj, azi_sun, azi_moon, alt_moon, dret: *mut f64 /*[3]*/)` (context.rs:850) — HeliacalAngleResult → dret[0..2].\n5. `swisseph_topo_arcus_visionis(h, ...)` (context.rs:828) — mirror the lib signature.\n6. Validate inputs: null array pointers → InvalidArg; object_name UTF-8-validated; event_type via HeliacalEventType TryFrom (unknown → InvalidArg).\n\n### Tests\nParity vs lib (Moshier — heliacal golden tests already run Moshier-only, reuse their parameter conventions from tests/golden/heliacal.rs): heliacal_ut for Venus MorningFirst from a known epoch, dret[0..2] bitwise; heliacal_pheno_ut all 28 slots bitwise vs struct fields; vis_limit_mag incl. flag bits in the return; heliacal_angle; error paths (bad object name, bad event type). These searches are slow — keep to 1-2 epochs per function.\n\n### Acceptance criteria\n- `cargo test -p swisseph-ffi` and root `cargo test` pass; header freshness green\n- Header documents every dret/darr slot index and the input-array element meanings (dgeo/datm/dobs), with units\n\n### Escape hatch\nIf a HeliacalPheno field's C darr index is ambiguous between the struct docs and the c-ref doc, read swehel.c directly to settle it (per the CLAUDE.md c-source policy for golden-failure-grade detail) — do not guess slot order.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward implementation following established FFI patterns from pheno.rs/eclipse.rs. Key design decision: C's combined iflag (ephemeris source bits 0-2 + heliacal flags bits 7+) split via `split_helflag()` into separate CalcFlags and HeliacalFlags, matching how the Rust lib API takes them as separate parameters. vis_limit_mag returns vision-mode flag bits as the positive return code (mirroring C), while errors remain negative. All 5 functions + 4 error-path tests passed on first attempt.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "a4c2d02"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208303208,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 137
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783266641655,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783266957769,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: 2 findings, both fixed in 24cae4d.\\n\\n1. [high] vis_limit_mag returned 0 (photopic success) for below-horizon objects — C returns -2. Fixed: check result.below_horizon, return -2. Added regression test.\\n2. [medium] datm/dobs doc slots wrong — datm[2] was \\\"humidity 0-1\\\" (should be \\\"%\\\"), dobs[3..5] had aperture/magnification swapped and slot 5 labeled as \\\"0\\\" (should be \\\"transmission\\\"). Fixed across all 5 functions + header regen.",
+      "ts": 1783267479896
+    }
+  ],
+  "created_at": 1783208303208,
+  "updated_at": 1783266957769,
+  "completed_at": 1783266957769,
+  "edges": [
+    {
+      "id": "019f2f7f-ced1-7243-ac3e-18192b60ef79",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/137",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208333009
+    },
+    {
+      "id": "019f2f7f-f922-7d12-a0b4-2bf210e31627",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/137",
+      "note": null,
+      "created_at": 1783208343842
+    }
+  ]
+}

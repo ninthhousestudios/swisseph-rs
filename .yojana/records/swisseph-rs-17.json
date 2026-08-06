@@ -1,0 +1,70 @@
+{
+  "id": "019efb3e-df1a-73f0-9710-832bcdde326b",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/17",
+  "sequence_number": 17,
+  "title": "Harden Body parameterized variants with range validation",
+  "description": "Codex review finding (swisseph-rs/1): the parameterized Body variants (Fictitious, Asteroid, PlanetMoon, Comet) accept unchecked i32 payloads. Callers can construct invalid values that bypass TryFrom's range checks — e.g. Body::Asteroid(-10000).to_raw_id() aliases SE_SUN (0), Body::Fictitious(23) emits a gap ID.\n\nFix: validate ranges in constructors or to_raw_id(). Either checked constructor functions that return Result, or validate in to_raw_id() itself.",
+  "category": "bug",
+  "status": "done",
+  "slice_type": null,
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "Body::Fictitious, Asteroid, PlanetMoon, Comet cannot be constructed with out-of-range payloads"
+    },
+    {
+      "done": false,
+      "text": "to_raw_id() cannot produce values that alias named body IDs (0-22) or fall in gaps (23-39)"
+    },
+    {
+      "done": false,
+      "text": "Existing TryFrom<i32> remains the canonical safe entry point from C IDs"
+    },
+    {
+      "done": false,
+      "text": "cargo test passes with new validation tests"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Introduced four newtypes (FictitiousId, AsteroidId, PlanetMoonId, CometId) with private inner fields and checked constructors. Added convenience constructors on Body (Body::fictitious(), etc.). TryFrom uses module-private field access internally. 9 new tests covering valid ranges, rejection of out-of-range values, aliasing prevention, and TryFrom roundtrips. No divergence from plan.",
+  "reproduction": null,
+  "root_cause": "Parameterized Body enum variants (Fictitious(i32), Asteroid(i32), etc.) had public i32 payloads with no range validation. Callers could construct values bypassing TryFrom's range checks — e.g. Body::Asteroid(-10000).to_raw_id() produced 0, aliasing SE_SUN. The scaffold established TryFrom as the safe entry point but left direct construction unchecked.",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "07077b8"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782331662106,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 17
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782331860068,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782331662106,
+  "updated_at": 1782331860068,
+  "completed_at": 1782331860068,
+  "arc_id": "019efa3b-90ee-7881-84a2-7de320bd1a9b",
+  "arc_phase": "implement",
+  "edges": []
+}

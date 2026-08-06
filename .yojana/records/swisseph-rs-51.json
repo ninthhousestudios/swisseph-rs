@@ -1,0 +1,109 @@
+{
+  "id": "019f14c9-b617-7801-80d3-793218ae5bb1",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/51",
+  "sequence_number": 51,
+  "title": "Wire SEFLG_SIDEREAL into calc + default-branch ayanamsa projection",
+  "description": "### Summary\nStop rejecting `SEFLG_SIDEREAL` in `Ephemeris::calc` and apply the default-branch sidereal projection (subtract the ayanamsa from ecliptic longitude/speed) to the computed position. This makes ~31 ayanamsa modes produce sidereal coordinates via `swe_calc`. The ECL_T0 / SSY_PLANE projection branches are the NEXT sub-task; this task errors cleanly on them.\n\n### Architecture notes\n- Stateless, pure pipeline. The projection is a post-step on the `[f64;24] xreturn` array produced by `calc_inner`.\n- `xreturn` layout (from app_pos_rest, src/calc.rs:222-298): `[0..6]` ecliptic polar (lon,lat,dist + speeds) in DEGREES; `[6..12]` ecliptic cartesian; `[12..18]` equatorial polar in DEGREES; `[18..24]` equatorial cartesian. The default sidereal branch only adjusts the ecliptic representation; equatorial output stays tropical (matches C).\n- Depends on the scalar ayanamsa from swisseph-rs/50.\n\n### Files\n- **src/calc.rs**: add `pub fn apply_sidereal_default(xreturn: &mut [f64;24], daya: [f64;2], has_speed: bool)`.\n- **src/context.rs**: in `calc()` remove SIDEREAL from the rejected-flags set and add the projection dispatch; handle SIDEREAL in `calc_speed3` too.\n- **tests/c-gen/gen_ayanamsa_calc.c**, **tests/golden-data/ayanamsa_calc.json**, **tests/golden/ayanamsa_calc.rs**, add `mod ayanamsa_calc;` to **tests/golden/main.rs**.\n\n### Implementation steps\n\n1. **`apply_sidereal_default(xreturn, daya, has_speed)`** in src/calc.rs. Cite docs/c-ref-ayanamsa.md §\"Sidereal Projection in the Calc Pipeline\" Branch 3. Our xreturn polar is in DEGREES (C's was radians at that point), so subtract degrees directly:\n```rust\nxreturn[0] = normalize_degrees(xreturn[0] - daya[0]);\nif has_speed { xreturn[3] -= daya[1]; }\n// Recompute ecliptic cartesian [6..12] from the adjusted polar (deg→rad)\nlet polar = [\n    xreturn[0] * DEGTORAD, xreturn[1] * DEGTORAD, xreturn[2],\n    xreturn[3] * DEGTORAD, xreturn[4] * DEGTORAD, xreturn[5],\n];\nlet cart = polar_to_cartesian_with_speed(polar);\nxreturn[6..12].copy_from_slice(&cart);\n```\n   `polar_to_cartesian_with_speed` already exists in src/math.rs. Leave `[12..24]` (equatorial) untouched.\n\n2. **calc() dispatch** (src/context.rs ~line 109-132). Currently:\n```rust\nlet unsupported = flags & (CalcFlags::TOPOCTR | CalcFlags::SIDEREAL);\nif !unsupported.is_empty() { return Err(Error::UnsupportedFlags(unsupported)); }\n```\n   Change the rejected set to just `CalcFlags::TOPOCTR`. After computing `xreturn`/`flags_used` from `calc_inner` (the non-SPEED3 path), and BEFORE `extract_for_body`, insert:\n```rust\nlet mut xreturn = xreturn;\nif flags.contains(CalcFlags::SIDEREAL) && body != Body::EclipticNutation {\n    self.apply_sidereal(&mut xreturn, jd_tt, body, flags_used)?;\n}\n```\n   Add a private helper `Ephemeris::apply_sidereal(&self, xreturn: &mut [f64;24], jd_tt: f64, body: Body, flags: CalcFlags) -> Result<(), Error>`:\n```rust\nlet bits = self.config.sidereal_bits;\nif bits.intersects(SiderealBits::ECL_T0 | SiderealBits::SSY_PLANE) {\n    // ECL_T0 / SSY_PLANE projection implemented in the next sub-task.\n    return Err(Error::UnsupportedFlags(CalcFlags::SIDEREAL));\n}\nlet daya = crate::ayanamsa::get_ayanamsa_with_speed(\n    &self.config, jd_tt, flags, &self.config.astro_models)?;\ncrate::calc::apply_sidereal_default(xreturn, daya, flags.contains(CalcFlags::SPEED));\nOk(())\n```\n   (`get_ayanamsa_with_speed` returns `Err(SiderealModeRequiresFixedStars)` for deferred modes, which propagates correctly.)\n\n3. **calc_speed3 + SIDEREAL** (src/context.rs:318-333). The 3-point path calls `calc_inner` directly and bypasses step 2. After `calc_speed_3point(&mut x1, ...)` and before `extract_for_body`, apply the same projection to `x1` if SIDEREAL set and not ECL_T0/SSY: call `self.apply_sidereal(&mut x1, jd_tt, body, flags_used)?`. The ayanamsa speed term (daya[1]) refines x1's already-computed 3-point speed; this matches C subtracting daya[1] from the speed component.\n\n### C reference\ndocs/c-ref-ayanamsa.md §\"Sidereal Projection in the Calc Pipeline\" (Branch 3 / default). Note the save/restore `xxsv` hack in the C source is for a global-cache artifact and is NOT needed in the stateless port.\n\n### Golden tests\n**C harness** `tests/c-gen/gen_ayanamsa_calc.c` (compile `cc -Wall -I../../../swisseph -o gen_ayanamsa_calc gen_ayanamsa_calc.c ../../../swisseph/libswe.a -lm`). For default-branch modes only — indices {0 (Fagan-Bradley), 1 (Lahiri), 3 (Raman), 5 (Krishnamurti), 26 (SS_Citra), 43 (Lahiri_1940)} × bodies {SE_SUN, SE_MOON, SE_MARS, SE_JUPITER, SE_MEAN_NODE} × epochs {2415020.0, 2433282.5, 2451545.0, 2455197.5, 2458849.5}:\n  - `swe_close(); swe_set_ephe_path(NULL); swe_set_sid_mode(index, 0, 0);`\n  - `double xx[6]; swe_calc(tjd, body, SEFLG_MOSEPH|SEFLG_SIDEREAL|SEFLG_SPEED, xx, serr);`\n  - Emit ecliptic `lon=xx[0], lat=xx[1], dist=xx[2], lon_speed=xx[3]`.\n  - Add a small second group with `SEFLG_EQUATORIAL` for Sun at J2000 under Lahiri to confirm equatorial output stays tropical (compare against the Rust equatorial result, same flags).\n  Emit `{\"cases\":[{\"index\":..,\"body\":..,\"tjd\":..,\"lon\":..,\"lat\":..,\"dist\":..,\"lon_speed\":..}, ...], \"equ\":[...]}`.\n**Rust test** `tests/golden/ayanamsa_calc.rs`: build `Ephemeris` with default (Moshier) config + `set_sidereal_mode(index,0,0)`; map body ints to `Body`; call `eph.calc(tjd, body, MOSEPH|SIDEREAL|SPEED)`; assert `lon/lat/dist` eps 1e-9, `lon_speed` eps 1e-7. (Pin `tidal_acceleration = Some(TIDAL_DE404)` if delta-T-driven mismatch, as in sidereal_time.rs.)\n\n### Acceptance criteria\n- `cargo test --test golden ayanamsa_calc -- --nocapture` passes.\n- Existing `cargo test --test golden calc` still passes (SIDEREAL not set there → no behavior change).\n- `cargo clippy --all-targets -- -D warnings` clean.\n\n### Escape hatch\nIf golden positions fail > 1e-8 after two attempts, STOP and report failing index/body/epoch, actual vs expected, and what you tried. Likely causes: (1) subtracting daya in radians vs degrees (our xreturn polar is DEGREES — subtract degrees); (2) forgetting to recompute ecliptic cartesian (breaks XYZ); (3) ayanamsa value itself wrong (verify swisseph-rs/50 golden still passes first). Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo test --test golden ayanamsa_calc -- --nocapture passes"
+    },
+    {
+      "done": true,
+      "text": "Existing cargo test --test golden calc still passes (SIDEREAL not set there)"
+    },
+    {
+      "done": true,
+      "text": "cargo clippy --all-targets -- -D warnings clean (no new warnings from this task)"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "68d33d1"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "ayanamsa"
+  ],
+  "history": [
+    {
+      "ts": 1782760191511,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 51
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782761705536,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782762108769,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, batch 49-52): approve with notes. Default-branch projection correct; ayanamsa_calc golden + equatorial-stays-tropical tests pass. FOLLOW-UP swisseph-rs/53: the calc_speed3 sidereal hook added here is fine for default-branch modes, but combined with the ECL_T0/SSY branches (52) it returns lon_speed=0.0 — the 3-point speed is overwritten by a projection of x2000 whose velocity is zero on the SPEED3 path. Untested combo, obscure flag, but a silent wrong answer.",
+      "ts": 1782764908169
+    }
+  ],
+  "created_at": 1782760191511,
+  "updated_at": 1782762108769,
+  "completed_at": 1782762108769,
+  "arc_id": "019efa3c-0958-7191-8176-140a89304f9a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f14ca-bb54-7c40-8fe8-39df63bed710",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/51",
+      "target": "swisseph-rs/50",
+      "note": null,
+      "created_at": 1782760258388
+    },
+    {
+      "id": "019f14ca-c1d1-7912-a0a4-5beae7284ea0",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/52",
+      "target": "swisseph-rs/51",
+      "note": null,
+      "created_at": 1782760260049
+    },
+    {
+      "id": "019f14ca-cc38-7622-aca9-b82969fb8e8a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/51",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760262712
+    }
+  ]
+}

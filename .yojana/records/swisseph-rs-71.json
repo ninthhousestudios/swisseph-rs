@@ -1,0 +1,88 @@
+{
+  "id": "019f1e17-8c64-78a0-ae99-3e0a2857456d",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/71",
+  "sequence_number": 71,
+  "title": "RSE 4/12: Rise/set fast algorithm + swe_rise_trans dispatcher",
+  "description": "### Summary\nAdd the fast rise/set algorithm (`rise_set_fast`, for |lat|≤60, ≤65 for the Sun) and the top-level `swe_rise_trans` dispatcher that chooses fast vs full path. Builds directly on RSE 3.\n\nDepends on **RSE 3** (full algorithm, `RiseSetResult`, `find_maximum`, azalt already wired).\n\n### Files\n- `src/riseset.rs` — add `rise_set_fast` + the dispatch helper.\n- `src/context.rs` — `pub fn rise_trans(&self, tjd_ut, body, starname: Option<&str>, epheflag, rsmi: RiseSetFlags, geopos:[f64;3], atpress, attemp) -> Result<RiseSetResult, Error>` (the public `swe_rise_trans` equivalent; picks fast vs full).\n- `tests/c-gen/gen_riseset.c` — add key `fast`; regenerate `riseset.json`.\n- `tests/golden/riseset.rs` — add `#[test] fast`.\n- `docs/codebase-map.md` — update the riseset row.\n\n### Implementation steps\nRead `docs/c-ref-riseset.md` §3 (`rise_set_fast`), §3.4 (`get_sun_rad_plus_refr`), §4 (`swe_rise_trans` dispatcher eligibility).\n\n1. **`rise_set_fast`** (§3): semi-diurnal-arc estimate (§3.2, the `run_rise_again:` retry-next-day loop) + Newton iteration (§3.3, 2 iterations general / 4 for finer). Target altitude via `get_sun_rad_plus_refr` (§3.4: disc radius + refraction + `rsmi` bits). Uses `calc_ut(... TOPOCTR)` + `swe_azalt`. NOTE (§3): the fast path NEVER returns circumpolar `-2` — it just fails to converge / retries; document that behaviour difference in a comment.\n2. **`swe_rise_trans` dispatcher** (§4): eligible for fast path when NOT `FORCE_SLOW` and `(|geolat| ≤ 60 || (body==Sun && |geolat| ≤ 65))` and only RISE/SET requested (not transit). Otherwise delegate to `rise_trans_true_hor` (RSE 3). Give `rise_trans` `horhgt = 0.0` when delegating.\n\n### C reference\n`docs/c-ref-riseset.md` §3, §3.4, §4.\n\n### Golden tests\n- **C harness** add to `tests/c-gen/gen_riseset.c` key `fast`: for `geopos ∈ {(8.55,47.37,500), (0,0,0), (139.7,35.7,40)}` (all |lat|≤60), `body ∈ {SE_SUN, SE_MOON}`, `tjd_ut ∈ {2451545.0, 2459000.5}`, `rsmi ∈ {SE_CALC_RISE, SE_CALC_SET}` (NO force-slow bit), call `swe_rise_trans(...)`. Emit `{geopos,body,tjd_ut,rsmi,retval,tret0}`. Regenerate `riseset.json`.\n- **Rust test** `#[test] fast`: assert `rise_trans(...)` `tret0` via `assert_f64_eps(.., 1e-6)`. Cross-check: for the same non-polar inputs, fast and full should agree to ~1e-5 day (optional sanity assert).\n- `cargo test --test golden riseset -- --nocapture` passes (both `full` and `fast`).\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden riseset -- --nocapture` passes.\n\n### Escape hatch\nIf fast-path times fail > 1e-4 day after two attempts, STOP and report. Read `swecl.c:4203–4383` directly. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented rise_set_fast (semi-diurnal-arc estimate + 2/4-iteration Newton refinement) in riseset.rs and Ephemeris::rise_trans (swe_rise_trans dispatcher) in context.rs, per docs/c-ref-riseset.md §3/§4. One ambiguity in the ref doc: it didn't state the exact ephemeris-source bitmask for iflagtopo's base; reused the existing IFLAG_KEEP_MASK constant (same mask as the full algorithm) since rise_set_fast is the same C translation unit/pattern -- reasonable inference, not verified against raw C source per the project's C-source budget (ref docs only, C source reserved for golden-test failures). All golden tests passed on the first run, so no fidelity issue surfaced. Added a 4th \"fast\" key to gen_riseset.c/riseset.json (24 cases, 3 non-polar geopos x 2 bodies x 2 epochs x RISE/SET, no FORCE_SLOW) plus a same-input fast-vs-full cross-check assertion in the Rust test. Updated docs/codebase-map.md's riseset entries; opportunistically backfilled the pre-existing gap where the dip/mtrans_flags golden keys (swisseph-rs/70 follow-up) were never added to the map.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "8ad41d9"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916287588,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 71
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782935527273,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782935532803,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Codex review: verdict needs-attention, but the single finding is a false positive on verification.\n\nCodex flagged: `fast_eligible` in `Ephemeris::rise_trans` (src/context.rs:537-542) checks `rsmi.intersects(RISE|SET)` without excluding MTRANSIT/ITRANSIT bits, so a caller combining e.g. `RISE|MTRANSIT` would incorrectly take the fast path instead of delegating to `calc_mer_trans`.\n\nVerified against `../swisseph/swecl.c:4372-4378` (actual `swe_rise_trans` C source, not the ref doc paraphrase): the C dispatcher's eligibility check is `(rsmi & (SE_CALC_RISE|SE_CALC_SET))` — identical logic, no exclusion of transit bits either. RISE/SET/MTRANSIT/ITRANSIT are documented as mutually-exclusive selectors (caller contract), not defensively enforced by the dispatcher in C. The Rust port is bit-exact faithful to this C behavior, including its permissiveness on misuse via combined flags. Not a bug — no change needed.\n\nVerdict: approve. No other findings surfaced.",
+      "ts": 1782937171617
+    }
+  ],
+  "created_at": 1782916287588,
+  "updated_at": 1782935532803,
+  "completed_at": 1782935532803,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-8ebf-7232-abd8-a4471822d5ee",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/71",
+      "target": "swisseph-rs/70",
+      "note": null,
+      "created_at": 1782916484799
+    },
+    {
+      "id": "019f1e1a-f398-72d0-99c8-09b7cb0e863f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/71",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916510616
+    }
+  ]
+}

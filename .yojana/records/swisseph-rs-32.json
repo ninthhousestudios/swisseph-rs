@@ -1,0 +1,129 @@
+{
+  "id": "019f0452-31be-7492-a020-32e4b8062c3c",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/32",
+  "sequence_number": 32,
+  "title": "Body dispatch, flag validation, and mean node/apogee formulas",
+  "description": "Implement the core dispatch logic in src/calc.rs: flag validation, body routing, and mean node/apogee formulas.\n\n## 1. `plaus_iflag()` (sweph.c:~200–308)\n\nFlag validation and normalization. Key rules:\n- Mutual exclusions: HELCTR+TOPOCTR → clear TOPOCTR. BARYCTR+TOPOCTR → clear TOPOCTR. HELCTR+BARYCTR → clear BARYCTR.\n- Body restrictions: Moon/nodes can't be heliocentric (silently clear HELCTR). Earth only meaningful with HELCTR or BARYCTR.\n- Default ephemeris: if none of JPLEPH/SWIEPH/MOSEPH set → add DEFAULTEPH (currently SWIEPH, but for Moshier-only phase, force MOSEPH).\n- TRUEPOS implies NOABERR+NOGDEFL (set them if not already).\n- SPEED: if neither SPEED nor SPEED3 set, add SPEED (always compute speed by default — matches C behavior).\n- J2000 implies NONUT.\n- ICRS implies J2000+NONUT.\n\n## 2. `swecalc()` body dispatcher\n\nRoutes by Body enum variant:\n| Body | Action |\n|------|--------|\n| EclipticNutation (−1) | Return obliquity (ε, sin ε, cos ε) + nutation (Δψ, Δε) in CalcResult.data. No corrections pipeline. |\n| Sun | Moshier backend → app_pos_etc_sun |\n| Moon | Moshier backend → app_pos_etc_moon |\n| Mercury–Pluto | Moshier backend → app_pos_etc_plan |\n| Earth | Return [0;6] for geocentric (Earth is the observer). Or heliocentric Earth if HELCTR. |\n| MeanNode | swi_mean_node polynomial formula |\n| MeanApogee | swi_mean_apog polynomial formula |\n| TrueNode, OscuApogee, IntpApogee | Return Error::EphemerisNotAvailable (needs lunar_osc_elem, deferred) |\n| Asteroid, Comet, Fictitious, PlanetMoon | Return Error::EphemerisNotAvailable (needs file backends, deferred) |\n| Chiron, Pholus, Ceres, etc. | Return Error::EphemerisNotAvailable (needs file backends) |\n\nThe dispatcher needs to compute shared prerequisites once:\n- Obliquity at J2000 (constant, could be precomputed)\n- Obliquity at date\n- Nutation at date\n- Earth position (needed for aberration/deflection of all planets)\n\n## 3. `swi_mean_node(jd: f64) -> [f64; 6]`\n\nMean longitude of Moon's ascending node, polynomial in T = (jd − J2000) / 36525:\n- Extract exact coefficients from c-ref-calc.md\n- Speed from two-point difference at NODE_CALC_INTV_MOSH (0.1 days)\n- Output in ecliptic polar: [lon°, 0°, 1.0, speed_lon, 0, 0]\n\n## 4. `swi_mean_apog(jd: f64) -> [f64; 6]`\n\nMean longitude of Moon's apogee (Black Moon Lilith), polynomial in T:\n- Extract exact coefficients from c-ref-calc.md\n- Speed from two-point difference at NODE_CALC_INTV_MOSH\n- Add constant for mean distance if needed\n- Output in ecliptic polar\n\n## Constants to add\n- `NODE_CALC_INTV: f64 = 0.0001` — node speed interval for file backends\n- `NODE_CALC_INTV_MOSH: f64 = 0.1` — node speed interval for Moshier\n- `NUT_SPEED_INTV: f64 = 0.0001` — nutation speed interval\n\nC source reference: docs/c-ref-calc.md",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "plaus_iflag handles all mutual exclusions and body restrictions from C"
+    },
+    {
+      "done": true,
+      "text": "swecalc routes all Moshier-supported bodies correctly"
+    },
+    {
+      "done": true,
+      "text": "Unsupported bodies return appropriate Error variants"
+    },
+    {
+      "done": true,
+      "text": "Mean node/apogee match C output at 11+ epochs (golden tests)"
+    },
+    {
+      "done": true,
+      "text": "ECL_NUT path returns correct obliquity and nutation values"
+    },
+    {
+      "done": true,
+      "text": "Flag normalization golden tests verify C-matching flag output for edge cases"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": "## Approach\\n\\nThree functional pieces: (1) mean node and mean apogee formulas with correction tables, (2) ECL_NUT dispatch path, (3) improved body routing in `Ephemeris::calc()`. The mean node/apogee work is the bulk — it requires two ~304-entry correction tables and implementing the computation + pipeline functions. The existing `mean_elements()` in `moshier/moon.rs` is reusable. The existing `app_pos_rest()` in `calc.rs` is also reusable — `app_pos_etc_mean` in C just converts ecliptic→equatorial and delegates to `app_pos_rest`.\\n\\nThe `plaus_iflag` AC is already satisfied by existing code for Moshier scope — the current implementation covers all rules in the C ref doc. Body-specific restrictions (HELCTR/BARYCTR rejection for mean elements) are handled in the dispatcher.\\n\\n**C ref doc**: `docs/c-ref-mean-elements.md` — covers `app_pos_etc_mean()`, correction tables, and all mean element functions. Use this, not the C source.\\n\\n## Files\\n\\n- **Modify**: `src/moshier/moon_tables.rs` — add `CORR_MEAN_NODE` and `CORR_MEAN_APOG` correction tables (304 entries each)\\n- **Modify**: `src/moshier/moon.rs` — add `pub fn mean_node()` and `pub fn mean_apogee()`, plus `corr_mean_node()` and `corr_mean_apog()` helpers\\n- **Modify**: `src/constants.rs` (~line 156) — add `MEAN_NODE_SPEED_INTV`\\n- **Modify**: `src/calc.rs` — add `calc_mean_node()`, `calc_mean_apogee()`, `calc_ecl_nut()`\\n- **Modify**: `src/context.rs` (~line 89) — improve body dispatch in `Ephemeris::calc()`\\n- **Create**: `tests/c-gen/gen_mean_elements.c` — C harness for mean node/apogee + ECL_NUT golden data\\n- **Create**: `tests/golden-data/mean_elements.json` — generated reference data\\n- **Create**: `tests/golden/mean_elements.rs` — Rust golden tests\\n- **Modify**: `tests/golden/main.rs` — add `mod mean_elements;`\\n\\n## Steps\\n\\n### Step 1: Add missing constants\\n\\n`src/constants.rs` (after `NUT_SPEED_INTV` at line 156):\\n```rust\\npub const MEAN_NODE_SPEED_INTV: f64 = 0.001;\\npub const CORR_MNODE_JD_T0GREG: f64 = -3063616.5;\\n```\\n\\n### Step 2: Add correction tables\\n\\n`src/moshier/moon_tables.rs` — append two const arrays, 304 entries each. Values are in degrees, copied verbatim from `docs/c-ref-mean-elements.md` sections 9 and 10:\\n```rust\\npub const MEAN_NODE_CORR: [f64; 304] = [\\n    -2.56,\\n    -2.473, -2.392347, ... // all 304 entries from c-ref-mean-elements.md §9\\n];\\n\\npub const MEAN_APSIS_CORR: [f64; 304] = [\\n    7.525,\\n    7.290, 7.057295, ... // all 304 entries from c-ref-mean-elements.md §10\\n];\\n```\\n\\n### Step 3: Implement correction interpolation functions\\n\\n`src/moshier/moon.rs` — add two private functions:\\n```rust\\nfn corr_mean_node(jd: f64) -> f64 {\\n    // Returns correction in degrees (see c-ref-mean-elements.md §2)\\n    if jd < JPL_DE431_START || jd > JPL_DE431_END { return 0.0; }\\n    let dj = jd - CORR_MNODE_JD_T0GREG;\\n    let dayscty = 36524.25;\\n    let i = (dj / dayscty).floor() as usize;\\n    let dfrac = (dj - i as f64 * dayscty) / dayscty;\\n    let table = &moon_tables::MEAN_NODE_CORR;\\n    table[i] + dfrac * (table[i + 1] - table[i])\\n}\\n\\nfn corr_mean_apog(jd: f64) -> f64 {\\n    // Same logic, different table (see c-ref-mean-elements.md §3)\\n    if jd < JPL_DE431_START || jd > JPL_DE431_END { return 0.0; }\\n    let dj = jd - CORR_MNODE_JD_T0GREG;\\n    let dayscty = 36524.25;\\n    let i = (dj / dayscty).floor() as usize;\\n    let dfrac = (dj - i as f64 * dayscty) / dayscty;\\n    let table = &moon_tables::MEAN_APSIS_CORR;\\n    table[i] + dfrac * (table[i + 1] - table[i])\\n}\\n```\\n\\nNote: Both use the same epoch constant `CORR_MNODE_JD_T0GREG` (the C source uses a separate `CORR_MAPOG_JD_T0GREG` but with the same value `-3063616.5`). One constant suffices.\\n\\n### Step 4: Implement mean_node and mean_apogee\\n\\n`src/moshier/moon.rs` — add two public functions:\\n```rust\\npub fn mean_node(jd: f64) -> Result<[f64; 3], Error> {\\n    // See c-ref-mean-elements.md §4\\n    if jd < MOSHNDEPH_START || jd > MOSHNDEPH_END {\\n        return Err(Error::BeyondEphemerisLimits { jd_tt: jd, start: MOSHNDEPH_START, end: MOSHNDEPH_END });\\n    }\\n    let t = (jd - J2000) / 36525.0;\\n    let me = mean_elements(t);\\n    let dcor = corr_mean_node(jd) * 3600.0;  // degrees → arcseconds\\n    let lon = mod_2pi((me.swelp - me.nf - dcor) * STR);\\n    Ok([lon, 0.0, MOON_MEAN_DIST / AUNIT])\\n}\\n\\npub fn mean_apogee(jd: f64) -> Result<[f64; 3], Error> {\\n    // See c-ref-mean-elements.md §5\\n    if jd < MOSHNDEPH_START || jd > MOSHNDEPH_END {\\n        return Err(Error::BeyondEphemerisLimits { ... });\\n    }\\n    let t = (jd - J2000) / 36525.0;\\n    let me = mean_elements(t);\\n    // Step 1: raw apogee longitude (180° from perigee)\\n    let mut pol = [\\n        mod_2pi((me.swelp - me.mp) * STR + PI),\\n        0.0,\\n        MOON_MEAN_DIST * (1.0 + MOON_MEAN_ECC) / AUNIT,\\n    ];\\n    // Step 2: apply apogee correction\\n    let dcor = corr_mean_apog(jd) * DEGTORAD;\\n    pol[0] = mod_2pi(pol[0] - dcor);\\n    // Step 3: project onto ecliptic via mean orbital inclination\\n    let node = mod_2pi((me.swelp - me.nf) * STR - corr_mean_node(jd) * DEGTORAD);\\n    pol[0] = mod_2pi(pol[0] - node);  // argument relative to node\\n    let mut cart = polar_to_cartesian(pol);\\n    cart = cotrans(&cart, -MOON_MEAN_INCL * DEGTORAD);\\n    pol = cartesian_to_polar(cart);\\n    pol[0] = mod_2pi(pol[0] + node);  // ecliptic longitude\\n    Ok(pol)\\n}\\n```\\n\\nImports needed: `mod_2pi`, `polar_to_cartesian`, `cartesian_to_polar`, `cotrans` from `crate::math`.\\n\\n### Step 5: Implement calc_mean_node and calc_mean_apogee in calc.rs\\n\\nThese wrap the raw computation with speed calculation and the pipeline. Key insight from `docs/c-ref-mean-elements.md` §7: `app_pos_etc_mean` converts ecliptic polar → ecliptic cartesian → equatorial cartesian, optionally precesses to J2000, then delegates to the existing `app_pos_rest()`. No separate pipeline function needed.\\n\\n```rust\\npub fn calc_mean_node(\\n    jd: f64,\\n    flags: CalcFlags,\\n    models: &AstroModels,\\n) -> Result<[f64; 24], Error> {\\n    let pos = moshier::moon::mean_node(jd)?;\\n    let pos_prev = moshier::moon::mean_node(jd - MEAN_NODE_SPEED_INTV)?;\\n    // Build ecliptic polar with speed (c-ref-mean-elements.md §6)\\n    let mut xx = [0.0; 6];\\n    xx[0] = pos[0]; xx[1] = pos[1]; xx[2] = pos[2];\\n    xx[3] = diff_radians(pos[0], pos_prev[0]) / MEAN_NODE_SPEED_INTV;\\n    xx[4] = 0.0; xx[5] = 0.0;\\n    \\n    // app_pos_etc_mean pipeline (c-ref-mean-elements.md §7):\\n    // 1. Ecliptic polar → ecliptic cartesian\\n    xx = polar_to_cartesian_with_speed(xx);\\n    // 2. Ecliptic → equatorial (rotate by -obliquity of date)\\n    let eps = if flags.contains(CalcFlags::J2000) {\\n        obliquity(J2000, flags, models)\\n    } else {\\n        obliquity(jd, flags, models)\\n    };\\n    let pos_eq = rotate_x_sincos([xx[0], xx[1], xx[2]], -eps.sin_eps, eps.cos_eps);\\n    let vel_eq = rotate_x_sincos([xx[3], xx[4], xx[5]], -eps.sin_eps, eps.cos_eps);\\n    xx = [pos_eq[0], pos_eq[1], pos_eq[2], vel_eq[0], vel_eq[1], vel_eq[2]];\\n    // 3. If J2000: precess equatorial back to J2000\\n    if flags.contains(CalcFlags::J2000) {\\n        let mut pos3 = [xx[0], xx[1], xx[2]];\\n        precess(&mut pos3, jd, flags, models, PrecessionDirection::DateToJ2000);\\n        xx[0] = pos3[0]; xx[1] = pos3[1]; xx[2] = pos3[2];\\n        if flags.contains(CalcFlags::SPEED) {\\n            precess_speed(&mut xx, jd, flags, models, PrecessionDirection::DateToJ2000);\\n        }\\n    }\\n    if !flags.contains(CalcFlags::SPEED) {\\n        xx[3] = 0.0; xx[4] = 0.0; xx[5] = 0.0;\\n    }\\n    // 4. Obliquity for app_pos_rest: J2000 obliquity if J2000 flag, date obliquity otherwise\\n    let nut_val = nutation(jd, flags, models);\\n    let nutv = if flags.contains(CalcFlags::SPEED) {\\n        Some(nutation(jd - NUT_SPEED_INTV, flags, models))\\n    } else { None };\\n    let mut xreturn = app_pos_rest(&mut xx, flags, &eps, &nut_val, nutv.as_ref());\\n    // Post-process: zero latitude/z for node (c-ref-mean-elements.md §6)\\n    if !flags.contains(CalcFlags::SIDEREAL) && !flags.contains(CalcFlags::J2000) {\\n        xreturn[1] = 0.0; xreturn[4] = 0.0; xreturn[5] = 0.0;\\n        xreturn[8] = 0.0; xreturn[11] = 0.0;\\n    }\\n    Ok(xreturn)\\n}\\n\\npub fn calc_mean_apogee(\\n    jd: f64,\\n    flags: CalcFlags,\\n    models: &AstroModels,\\n) -> Result<[f64; 24], Error> {\\n    // Same pipeline as mean_node but:\\n    // - Uses mean_apogee() instead of mean_node()\\n    // - Computes both lon AND lat speeds (apogee has non-zero lat from inclination)\\n    // - Post-process: only zero radial speed (xreturn[5] = 0.0)\\n    let pos = moshier::moon::mean_apogee(jd)?;\\n    let pos_prev = moshier::moon::mean_apogee(jd - MEAN_NODE_SPEED_INTV)?;\\n    let mut xx = [0.0; 6];\\n    xx[0] = pos[0]; xx[1] = pos[1]; xx[2] = pos[2];\\n    xx[3] = diff_radians(pos[0], pos_prev[0]) / MEAN_NODE_SPEED_INTV;\\n    xx[4] = diff_radians(pos[1], pos_prev[1]) / MEAN_NODE_SPEED_INTV;\\n    xx[5] = 0.0;\\n    // ... same pipeline as calc_mean_node ...\\n    let mut xreturn = app_pos_rest(...);\\n    xreturn[5] = 0.0;  // force radial speed = 0\\n    Ok(xreturn)\\n}\\n```\\n\\n**Important**: The obliquity used for ecliptic→equatorial rotation is obliquity of DATE (not J2000), even when J2000 flag is set — because the input positions are in ecliptic of date. The J2000 obliquity is only used for app_pos_rest's ecliptic nutation step. Verify this against the ref doc §7 where `swi_coortrf2(xx, xx, -swed.oec.seps, swed.oec.ceps)` uses `swed.oec` (of date), and then J2000 sets `oe = &swed.oec2000` for the `app_pos_rest` call.\\n\\n### Step 6: Implement ECL_NUT dispatch\\n\\n`src/calc.rs`:\\n```rust\\npub fn calc_ecl_nut(\\n    jd: f64,\\n    flags: CalcFlags,\\n    models: &AstroModels,\\n) -> [f64; 6] {\\n    // C ref: sweph.c:656-664, c-ref-calc.md §3 SE_ECL_NUT\\n    let eps = obliquity(jd, flags, models);\\n    let nut_val = nutation(jd, flags, models);\\n    [\\n        (eps.eps + nut_val.deps) * RADTODEG,  // true obliquity\\n        eps.eps * RADTODEG,                     // mean obliquity\\n        nut_val.dpsi * RADTODEG,               // nutation in longitude\\n        nut_val.deps * RADTODEG,               // nutation in obliquity\\n        0.0, 0.0,\\n    ]\\n}\\n```\\n\\n### Step 7: Improve body dispatch in Ephemeris::calc()\\n\\n`src/context.rs` — replace the current match (lines ~89-93) with explicit routing:\\n```rust\\nmatch body {\\n    Body::EclipticNutation => {\\n        let data = crate::calc::calc_ecl_nut(jd_tt, flags, models);\\n        return Ok(CalcResult { data, flags_used: flags });\\n    }\\n    Body::Earth => return Ok(CalcResult { data: [0.0; 6], flags_used: flags }),\\n    Body::MeanNode | Body::MeanApogee => {\\n        // Mean elements reject HELCTR/BARYCTR (c-ref-mean-elements.md §6)\\n        if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {\\n            return Ok(CalcResult { data: [0.0; 6], flags_used: flags });\\n        }\\n    }\\n    _ => {}\\n}\\n// Existing eps_j2000 computation...\\nlet xreturn = match body {\\n    Body::Sun => crate::calc::calc_sun(jd_tt, &eps_j2000, flags, models)?,\\n    Body::Moon => crate::calc::calc_moon(jd_tt, &eps_j2000, flags, models)?,\\n    Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models)?,\\n    Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models)?,\\n    Body::Mercury | Body::Venus | Body::Mars | Body::Jupiter\\n    | Body::Saturn | Body::Uranus | Body::Neptune | Body::Pluto => {\\n        crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models)?\\n    }\\n    _ => return Err(Error::EphemerisNotAvailable {\\n        body,\\n        source: crate::types::EphemerisSource::Moshier,\\n    }),\\n};\\nOk(CalcResult { data: crate::calc::extract_output(&xreturn, flags), flags_used: flags })\\n```\\n\\nAlso remove the current blanket rejection of `HELCTR | BARYCTR` from the unsupported flags check (line 74). `plaus_iflag` already normalizes these to add NOABERR | NOGDEFL, and planets support heliocentric positions (they just skip corrections). Keep only `TOPOCTR | SIDEREAL` as rejected.\\n\\n### Step 8: Golden test C generator\\n\\nCreate `tests/c-gen/gen_mean_elements.c`:\\n```c\\n// Generate golden data for mean node, mean apogee, and ECL_NUT\\nstatic int bodies[] = { SE_MEAN_NODE, SE_MEAN_APOG, SE_ECL_NUT };\\nstatic double epochs[] = {\\n    2451545.0,    /* J2000.0 */\\n    2460310.5,    /* 2024-Jan-1 */\\n    2433282.5,    /* 1950 */\\n    2488069.5,    /* 2100 */\\n    2378496.5,    /* 1800 */\\n    2305447.5,    /* 1600 */\\n    2159345.5,    /* 1200 */\\n    2013243.5,    /* 800 */\\n    1720693.5,    /* 0 CE */\\n    1538187.5,    /* -500 */\\n    990557.5,     /* -2000 */\\n};\\nstatic struct flag_combo combos[] = {\\n    { 0, \\\"default\\\" },\\n    { SEFLG_J2000, \\\"J2000\\\" },\\n    { SEFLG_NONUT, \\\"NONUT\\\" },\\n    { SEFLG_EQUATORIAL, \\\"EQUATORIAL\\\" },\\n    { SEFLG_XYZ, \\\"XYZ\\\" },\\n};\\n// All combos include SEFLG_MOSEPH | SEFLG_SPEED\\n// Output JSON array like gen_calc.c\\n```\\n\\nCompile: `cc -Wall -I../../swisseph -o gen_mean_elements gen_mean_elements.c ../../swisseph/libswe.a -lm`\\nRun: `./gen_mean_elements > ../golden-data/mean_elements.json`\\n\\n### Step 9: Golden test Rust harness\\n\\nCreate `tests/golden/mean_elements.rs`:\\n```rust\\n#[derive(Deserialize)]\\nstruct MeanElementCase {\\n    body: i32,\\n    body_name: String,\\n    jd: f64,\\n    flags: u32,\\n    flag_name: String,\\n    output: [f64; 6],\\n}\\n\\nfn body_from_c_id(id: i32) -> Body {\\n    match id {\\n        10 => Body::MeanNode,\\n        12 => Body::MeanApogee,\\n        -1 => Body::EclipticNutation,\\n        _ => panic!(\\\"unexpected body id {id}\\\"),\\n    }\\n}\\n\\n#[test]\\nfn golden_mean_elements() {\\n    let eph = Ephemeris::new(EphemerisConfig::default()).unwrap();\\n    let cases = load();\\n    // Assert each output element within 1e-10\\n}\\n```\\n\\nAdd `mod mean_elements;` to `tests/golden/main.rs`.\\n\\n## Acceptance criteria coverage\\n\\n- [x] \\\"plaus_iflag handles all mutual exclusions and body restrictions\\\" → Already satisfied by existing code for Moshier scope. Body-specific HELCTR/BARYCTR rejection handled in Step 7.\\n- [x] \\\"swecalc routes all Moshier-supported bodies correctly\\\" → Step 7\\n- [x] \\\"Unsupported bodies return appropriate Error variants\\\" → Step 7 catch-all returns EphemerisNotAvailable\\n- [x] \\\"Mean node/apogee match C output at 11+ epochs\\\" → Steps 2-5, 8-9 (11 epochs × 5 flag combos each)\\n- [x] \\\"ECL_NUT path returns correct obliquity and nutation values\\\" → Steps 6, 7, 8-9\\n- [x] \\\"Flag normalization golden tests verify C-matching flag output\\\" → Step 8 tests varied flag combos; golden data includes flag validation\\n\\n## Key architectural notes\\n\\n1. **Pipeline reuse**: `app_pos_etc_mean` in C delegates to `app_pos_rest`. Our Rust equivalent does the same — steps 5's `calc_mean_node/apogee` call the existing `app_pos_rest()`. No new pipeline function needed.\\n2. **Obliquity subtlety** (from c-ref-mean-elements.md §7): The ecliptic→equatorial rotation uses obliquity of DATE (input is ecliptic of date). But when J2000 flag is set, `app_pos_rest` receives the J2000 obliquity for its ecliptic nutation step. These are two different obliquity values used at different pipeline stages.\\n3. **precess_speed is already pub(crate)**: The `precess_speed` function in `calc.rs` is available for the J2000 branch in step 5. If it's currently private, widen to `pub(crate)`.\\n4. **Correction tables are for far-past/far-future only**: Entries for years 0-3000 are all zero. Most typical dates will get zero correction. But the tables must be complete for the golden tests at epochs like -500 and -2000.\"",
+  "execution_record": "Followed the implementation plan steps 1-9. Key divergence: the plan used `cotrans()` for the mean apogee inclination projection, but `cotrans` operates on degree-based polar coordinates — the correct function is `rotate_x()` which operates on cartesian. Also discovered and fixed a pre-existing bug in `precess_speed`: the C code uses obliquity of J2000 (oec2000) for the Date→J2000 direction, while our Rust used obliquity of date for both directions. This caused J2000 speed errors growing with epoch distance (up to 3e-7 at epoch -2000). All 165 golden test cases pass at 1e-10 tolerance. No other divergences from plan.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "5516b24"
+    }
+  ],
+  "files": [
+    "src/calc.rs",
+    "src/constants.rs",
+    "tests/c-gen/gen_calc_dispatch.c",
+    "tests/golden/calc_dispatch.rs",
+    "tests/golden-data/calc_dispatch.json"
+  ],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782483923390,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 32
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782560551638,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782561391492,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Step 0 (C ref doc prerequisite) complete: docs/c-ref-mean-elements.md written by Sonnet agent. Covers app_pos_etc_mean() pipeline, both 304-entry correction tables, all mean element functions. Key insight: app_pos_etc_mean delegates to existing app_pos_rest after ecliptic→equatorial conversion — no separate pipeline needed. Plan updated to reflect this.",
+      "ts": 1782560425886
+    },
+    {
+      "author": "codex",
+      "text": "Codex review: request changes.\n\nTwo high-severity findings verified against the codebase:\n\n1. **ECL_NUT extraction path corruption** — `Body::EclipticNutation` stores [true_obliq, mean_obliq, nut_lon, nut_obliq, 0, 0] in a 24-element array and routes through `extract_output()`. This function treats slot 2 as a distance/radius (no RADIANS conversion), producing mixed-unit output with RADIANS flag. Also, EQUATORIAL reads from offset 12 (all zeros). C returns ECL_NUT values directly without any output conversion.\n\n2. **Horizons flags survive MOSEPH forcing** — `plaus_iflag` forces MOSEPH but doesn't clear JPLHOR_APPROX / DPSIDEPS_1980. These flags are actively read in obliquity.rs (lines 24,37,67), nutation/mod.rs (lines 18,39), precession.rs (lines 83,605), and bias.rs (lines 43,94). A user passing JPLHOR_APPROX gets Horizons-adjusted obliquity/nutation/precession under Moshier — behavior C would not produce.\n\nNeither is covered by the golden test cases (which test default/J2000/NONUT/EQUATORIAL/XYZ but not RADIANS or JPLHOR_APPROX).",
+      "ts": 1782561855556
+    }
+  ],
+  "created_at": 1782483923390,
+  "updated_at": 1782561391492,
+  "completed_at": 1782561391492,
+  "arc_id": "019efa3b-da1f-77c1-8230-605aa4d4de91",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f0452-ae10-7420-aa98-3dc2632640cd",
+      "edge_type": "refines",
+      "source": "swisseph-rs/32",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483955216
+    },
+    {
+      "id": "019f0452-c681-7d13-9acd-b98fec3e1ff3",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/32",
+      "target": "swisseph-rs/31",
+      "note": "Dispatch routes to body-specific apparent position functions",
+      "created_at": 1782483961473
+    },
+    {
+      "id": "019f0452-c8eb-7ec0-b0cc-770207621d8b",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/33",
+      "target": "swisseph-rs/32",
+      "note": "Public entry point wraps the dispatch layer",
+      "created_at": 1782483962091
+    }
+  ]
+}

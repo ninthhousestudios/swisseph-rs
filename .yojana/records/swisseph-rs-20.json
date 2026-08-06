@@ -1,0 +1,114 @@
+{
+  "id": "019efef1-4cba-7690-9fbe-603fa9eabbf4",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/20",
+  "sequence_number": 20,
+  "title": "Nutation data tables (swenut2000a.h)",
+  "description": "Port the IAU 2000A nutation series data from swenut2000a.h (~2819 lines) into Rust const arrays. This is mechanical data transcription — write a script to parse the C header and emit Rust.\n\n## Source\nswenut2000a.h contains the nutation term tables for the IAU 2000A model:\n- Luni-solar terms: 678 entries, each with 5 Delaunay argument multipliers + 6 amplitude coefficients\n- Planetary terms: 687 entries, each with 14 planetary argument multipliers + 4 amplitude coefficients\n\n## Approach\n1. Write a Python/Rust script that parses the C arrays from swenut2000a.h\n2. Emit Rust `const` arrays with proper typing\n3. Place in a `nutation_data.rs` module (or `nutation/data.rs`)\n4. Verify array lengths and spot-check values against C source\n\n## Also include\n- IAU 1980 nutation: 105 terms (these are inline in swephlib.c around line 2126, smaller — can be hand-ported or scripted)\n- IAU 2000B: 77 luni-solar terms (subset of 2000A, also in swephlib.c)\n\n## Testing\n- Assert array lengths match C\n- Spot-check first/last/middle entries against C source\n- The actual numerical verification happens in the nutation algorithms task\n\n## C source reference\n- swenut2000a.h:1–2819 (IAU 2000A luni-solar + planetary tables)\n- swephlib.c:~2126 (IAU 1980 terms, inline)\n- swephlib.c:~2180 (IAU 2000B terms, inline)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "script that parses C header and emits Rust const arrays"
+    },
+    {
+      "done": false,
+      "text": "IAU 2000A luni-solar terms (678 entries) as const array"
+    },
+    {
+      "done": false,
+      "text": "IAU 2000A planetary terms (687 entries) as const array"
+    },
+    {
+      "done": false,
+      "text": "IAU 1980 terms (105 entries) as const array"
+    },
+    {
+      "done": false,
+      "text": "IAU 2000B terms as const array"
+    },
+    {
+      "done": false,
+      "text": "array length assertions in tests"
+    },
+    {
+      "done": false,
+      "text": "spot-check values against C source"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "792d756"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782393687226,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 20
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782410849890,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782410955604,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes.\n\nRisk score: 0.146 (low). No constraint or convention violations.\n\nOne medium finding: extract_nt() strips #if/#endif text but doesn't evaluate conditionals — if upstream changed #if 1 to #if 0, the parser would still include those rows. Also, macro directives like #if NUT_CORR_1987 would leak '1987' into parsed integers.\n\nAssessment: valid observation but low practical risk — the script is throwaway (run once to generate, output committed and verified). The Herring corrections have been #if 1 since at least 2010. If we ever regenerate, we'd verify counts again. Not worth hardening the script for a hypothetical upstream change.\n\nMechanically verified: all array values match C source, types correct, counts correct, spot-checks pass.",
+      "ts": 1782411214351
+    }
+  ],
+  "created_at": 1782393687226,
+  "updated_at": 1782410955604,
+  "completed_at": 1782410955604,
+  "arc_id": "019efa3b-bfcb-70f3-a6ea-f3430a85c05a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019efef2-28be-7521-958d-eaccfd7b791f",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/21",
+      "target": "swisseph-rs/20",
+      "note": null,
+      "created_at": 1782393743550
+    },
+    {
+      "id": "019efef2-3a63-7c81-b4c9-209a3ff184f8",
+      "edge_type": "refines",
+      "source": "swisseph-rs/20",
+      "target": "swisseph-rs/4",
+      "note": null,
+      "created_at": 1782393748067
+    }
+  ]
+}

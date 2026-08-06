@@ -1,0 +1,107 @@
+{
+  "id": "019f1397-aca6-7923-955e-4c1f327a84b4",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/44",
+  "sequence_number": 44,
+  "title": "JPL DE backend: interp() + swi_pleph body assembly",
+  "description": "Port the JPL Chebyshev interpolation (`interp`), record/segment selection (`state`), and body-relative position assembly (`swi_pleph`) on top of the mmap reader from swisseph-rs/43. Output: raw barycentric/geocentric equatorial-J2000 position+velocity for any body, golden-tested against C's `swi_pleph`. No calc-pipeline integration here — that is swisseph-rs/46.\n\nRead `docs/c-ref-jpl.md` §§ \"Record Selection and Time Normalisation\", \"`interp()`\", \"`state()`\", \"`swi_pleph()`\", and §Constants (J_* indices).\n\n## Architecture invariants\n- Stateless & pure: free functions taking `&JplFile`. No caching, no globals, all read paths via `&self`/`&JplFile`. (C's `nrl` single-record cache and lazily-extended `pc[]/vc[]` arrays are stateful optimizations — drop them; recompute per call. The OS page cache covers record-read cost.)\n- Backend isolation: no imports from `sweph_file` or `moshier`.\n- Do NOT reuse `math::chebyshev_eval`/`chebyshev_deriv` — they use the SE1 backward-Clenshaw convention with pre-normalised `t∈[-1,1]` and a single sub-interval. JPL needs its own forward-recurrence eval with sub-interval selection (c-ref-jpl.md §\"Comparison with SE1 Chebyshev\"). Implement fresh in jpl.\n\n## Files\n- `src/jpl/interp.rs` (new) — `interp()` Chebyshev eval + `state()` record selection/read + per-body interpolation.\n- `src/jpl/mod.rs` — add `mod interp;`, define and `pub` the public primitive `jpl_pleph(...)`. Add J_* index constants here (or in header.rs) as `pub const`.\n\n## Constants (c-ref-jpl.md §\"JPL Body Indices\")\n`pub const J_MERCURY: i32 = 0; J_VENUS=1; J_EARTH=2; J_MARS=3; J_JUPITER=4; J_SATURN=5; J_URANUS=6; J_NEPTUNE=7; J_PLUTO=8; J_MOON=9; J_SUN=10; J_SBARY=11; J_EMB=12; J_NUT=13; J_LIB=14`.\n\n## Implementation steps\n\n1. **Record read** (interp.rs; c-ref-jpl.md §\"Record Read\"). `fn read_record(file: &JplFile, nr: usize) -> Vec<f64>`: read `ncoeffs` f64 starting at byte offset `nr * irecsz` from `file.bytes()`, applying `byte_order`. Return the `buf[0..ncoeffs]` (buf[0]=seg start JD, buf[1]=seg end JD, buf[2..]=coeffs).\n\n2. **`interp`** (c-ref-jpl.md §\"`interp()`\"). Signature:\n   ```rust\n   fn interp(coeffs: &[f64], t: f64, intv: f64, ncf: usize, ncm: usize, na: usize, need_speed: bool) -> [f64; 6]\n   ```\n   where `coeffs` is the slice of `buf` starting at this body's first coefficient (`&buf[ipt[i*3]-1 ..]`). Steps (cite §\"Sub-Interval Selection\", §\"Position Polynomial Recurrence\", §\"Velocity Polynomial Recurrence\"):\n   - `dt1 = t.floor()`; `temp = na as f64 * t`; `ni = (temp - dt1) as usize`; `tc = (temp.rem_euclid(1.0) /*=fmod fract*/ + dt1) * 2.0 - 1.0`. (Match C: `tc = (fmod(temp,1.0) + dt1)*2 - 1`.)\n   - Build `pc[0..ncf]`: `pc[0]=1.0; pc[1]=tc; twot=2*tc; for i in 2..ncf { pc[i]=twot*pc[i-1]-pc[i-2]; }`.\n   - Position, per component `c in 0..ncm`: `pv[c] = Σ_{j=ncf-1..=0} pc[j] * coeffs[j + (c + ni*ncm)*ncf]` (sum descending to match C accumulation order).\n   - If `need_speed`: build `vc[0..ncf]`: `vc[0]=0.0; vc[1]=1.0; vc[2]=4.0*tc; for i in 3..ncf { vc[i]=twot*vc[i-1]+2.0*pc[i-1]-vc[i-2]; }`. `bma = 2.0*na as f64 / intv`. Velocity per component: `pv[c+ncm] = (Σ_{j=ncf-1..=1} vc[j]*coeffs[j+(c+ni*ncm)*ncf]) * bma`.\n   - Return `[f64;6]` (positions in [0..ncm], velocities in [ncm..2*ncm]; ncm is 3 for bodies, 2 for nutation — caller knows ncm). Acceleration/jerk NOT needed (the pipeline never requests them).\n   - FP fidelity: match C's expression grouping exactly (see CLAUDE.md §FP fidelity; `twot*pc[i-1]-pc[i-2]`, descending dot-product order).\n\n3. **`state`** (interp.rs; c-ref-jpl.md §\"Record Selection\", §\"`state()`\"). `fn state(file: &JplFile, et: f64, list: &[u8; 12], do_bary: bool, need_speed: bool) -> Result<(Vec<[f64;6]>, [f64;6]), Error>` returning per-body `pv[0..12]` and `pvsun[6]`.\n   - Range check: `et` within `[ss[0], ss[1]]` → else `Error::BeyondEphemerisLimits { jd_tt: et, start: ss[0], end: ss[1] }`.\n   - Epoch decomposition (§\"Epoch Decomposition\"): `s = et - 0.5; et_mn = s.floor(); et_fr = s - et_mn; et_mn += 0.5;`.\n   - Record number: `nr = ((et_mn - ss[0]) / ss[2]) as i32 + 2; if et_mn == ss[1] { nr -= 1; }`.\n   - Normalised time: `t = (et_mn - ((nr-2) as f64 * ss[2] + ss[0]) + et_fr) / ss[2]` → `t∈[0,1)`.\n   - `intv = ss[2]` (do_km is always false in our context — AU + AU/day).\n   - Read record `nr`. Compute `aufac = 1.0/au`.\n   - Always interp SSBary Sun: `interp(&buf[ipt[30]-1 ..], t, intv, ipt[31], 3, ipt[32], need_speed)` → scale all 6 by `aufac` → `pvsun`.\n   - For `i in 0..10` where `list[i] > 0`: `interp(&buf[ipt[i*3]-1 ..], t, intv, ipt[i*3+1], 3, ipt[i*3+2], need_speed)` → for each of 6 comps: if `i < 9 && !do_bary` then `pv[i][k] = pv[i][k]*aufac - pvsun[k]` (heliocentric) else `pv[i][k] *= aufac` (barycentric). NOTE: our pipeline always uses `do_bary=true`, so all are barycentric; keep the heliocentric branch for fidelity but it won't be exercised. Nutation/libration (list[10]/[11]) not needed — skip (the pipeline computes nutation independently).\n   - Index helper for buf: `ipt[k]` offsets are **1-based**; slice as `&buf[(ipt[k]-1) as usize ..]`.\n\n4. **`swi_pleph`** (mod.rs; c-ref-jpl.md §\"`swi_pleph()`\"). `pub fn jpl_pleph(file: &JplFile, et: f64, ntarg: i32, ncent: i32, need_speed: bool) -> Result<[f64;6], Error>`:\n   - Build `list[12]` (per §\"list[] Setup\"): for regular bodies set `list[map(target)] = if need_speed {2} else {1}` and same for center, with the Earth↔Moon dependency: if target/center is `J_MOON` set `list[J_EARTH]=val`; if `J_EARTH` set `list[J_MOON]=val`; if `J_EMB` set `list[J_EARTH]=val`. (Map J_* slot to list index: list index == J_* value for 0..=9; Sun handling via pvsun.)\n   - Call `state(file, et, &list, true, need_speed)` → `(pv, pvsun)`.\n   - Post-state assembly (§\"Post-State Assembly\"): fill `pv[J_SUN] = pvsun`; `pv[J_SBARY] = 0`; `pv[J_EMB] = pv[J_EARTH]`. Earth/Moon conversion: if `(ntarg,ncent)` is the Earth↔Moon pair → zero `pv[J_EARTH]` (Moon already geocentric); else convert EMB→Earth: `pv[J_EARTH][k] -= pv[J_MOON][k]/(emrat+1.0)` and Moon→barycentric: `pv[J_MOON][k] += pv[J_EARTH][k]` (in that order; use the file's `emrat`, NOT the `EARTH_MOON_MRAT` constant).\n   - Result: `rrd[k] = pv[ntarg][k] - pv[ncent][k]` for k in 0..6.\n   - `pv` array must have slots 0..=12 (size 13). Use `[[f64;6]; 13]`.\n\n## Output frame & units (record for swisseph-rs/46)\n`jpl_pleph` returns **barycentric (or geocentric for Moon) equatorial J2000/ICRF**, units AU + AU/day. This matches what `sweph_positions` delivers into the shared pipeline (verified: the pipeline precesses equatorial-J2000 directly).\n\n## C reference\n`docs/c-ref-jpl.md` §§ \"Record Selection and Time Normalisation\", \"`interp()`\", \"`state()`\", \"`swi_pleph()`\", Constants.\n\n## Golden tests\n- **`gen_jpl_pleph.c`** (links libswe.a — `swi_pleph` is reachable, as gen_sweph_eval.c uses swed internals): `swe_set_ephe_path(\"<repo>/ephe\")`, `swe_set_jpl_file(\"de441.eph\")`, force-open via one `swe_calc(jd, SE_SUN, SEFLG_JPLEPH,...)`, then call `swi_pleph(jd, ntarg, ncent, rrd, serr)` directly for a grid: ntarg ∈ {J_MERCURY..J_PLUTO, J_MOON, J_SUN, J_EARTH} with ncent=J_SBARY, plus (ntarg=J_MOON, ncent=J_EARTH). Epochs: reuse the 7 calc.json epochs (all within DE441 range). Emit `tests/golden-data/jpl_pleph.json`: array of `{ ntarg, ncent, jd, rrd:[6] }`.\n- **`jpl_pleph.rs`**: gate on `ephe/de441.eph` existence. Open `JplFile`, call `jpl_pleph` for each case with `need_speed=true`, assert all 6 components vs `rrd` with **`assert_f64_eps` at 1e-9** (Chebyshev eval is iterative; positions should match to ~1e-10 but allow 1e-9 for accumulated FP). Register `mod jpl_pleph;` in main.rs.\n\n## Acceptance criteria\n- `cargo build` clean; `cargo clippy --all-targets` no new warnings.\n- `cargo test --test golden jpl_pleph -- --nocapture` passes (must actually run — de441.eph present).\n- No new blocking forbidden_dep violations.\n\n## Escape hatch\nIf positions diverge > 1e-8 after two attempts, STOP and report failing (ntarg,jd), actual vs expected for all 6 comps, and your computed `(nr, t, ni, tc)` for one failing case. Likely culprits: 1-based ipt offset arithmetic, the `(c + ni*ncm)*ncf` buf index, sub-interval `tc` mapping, or velocity `bma` scaling. Escalate to Opus — do not chase past two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo build clean"
+    },
+    {
+      "done": true,
+      "text": "cargo clippy --all-targets no new warnings"
+    },
+    {
+      "done": true,
+      "text": "cargo test --test golden jpl_pleph passes"
+    },
+    {
+      "done": true,
+      "text": "No new forbidden_dep violations"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "5b5f8e4"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-3",
+    "jpl"
+  ],
+  "history": [
+    {
+      "ts": 1782740135078,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 44
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782742280094,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782742564478,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782740135078,
+  "updated_at": 1782742564478,
+  "completed_at": 1782742564478,
+  "arc_id": "019efa3b-ffd4-7111-894d-963830d91b4a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1398-f220-7f51-9ac5-9a50a2ab29df",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/44",
+      "target": "swisseph-rs/43",
+      "note": null,
+      "created_at": 1782740218400
+    },
+    {
+      "id": "019f1398-f5df-78c1-b447-bd4e0ef30aca",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/46",
+      "target": "swisseph-rs/44",
+      "note": null,
+      "created_at": 1782740219359
+    },
+    {
+      "id": "019f1398-ffeb-7703-bb06-198c19cbfded",
+      "edge_type": "refines",
+      "source": "swisseph-rs/44",
+      "target": "swisseph-rs/8",
+      "note": null,
+      "created_at": 1782740221931
+    }
+  ]
+}

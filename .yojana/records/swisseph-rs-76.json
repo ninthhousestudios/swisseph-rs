@@ -1,0 +1,128 @@
+{
+  "id": "019f1e19-3f35-7372-b34b-a01929db4e80",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/76",
+  "sequence_number": 76,
+  "title": "RSE 9/12: Lunar eclipse geometry (lun_eclipse_how + swe_lun_eclipse_how)",
+  "description": "### Summary\nPort the lunar-eclipse geometry core `lun_eclipse_how` (Earth-shadow cone from the selenocentric perspective, umbral/penumbral magnitude, atmospheric enlargement factors) and its public wrapper `swe_lun_eclipse_how` (adds Moon az/alt at an observer). Exposes `Ephemeris::lun_eclipse_how` (`&self`).\n\nDepends on **RSE 5** (eclipse module scaffold, constants, `calc_planet_star`) and **RSE 2** (`swe_azalt` for the wrapper). Uses geocentric + topocentric `calc` (RSE 1).\n\n### Files\n- `src/eclipse.rs` — add `LunarEclipseHow` (attr) result struct, `lun_eclipse_how`, `swe_lun_eclipse_how`.\n- `src/context.rs` — `pub fn lun_eclipse_how(&self, tjd_ut, ifl: CalcFlags, geopos:[f64;3]) -> Result<LunarEclipseHow, Error>`.\n- `src/lib.rs` — re-export `LunarEclipseHow`.\n- `tests/c-gen/gen_eclipse.c` — add key `lun_how`; regenerate `eclipse.json`.\n- `tests/golden/eclipse.rs` — add `#[test] lun_how`.\n\n### Implementation steps\nRead `docs/c-ref-eclipse-lunar.md` §1 (constants), §2.1–§2.10 (`lun_eclipse_how`), §3 (`swe_lun_eclipse_how` + `attr[]` table).\n\n1. **`LunarEclipseHow`** result: fields per the `attr[]` index table in §3 (`attr[0]`=umbral magnitude, `attr[1]`=penumbral magnitude, azimuth/altitude slots, distance-from-opposition, Saros, ...). Copy exactly.\n2. **`lun_eclipse_how`** (§2): setup (§2.1); change of origin to the selenocentric frame (§2.2); umbra/penumbra half-angles (§2.3); Moon position relative to shadow axis (§2.4); **shadow diameters on the fundamental plane WITH atmospheric enlargement (§2.5)** — the `(1 + 1/50)` umbra enlargement and the double `cosf1`/`cosf2` division (which appears redundant but MUST be preserved bit-for-bit per the FP-fidelity rule), plus the `×0.99405` / `×0.98813` NASA-agreement factors applied exactly where §2.5 says; umbral magnitude (§2.6); penumbral magnitude always computed (§2.7); distance from opposition (§2.8); Saros lookup (§2.9); return value (§2.10).\n3. **`swe_lun_eclipse_how`** (§3): wrapper computing Moon az/alt at `geopos` via `swe_azalt` and filling those `attr[]` slots. STATELESS NOTE: observer from `geopos`, not a global.\n\n### C reference\n`docs/c-ref-eclipse-lunar.md` §1, §2 (all subsections), §3.\n\n### Golden tests\n- **C harness** add key `lun_how`: for known lunar eclipses `tjd_ut ∈ {2451991.9 /*2001-01-09 total*/, 2459406.0 /*2021-05-26*/, 2460634.9 /*2024-2025 partial*/}` and observers `geopos ∈ {(8.55,47.37,500)}`, call `swe_lun_eclipse_how(tjd_ut, SEFLG_MOSEPH, geopos, attr, serr)`. Emit `{tjd_ut, geopos, retval, attr:[0..11]}`. Regenerate `eclipse.json`.\n- **Rust test** `#[test] lun_how`: assert `attr` fields via `assert_f64_eps(.., 1e-7)`; assert returned flags == `retval`.\n- `cargo test --test golden eclipse::lun_how -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::lun_how -- --nocapture` passes (1e-7).\n\n### Escape hatch\nIf `attr` fails > 1e-6 after two attempts, STOP and report which `attr[]` index diverges (the atmospheric-factor application in §2.5 is the usual culprit). Read `swecl.c:3190–3363` directly. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "cargo build + cargo clippy --all-targets clean"
+    },
+    {
+      "done": false,
+      "text": "cargo test --test golden eclipse::lun_how -- --nocapture passes (1e-7)"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Ephemeris::lun_eclipse_how takes geopos: [f64;3] (mandatory), not Option, deviating from C's nullable geopos.",
+      "rationale": "The geocentric-only C path (geopos=NULL) is only needed internally by the not-yet-ported eclipse-search module (RSE 10/12), which can call the pub(crate) lun_eclipse_how core directly instead of going through the public wrapper with a null geopos. Keeping the public API mandatory mirrors the already-shipped sol_eclipse_how's ergonomics and avoids an Option in the public surface for a case fully served elsewhere.",
+      "rejected_alternatives": [
+        "Option<[f64;3]> geopos on the public wrapper, matching C's nullable contract literally."
+      ]
+    },
+    {
+      "decision": "Extracted a shared saros_lookup(tjd_ut, table) helper and refactored eclipse_how's inline solar Saros scan to use it, rather than duplicating the identical loop for the new lunar table.",
+      "rationale": "The solar and lunar Saros lookups are the C source's own duplicated verbatim algorithm over two distinct tables (swecl.c:1112-1144 / 3352-3372); CLAUDE.md's project constraints direct reuse/extraction over duplicating existing logic when adding a new near-identical use.",
+      "rejected_alternatives": [
+        "Copy-paste the loop inline into lun_eclipse_how, matching C's own duplication 1:1."
+      ]
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "25ca6f2"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916398901,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 76
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782989943770,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782990665557,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, claude inline, w/ 77): APPROVE. Faithful port of lun_eclipse_how core + swe_lun_eclipse_how wrapper. Verified against docs/c-ref-eclipse-lunar.md §2/§3: §2.5 doubled cosf1/cosf2 division + (1+1/50) atmos enlargement + 0.99405/0.98813 NASA factors preserved in exact C order; §2.6 mutually-exclusive TOTAL/PARTIAL/PENUMBRAL chain; §2.7 penumbral mag always computed; s0/r0 reuse the pre-negation dm (FP hazard §2.4 handled). Constants (DSUN/DEARTH/RMOON/REARTH/geoalt bounds/LAPSE_RATE) and flag values (DPSIDEPS_1980=262144=SEFLG_JPLHOR, JPLHOR_APPROX=524288, TOPOCTR) confirmed against C. azalt(...,LAPSE_RATE,...) call matches already-landed sol_eclipse_how. saros_lookup extraction (solar+lunar) is a clean dedup, consistent w/ CLAUDE reuse constraint. Golden: cargo test --test golden eclipse::lun_how passes @1e-7 (3 real eclipses incl. retval==0 below-horizon path where attr stays populated + flags cleared). clippy --all-targets clean. No findings.",
+      "ts": 1782991692888
+    }
+  ],
+  "created_at": 1782916398901,
+  "updated_at": 1782990665557,
+  "completed_at": 1782990665557,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-afc8-70f1-9293-94ade5c08939",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/76",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916493256
+    },
+    {
+      "id": "019f1e1a-b395-7e62-b2e8-b6aebc4a5af2",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/76",
+      "target": "swisseph-rs/69",
+      "note": null,
+      "created_at": 1782916494229
+    },
+    {
+      "id": "019f1e1a-b72f-7f33-ada8-7e0f44bd3619",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/77",
+      "target": "swisseph-rs/76",
+      "note": null,
+      "created_at": 1782916495151
+    },
+    {
+      "id": "019f1e1b-0794-7783-8ff6-d64f5f6b7425",
+      "edge_type": "refines",
+      "source": "swisseph-rs/76",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916515732
+    }
+  ]
+}

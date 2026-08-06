@@ -1,0 +1,104 @@
+{
+  "id": "019f19d4-af18-73d2-803c-c387b8b092c2",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/60",
+  "sequence_number": 60,
+  "title": "Houses 2/9: Porphyry, Sripati, Meridian, Morinus, Carter (O/S/X/M/F)",
+  "description": "### Summary\nAdd the quadrant-arithmetic and equatorial-projection house systems: Porphyry (O), Sripati (S), Meridian/axial (X), Morinus (M), Carter (F). Porphyry is the universal polar-circle fallback used by later iterative systems, so it MUST land here. This task also first exercises the driver-level finite-difference cusp-speed path (`do_interpol`) added in sub-task 1, via S/X/M/F.\n\n### Files\n- `src/houses.rs` — replace the stub match arms for O/S/X/M/F in `calc_h`; add a reusable `fn fill_porphyry(h: &mut CalcH, geolat, sine, cose, do_speed)` helper (later sub-tasks call it on polar failure).\n- `tests/c-gen/gen_houses.c` — add a `\"quad_arith\"` JSON key.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add a `quad_arith` test.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §5 \"O\", \"S\", \"X\", \"M\", \"F\" and §4.2(b),(d),(e).\n1. **Porphyry (O)** — ref §5 \"O\". Extract the body into `fill_porphyry(...)` so the iterative systems (sub-task 4) can `goto porphyry` by calling it. Re-assert `cusps[1]=ac; cusps[10]=mc` at the top (repairs a corrupted prior attempt). Cusp speeds: §4.2(b) linear quadrant-rate interpolation (NOT AscDash): `q1_speed = ac_speed - mc_speed; cusp_speed[2]=ac_speed - q1_speed/3; [3]=ac_speed - q1_speed/3*2; [11]=ac_speed + q1_speed/3; [12]=ac_speed + q1_speed/3*2`. The post-switch mirror (sub-task 1) fills the opposite cusps.\n2. **Sripati (S)** — ref §5 \"S\": reassigns `cusps[1]` and `cusps[10]` (half-sector offset from ac/mc). Set `h.do_interpol = true` (finite-diff speeds).\n3. **Meridian (X)** — ref §5 \"X\": 12-iteration `armc_to_mc`-style loop with the rotated index `j = ((i+10-1) mod 12)+1`. Set `h.do_interpol = true`.\n4. **Morinus (M)** — ref §5 \"M\": same equatorial points as X but projected via `crate::math::cotrans([a,0.0,1.0], +ekl)` (note the +ekl sign; verify against the existing cotrans port — cotrans rotates by the given angle; pass `eps.to_radians()` if cotrans expects radians, else degrees — CHECK the signature in src/math.rs:271 before calling). `cusps[j] = result[0]`. Set `h.do_interpol = true`.\n5. **Carter (F)** — ref §5 \"F\": `a = RA of ascendant` via `cotrans([ac,0,1], -ekl)[0]`; loop fills only `i ∈ {2,3,10,11,12}` (the `if i<=3 || i>=10` guard) with the `tand(ra)/cose` MC-style projection. Set `h.do_interpol = true`. cusps[4..9] are filled by the post-switch mirror.\n\n### C reference\n`docs/c-ref-houses.md` §5 O/S/X/M/F; §4.2(b)(d)(e); §12.1 (armc_to_mc normalization). Confirm `crate::math::cotrans` signature/units at src/math.rs:271 before steps 4–5.\n\n### Golden tests\n- C harness: add key `\"quad_arith\"` to `gen_houses.c`: for each char in `['O','S','X','M','F']` × the sub-task-1 battery, call `swe_houses_armc_ex2` (cusp_speed/ascmc_speed non-NULL) and emit `{hsys, armc, geolat, eps, cusps:[1..12], cusp_speed:[1..12]}`. Regenerate houses.json with the build/run command from sub-task 1.\n- Rust test `quad_arith` in `tests/golden/houses.rs`: assert cusps (eps 1e-9) and cusp_speeds (eps 1e-7). The finite-difference speeds for S/X/M/F will not be bitwise-exact — keep them at 1e-7. Porphyry (O) speeds are analytical — try 1e-9 first.\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::quad_arith -- --nocapture` passes.\n- Sub-task-1 tests still pass: `cargo test --test golden houses -- --nocapture`.\n\n### Escape hatch\nSame as sub-task 1: stop after two attempts on >1e-8 position mismatches; for FP issues read swehouse.c directly; escalate to Opus. The finite-diff speed path is the likely first failure point — verify `dt`, `darmc`, and the `diff_degrees/2/dt` formula against ref §4.2(d) before assuming a system-formula bug.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented O/S/X/M/F per c-ref-houses.md §5. Reused mc_like() for X's per-cusp loop and Carter's loop (both are exactly the tand(x)/cose projection already factored out). Reused cotrans() for M (+eps) and F (-eps) — sign convention confirmed consistent with existing rotate_x_sincos. fill_porphyry() extracted as a standalone fn (cusps/cusp_speeds by &mut, ac/mc/speeds by value, returns possibly-polar-swapped ac) so later iterative systems can call it on Newton-iteration failure. One clippy needless_range_loop fix: Carter's sparse {2,3,10,11,12} cusp set is iterated via an explicit array literal rather than a guarded 2..=12 range. All golden tests passed on first run (cusps 1e-9, cusp_speed 1e-9 for Porphyry analytical / 1e-7 for S,X,M,F finite-diff) — no FP fidelity debugging needed.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "743f5e9"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782844796696,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 60
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782846713551,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782846969222,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve. No material findings — match arms and fill_porphyry() verified against swehouse.c directly (cusp formulas, Carter loop order, post-switch mirror, speed/do_interpol mechanism all align). Codex couldn't run cargo test/clippy (read-only sandbox) but both were already verified clean by the implementer pre-commit.",
+      "ts": 1782847174111
+    }
+  ],
+  "created_at": 1782844796696,
+  "updated_at": 1782846969222,
+  "completed_at": 1782846969222,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-8630-75f0-b373-449155b41279",
+      "edge_type": "refines",
+      "source": "swisseph-rs/60",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845048368
+    },
+    {
+      "id": "019f19d8-b4ff-7992-b380-e63f16d40294",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/60",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845060351
+    },
+    {
+      "id": "019f19d8-c230-7d80-9b77-1ac84628e599",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/62",
+      "target": "swisseph-rs/60",
+      "note": null,
+      "created_at": 1782845063728
+    },
+    {
+      "id": "019f19d9-2fc9-7b93-b4b2-e8c020222fdd",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/60",
+      "note": null,
+      "created_at": 1782845091785
+    }
+  ]
+}

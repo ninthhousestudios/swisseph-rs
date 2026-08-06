@@ -1,0 +1,108 @@
+{
+  "id": "019efa42-79db-7031-b2a8-7c14412e92df",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/6",
+  "sequence_number": 6,
+  "title": "Plan: Core dispatcher & apparent position pipeline",
+  "description": "Port the heart of sweph.c (~4000 lines): the dispatch logic, apparent position correction pipeline, caching, and configuration. This is the integration point — all prior phases come together here.\n\n## Core dispatch: swe_calc() → swecalc() (catalogue-internal §2.1)\n\n**swe_calc() (sweph.c:309):**\n1. Validate/normalize flags via plaus_iflag()\n2. Cache check: if savedat[ipl] matches (tjd, ipl, flags) → return cached\n3. Speed mode: SEFLG_SPEED → single call; SEFLG_SPEED3 → 3 calls with central difference\n4. Call swecalc()\n5. Store result in savedat[ipl]\n\n**swecalc() (sweph.c:587):** dispatches by body number:\n- SE_ECL_NUT (-1): nutation + obliquity directly\n- SE_MOON: sweplan() → app_pos_etc_moon()\n- SE_SUN: sweplan() for barycentric sun → app_pos_etc_sun()\n- Mercury–Pluto, Earth: main_planet() → backend + app_pos_etc_plan()\n- SE_MEAN_NODE/APOG: swi_mean_node/apog at two times, speed from difference\n- SE_TRUE_NODE, SE_OSCU_APOG: lunar_osc_elem() with Newton iteration\n- SE_INTP_APOG: intp_apsides()\n- 10000+: asteroids via sweph() with cascade fallback\n- SE_FICT_OFFSET+: swi_osc_el_plan() from orbital elements\n\n**Ephemeris cascade (catalogue-internal §2.2):** try preferred → JPL → Swiss → Moshier. Record actual ephemeris used in return flags.\n\n## Planet computation chain (catalogue-internal §2.3)\n- `main_planet()` (sweph.c:1562) — routes through ephemeris selection, calls app_pos_etc_plan()\n- `main_planet_bary()` (sweph.c:1697) — raw barycentric, no corrections\n- `sweplan()` (sweph.c:1820) — orchestrates planet+moon+sun, handles helio→bary conversion, Earth = EMB − Moon/(EARTH_MOON_MRAT+1)\n- `jplplan()` (sweph.c:1989) — JPL kernel interface (stub until Phase 7)\n\n## Apparent position pipeline (catalogue-internal §2.4)\n\n**app_pos_etc_plan() (sweph.c:2465) + app_pos_rest() (sweph.c:2777):**\n```\nRaw barycentric equatorial J2000\n  → 1. Light-time iteration (Newton: t' = t − |Δx|/c, 1-2 iterations)\n  → 2. Aberration (special-relativistic Lorentz transform) — swi_aberr_light()\n  → 3. Gravitational deflection (GR light bending by Sun) — swi_deflect_light()\n  → 4. Precession (J2000 → equinox of date)\n  → 5. Nutation (mean → true equinox of date)\n  → 6. Ecliptic transform (equatorial → ecliptic via obliquity rotation)\n  → 7. Sidereal transform (subtract ayanamsa, if SEFLG_SIDEREAL) — deferred to Phase 8\n  → 8. Polar conversion (Cartesian → lon, lat, distance)\n  → 9. Unit conversion (radians → degrees)\n```\n\n**Output slots in xreturn[24]:** [0-5] ecliptic polar, [6-11] ecliptic cartesian, [12-17] equatorial polar, [18-23] equatorial cartesian. Caller's flags select which slot is copied to output.\n\n## Relativistic corrections (catalogue-internal §3)\n\n**Aberration — swi_aberr_light() (sweph.c:3699):**\nSpecial-relativistic Lorentz transform using Earth velocity in units of c. β = √(1-v²), f₁ = (û·v̂)/|û|, f₂ = 1 + f₁/(1+β), x_app = (β×x + f₂×|û|×v)/(1+f₁)\n\n**Gravitational deflection — swi_deflect_light() (sweph.c:3743):**\nGR light bending by Sun. g₁ = 2GM/(c²×AUNIT×rE), g₂ = 1+(q̂·ê). Effective mass factor meff() smooths singularity near solar disc.\n\nBoth corrections also adjust velocity via finite differences.\n\n## Caching & configuration\n\n**Position cache:** `savedat[SE_NPLANETS+1]` keyed by (tjd, ipl, iflag). In Rust: `HashMap<(OrderedFloat<f64>, Body, Flags), SavedPosition>` or a fixed-size array.\n\n**Configuration methods becoming Ephemeris builder/methods:**\n- `swe_set_ephe_path(path)` → `EphemerisConfig.ephe_path`\n- `swe_set_topo(lon, lat, alt)` → `EphemerisConfig.topo`\n- `swe_set_sid_mode(mode, t0, ayan_t0)` → `EphemerisConfig.sidereal`\n- `swe_set_astro_models(samod, iflag)` → `EphemerisConfig.models`\n- `swe_close()` → `Drop` impl or explicit `close()` method\n\n## Split borrow design\nThe biggest challenge. During a single calc() call, we need simultaneous access to:\n- Read: config (paths, models, topo)\n- Read+Write: planet cache (read other planets, write current one)\n- Read+Write: obliquity cache\n- Read+Write: nutation cache\n- Read: file manager (for file-based backends)\n\nRecommendation: make config, cache, and files separate fields on Ephemeris. Internal functions take specific sub-structs:\n```rust\nfn apparent_position(\n    config: &EphemerisConfig,\n    astro_cache: &mut AstroCache,  // obliquity + nutation\n    raw_pos: &[f64; 6],\n    flags: Flags,\n) -> Result<Position, Error>\n```\n\n## Testing\n- setest/suite_01_calc.c — the big one. All bodies, all flag combinations.\n- Golden data: swetest -p0123456789 -b1.1.2000 -fPl -head (all planets at J2000)\n- Test each correction independently: SEFLG_TRUEPOS (no corrections), add one at a time\n- Moshier backend only for now; file backends plugged in later\n\n## C source reference\n- sweph.c:309 — swe_calc entry\n- sweph.c:587 — swecalc dispatch\n- sweph.c:1562-1989 — main_planet, sweplan, jplplan chain\n- sweph.c:2465-2777 — app_pos_etc_plan, app_pos_rest (apparent position pipeline)\n- sweph.c:3699 — swi_aberr_light\n- sweph.c:3743 — swi_deflect_light\n\n## Dependencies\n- Phase 0–4 (everything so far). This is the integration point.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Decomposed into 6 sub-tasks (swisseph-rs/28–33) on arc ~6, phase=implement, with a linear dependency chain: 28→29→30→31→32→33.\n\n## Stale assumptions corrected from original description\n\n1. **Split borrow design is moot.** The description devoted significant space to simultaneous read/write access across config, cache, and file fields on Ephemeris. Per finalized architecture, Ephemeris is stateless (read-only config, all &self, no mutable cache). No split borrow problem exists — calc functions take &EphemerisConfig or needed sub-fields.\n\n2. **Caching is not internal to Ephemeris.** The description proposed `HashMap<(OrderedFloat<f64>, Body, Flags), SavedPosition>` on Ephemeris. This contradicts the stateless architecture. Decision: omit position caching for the Moshier phase (computation is ~microseconds). Callers needing caching wrap externally. File backends may revisit with a caller-managed cache struct.\n\n3. **sweplan complexity is thin for Moshier.** The description implies sweplan is heavy. For Moshier-only, moshier::backend::compute() already returns geocentric equatorial J2000 — the helio→bary, EMB→Earth orchestration is already handled inside the backend. The complex sweplan coordination (file segment management, cross-body caching) only matters for file backends in later phases.\n\n4. **Configuration methods already done.** swe_set_ephe_path, swe_set_topo, swe_set_sid_mode, swe_set_astro_models are already modeled as EphemerisConfig fields. swe_close/Drop not needed for Moshier.\n\n5. **Ephemeris cascade deferred.** JPL→Swiss→Moshier fallback is only meaningful once file backends exist (phases 7–8). For now, Moshier-only — no cascade logic needed.\n\n## Sub-task chain\n\n- /28: C reference doc (docs/c-ref-calc.md) — prerequisite for all implementation\n- /29: Relativistic corrections (aberration, deflection, meff) — pure math, new src/corrections.rs\n- /30: Coordinate pipeline (app_pos_rest) — shared transform pipeline in src/calc.rs\n- /31: Light-time + body-specific apparent position — app_pos_etc_{plan,sun,moon}\n- /32: Body dispatch + flag validation + mean nodes — swecalc, plaus_iflag, mean_node/apog\n- /33: Public Ephemeris::calc() + integration golden tests — final assembly",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315121115,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 6
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782483990960,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782483999566,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315121115,
+  "updated_at": 1782483999566,
+  "completed_at": 1782483999566,
+  "arc_id": "019efa3b-da1f-77c1-8230-605aa4d4de91",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f0452-a0b2-7921-ad75-e400135168cc",
+      "edge_type": "refines",
+      "source": "swisseph-rs/28",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483951794
+    },
+    {
+      "id": "019f0452-a48b-73f3-94b6-43792a6486df",
+      "edge_type": "refines",
+      "source": "swisseph-rs/29",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483952779
+    },
+    {
+      "id": "019f0452-a6e7-7450-8f4e-e4ac0cf98922",
+      "edge_type": "refines",
+      "source": "swisseph-rs/30",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483953383
+    },
+    {
+      "id": "019f0452-aa1b-7803-bef7-a687223dbb45",
+      "edge_type": "refines",
+      "source": "swisseph-rs/31",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483954203
+    },
+    {
+      "id": "019f0452-ae10-7420-aa98-3dc2632640cd",
+      "edge_type": "refines",
+      "source": "swisseph-rs/32",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483955216
+    },
+    {
+      "id": "019f0452-b1b5-76e3-b4ab-83e8bd0d2918",
+      "edge_type": "refines",
+      "source": "swisseph-rs/33",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483956149
+    }
+  ]
+}

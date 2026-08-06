@@ -1,0 +1,81 @@
+{
+  "id": "019f28f1-9f3e-7b63-8788-900f4f405a84",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/120",
+  "sequence_number": 120,
+  "title": "Polish 7/7: Criterion benchmarks, C comparison harness, multithread-scaling capstone",
+  "description": "### Summary\nCriterion benchmark suite for the Rust crate, a matching C timing harness (so Rust-vs-C numbers are honest, same workloads), and the capstone: thread-scaling throughput on one shared `Ephemeris` — the demo that the stateless design earned its keep vs. C's copy-per-isolate. Results written to docs/benchmarks.md and a Performance section appended to README.md.\n\n### Files\n- `Cargo.toml` — `[dev-dependencies] criterion = \"0.5\"`; `[[bench]] name = \"ephemeris\", harness = false`\n- `benches/ephemeris.rs` (new)\n- `tools/bench_c.c` (new) + a target in `tools/Makefile`\n- `docs/benchmarks.md` (new); `README.md` — append Performance section\n\n### Implementation steps\n1. **benches/ephemeris.rs**, four groups (each benching one call per iteration, black_box on inputs/outputs):\n   - `calc_moshier`: calc(SPEED) for all 10 bodies Sun..Pluto at J2000, Moshier config — reports per-full-chart time\n   - `calc_swiss`: same with Swisseph source + `ephe_path` = \"ephe\" (skip group gracefully with a stderr note if files absent)\n   - `houses_placidus`: houses_ex2, Placidus, Zurich coords, one epoch\n   - `eclipse_search`: sol_eclipse_when_glob forward from J2000, Moshier\n   Also two micro groups for the known hot kernels: `nutation_iau2000b` (nutation::calc at one epoch) and `moshier_moon` (moshier moon series eval) — these are the profile targets the task description asked to identify.\n2. **Capstone thread-scaling bench** in the same file: for N in {1, 2, 4, 8}: N threads via std::thread::scope sharing one &Ephemeris (Moshier), each computing a fixed slice of a 10_000-epoch × Sun..Pluto workload; measure wall-clock with `iter_custom`, report throughput (charts/sec) per N. The assertion of interest is near-linear scaling (no hidden synchronization). Print a small table.\n3. **tools/bench_c.c**: same four core workloads against `../swisseph/libswe.a` (pattern-match tools/golden_gen.c for includes/linking; add a Makefile target `bench_c`). Timing via clock_gettime(CLOCK_MONOTONIC), ≥3s warm loop each, print ns/op. Note in comments: C numbers are single-thread only — libswe is not thread-safe; that asymmetry IS the point of the capstone. Run swe_set_ephe_path(\"../swisseph/ephe\") for the Swiss workload.\n4. **docs/benchmarks.md**: methodology (hardware line from /proc/cpuinfo model name, rustc/gcc versions, flags), the Rust vs C table for the four workloads, the thread-scaling table, and two honesty notes: (a) C timings exclude any locking a real multi-threaded C consumer would need; (b) first-call file-open costs are excluded in both (setup outside the timed loop).\n5. **README Performance section**: 10 lines max — the headline table (Rust vs C, and 8-thread scaling factor) + link to docs/benchmarks.md. Run everything with `cargo bench` on the machine and paste real numbers; do not ship placeholder numbers.\n\n### C reference\ntools/golden_gen.c + tools/Makefile as the build pattern for linking libswe.a. Public API only (catalogue-public.md if function signatures needed). No C internals.\n\n### Golden tests\nNone — benchmarks, not correctness. `cargo test` must stay green after the Cargo.toml edits.\n\n### Acceptance criteria\n- `cargo bench` runs all groups to completion\n- `make -C tools bench_c && tools/bench_c` runs to completion\n- docs/benchmarks.md contains real measured numbers (no TODO/placeholder)\n- README has the Performance section\n- `cargo test` passes\n\n### Escape hatch\nIf criterion's harness fights the thread-scaling measurement (iter_custom awkwardness), fall back to a plain `#[bench]`-style manual timing loop inside the same bench binary and report numbers via println — measured honestly beats framework-pretty. If Rust is >2x slower than C on any core workload, don't tune — report the gap with a profile hint (cargo flamegraph target) as a finding; optimization is a separate task.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Moshier full-chart is 44× slower than C single-thread due to stateless recomputation of Earth/nutation on every call (C caches globally). This is the expected architectural cost — reported as a finding with a profile hint rather than tuned. Swiss files 2.6× slower, houses 1.8× faster, eclipse ~parity. Thread scaling: 3.4× at 4 threads, 4.2× at 8 threads — near-linear through physical core count, zero synchronization. The 44× Moshier gap is the optimization target for a future epoch-scoped cache task.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d9f8a01"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "polish"
+  ],
+  "history": [
+    {
+      "ts": 1783098351422,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 120
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783209955253,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783210762698,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783098351422,
+  "updated_at": 1783210762698,
+  "completed_at": 1783210762698,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f2-2a89-7b52-ad8f-862e960c0a74",
+      "edge_type": "refines",
+      "source": "swisseph-rs/120",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098387081
+    },
+    {
+      "id": "019f28f2-67ed-7592-9db9-1ab095a14884",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/120",
+      "target": "swisseph-rs/118",
+      "note": "bench task appends the Performance section to the README 118 creates",
+      "created_at": 1783098402797
+    }
+  ]
+}

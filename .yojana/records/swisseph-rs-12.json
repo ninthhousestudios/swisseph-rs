@@ -1,0 +1,161 @@
+{
+  "id": "019efa44-7985-7fc0-a927-fb1c85cac121",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/12",
+  "sequence_number": 12,
+  "title": "Plan: Rise/Set, Eclipses, Occultations",
+  "description": "Port the largest chunk of swecl.c (~4000 lines). Atmospheric refraction, horizontal coordinates, rise/set/transit, solar and lunar eclipses, occultations.\n\n## Refraction (swecl.c:3035, catalogue-internal §11)\n- `swe_refrac(inalt, atpress, attemp, calc_flag)` — Saemundsson formula (>17.9°) + low-altitude polynomial\n- `swe_refrac_extended(inalt, geoalt, atpress, attemp, lapse_rate, calc_flag, dret)` — elevated observers, geometric horizon dip\n\n## Horizontal coordinates (catalogue-internal §6.3)\n- `swe_azalt(tjd_ut, calc_flag, geopos, atpress, attemp, xin, xaz)` — ecliptic/equatorial → azimuth/altitude with refraction\n- `swe_azalt_rev()` — inverse\n\n## Rise/Set (catalogue-internal §10)\n**Fast algorithm** (swecl.c:4203): |lat| ≤ 60°, semi-diurnal arc estimate, 2-4 Newton iterations\n**Full algorithm** (swecl.c:4387): sample 14-15 points at 2hr intervals, find zero crossings, binary search refinement (20 iterations → ~86μs accuracy)\n**Meridian transit** (swecl.c:4688): 4-iteration RA matching, 361°/day rate\n**Circumpolar detection**: arccos argument out of [-1,1] range\n\n## Solar eclipses (catalogue-internal §9)\n**Global search** (swecl.c:1185): Meeus lunation stepping, F-argument filter (eliminates ~70%), approximate max time, iterative refinement via find_maximum()\n**Shadow geometry** (swecl.c:640): shadow axis direction, umbra/penumbra half-angles, shadow cone intersection with Earth\n**Local circumstances** (swecl.c:967): topocentric positions, magnitude = (-dctr + rsun + rmoon)/(2×rsun), obscuration from circular segment intersection\n**Contact times**: find_zero() with 2hr initial sampling, 3 refinement iterations\n\n## Lunar eclipses (catalogue-internal §9.4)\nShadow cone from selenocentric perspective. Atmospheric correction factors (1+1/50, ×0.99405/0.98813 for NASA agreement).\n\n## Occultations\nSame machinery as solar eclipses but for Moon covering planet/star.\n\n## Rust design\nThese functions need `&mut Ephemeris` because they call `calc()` internally. Group as methods:\n```rust\nimpl Ephemeris {\n    pub fn rise_trans(&mut self, ...) -> Result<RiseSetResult, Error> { ... }\n    pub fn solar_eclipse_when_global(&mut self, ...) -> Result<EclipseGlobal, Error> { ... }\n    pub fn solar_eclipse_how(&mut self, ...) -> Result<EclipseLocal, Error> { ... }\n    // etc.\n}\n```\n\n## Testing\n- setest/suite_08_eclipses.c, setest/suite_09_rise.c\n- Golden data: known historical eclipses, sunrise/sunset for various locations and dates\n- Circumpolar edge cases: Tromsø in summer/winter\n\n## C source reference\n- swecl.c:640 — eclipse_where (shadow geometry)\n- swecl.c:967 — eclipse_how (local circumstances)\n- swecl.c:1185 — swe_sol_eclipse_when_glob (Meeus search)\n- swecl.c:3035 — swe_refrac, swe_refrac_extended\n- swecl.c:3237 — lun_eclipse_how\n- swecl.c:4203 — rise_set_fast\n- swecl.c:4387 — swe_rise_trans_true_hor (full algorithm)\n- swecl.c:4688 — meridian transit\n\n## Dependencies\n- Phase 5 (calc pipeline — this calls calc() heavily), Phase 3 (sidereal time for azalt)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Decomposed into 12 implement-phase sub-tasks (swisseph-rs/68-79), each a self-contained single-session Sonnet brief with exact ref-doc citations, signatures, golden-test specs, and escape hatches. Six C reference docs written by dedicated sonnet agents (committed c3b61bd): c-ref-topocentric, -refraction-azalt, -riseset, -eclipse-solar, -eclipse-lunar, -occultation.\n\nDivergences from the original description:\n1. STALE ARCHITECTURE: original said these functions need `&mut Ephemeris`. Corrected to stateless `&self` throughout (matches calc/houses_ex2). No swe_set_topo / swe_set_lapse_rate globals — observer comes from config.topographic, lapse_rate is an explicit parameter.\n2. HIDDEN PREREQUISITE (not in original): topocentric swe_calc support. Rust calc() currently rejects SEFLG_TOPOCTR with UnsupportedFlags, but rise/set (swe_calc_ut|TOPOCTR) AND every eclipse _where/_how/_loc depend on it (verified via swecl.c grep: lines 385,414,1551,1868 + rise range 4230,4297). So swi_get_observer + the TOPOCTR branches in sweph.c's app_pos code (~2524-2586,3395-3531,3923-3971) had to be added as RSE 1/12 — the gating dependency. Conceptually a Phase-5 (calc pipeline) concern that was missed; owned here because no other arc covers it.\n3. Only refraction+azalt (RSE 2) are independent of topocentric calc; everything else chains off RSE 1.\n4. Sub-task boundaries follow the C function map (swecl.c 565-5063 minus swe_pheno/nod_aps/orbital/gauquelin which belong to swisseph-rs/13): topo → azalt → riseset(full+transit / fast) → solar eclipse(where / how / when_glob / when_loc) → lunar eclipse(how / when) → occultation(where+glob / when_loc). find_maximum/find_zero go into math.rs (RSE 3), reused by all search tasks. EclipseFlags/RiseSetFlags already existed in flags.rs.\n5. Corrected a factual error from the original description: rise/set bisection resolution is ~7 ms, not \"86µs\" (per c-ref-riseset.md §5.4, traced from source).\n\nDependency graph wired via depends_on edges; all 12 refine swisseph-rs/12. Arc 019efa3c advanced study→implement.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "c3b61bd"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315252101,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 12
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782916572154,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782916589459,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315252101,
+  "updated_at": 1782916589459,
+  "completed_at": 1782916589459,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f1e1a-e5e4-7a32-aa59-4f561c485d93",
+      "edge_type": "refines",
+      "source": "swisseph-rs/68",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916507108
+    },
+    {
+      "id": "019f1e1a-eb22-7953-b8f4-ff2653eabef2",
+      "edge_type": "refines",
+      "source": "swisseph-rs/69",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916508450
+    },
+    {
+      "id": "019f1e1a-ef3e-7e12-b0a8-0f94be52d66d",
+      "edge_type": "refines",
+      "source": "swisseph-rs/70",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916509502
+    },
+    {
+      "id": "019f1e1a-f398-72d0-99c8-09b7cb0e863f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/71",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916510616
+    },
+    {
+      "id": "019f1e1a-f72f-76d2-b0f8-3c4ef87c086f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/72",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916511535
+    },
+    {
+      "id": "019f1e1a-f9da-7510-99f0-63d038ca4bd4",
+      "edge_type": "refines",
+      "source": "swisseph-rs/73",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916512218
+    },
+    {
+      "id": "019f1e1a-fde3-7970-ad4f-8d6e01a4da5d",
+      "edge_type": "refines",
+      "source": "swisseph-rs/74",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916513251
+    },
+    {
+      "id": "019f1e1b-01e4-7682-8222-f4ef4d651b55",
+      "edge_type": "refines",
+      "source": "swisseph-rs/75",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916514276
+    },
+    {
+      "id": "019f1e1b-0794-7783-8ff6-d64f5f6b7425",
+      "edge_type": "refines",
+      "source": "swisseph-rs/76",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916515732
+    },
+    {
+      "id": "019f1e1b-0a72-77a2-86df-87791da1210f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/77",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916516466
+    },
+    {
+      "id": "019f1e1b-0e08-73d2-8f30-5d3e4743ce24",
+      "edge_type": "refines",
+      "source": "swisseph-rs/78",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916517384
+    },
+    {
+      "id": "019f1e1b-105f-7060-b3a2-2ad6ff75415d",
+      "edge_type": "refines",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916517983
+    }
+  ]
+}

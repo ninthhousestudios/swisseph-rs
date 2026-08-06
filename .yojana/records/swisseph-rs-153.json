@@ -1,0 +1,60 @@
+{
+  "id": "019f4db4-7abc-70a2-8a87-b8f325419ac7",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/153",
+  "sequence_number": 153,
+  "title": "change epsilon and nutation display to dms to match c-swetest",
+  "description": "",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": null,
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "5c89705"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783715101372,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 153
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781401068,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781542446,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783715101372,
+  "updated_at": 1783781542446,
+  "completed_at": 1783781542446,
+  "edges": []
+}

@@ -1,0 +1,122 @@
+{
+  "id": "019f19d5-32df-78f1-9ad7-57b2e21a36d8",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/61",
+  "sequence_number": 61,
+  "title": "Houses 3/9: Regiomontanus, Campanus, Polich/Page, Horizon, Savard-A (R/C/T/H/J)",
+  "description": "### Summary\nAdd the great-circle / pole-height quadrant house systems with analytical (`AscDash`) cusp speeds: Regiomontanus (R), Campanus (C), Polich/Page topocentric (T), Horizon/azimuth (H), Savard-A (J). All share the `cusps = Asc1(th ± offset, pole_height, sine, cose)` shape plus the polar-circle 180° shift.\n\n### Files\n- `src/houses.rs` — replace the stub match arms for R/C/T/H/J in `calc_h`. Factor the shared polar-circle 180° shift into a small helper `fn polar_shift_subset(h: &mut CalcH, geolat, eps, mc_too: bool)` if it reduces duplication (the C applies it to `i ∈ {1,2,3,10,11,12}` for C/H/J/R; T and the §5 notes apply it to all 12 — read carefully, the subset differs per system).\n- `tests/c-gen/gen_houses.c` — add `\"great_circle\"` key.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add `great_circle` test.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §5 \"R\", \"C\", \"T\", \"H\", \"J\" and §4.2(a).\n1. **Regiomontanus (R)** — ref §5 \"R\": `fh1=atand(tanfi*0.5); fh2=atand(tanfi*cosd(30))`; cusps 11/12/2/3 via `asc1`, speeds via `asc_dash` with the SAME (x,f) pairs. Polar shift on `{1,2,3,10,11,12}` when `|fi| >= 90-ekl`.\n2. **Polich/Page (T)** — ref §5 \"T\": identical structure to R but `fh1=atand(tanfi/3.0); fh2=atand(tanfi*2.0/3.0)`. NOTE: T's polar shift adds 180° to ac, mc, AND all 12 cusps (not the {1,2,3,10,11,12} subset). Replicate literally.\n3. **Campanus (C)** — ref §5 \"C\": `fh1=asind(sind(fi)/2); fh2=asind(sqrt(3)/2*sind(fi))`; `xh1=atand(sqrt(3)/cosfi); xh2=atand((1/sqrt(3))/cosfi)` (with the `cosfi==0` degenerate branch). Cusps 11/12/2/3 at `th+90∓xh1/xh2`. Speeds via asc_dash. Polar branch on `{1,2,3,10,11,12}` (the C source `continue`s for 4≤i<10).\n4. **Horizon (H)** — ref §5 \"H\": co-latitude remap `fi' = 90-fi (fi≥0) else -90-fi`, `th' = degnorm(th+180)`, same fh/xh formulas as Campanus on `fi'`; cusp[1] IS recomputed here; then the UNCONDITIONAL `cusps[1..3]+=180, cusps[11..12]+=180` AFTER the polar branch; restore fi/th at the end; final AC/DC check. Order of operations matters — follow §5 \"H\" exactly.\n5. **Savard-A (J)** — ref §5 \"J\": `xs1/xs2` from `asind(sind(2fi/3)/sinfi)` etc (with `|fi|<VERY_SMALL` fallback to 2/3, 1/3); `xh1/xh2` from `atand(tand(xs)/cosfi)`; `fh1/fh2` from `asind(sind(fi)*sind(90-xs))`. Cusps 12/11/2/3 via asc1; speeds via asc_dash. Polar shift on `{1,2,3,10,11,12}`.\n\nAll five use analytical cusp speeds (`do_interpol` stays false) — the post-switch mirror copies opposite-cusp speeds.\n\n### C reference\n`docs/c-ref-houses.md` §5 R/C/T/H/J; §4.2(a). FP hazards §12.4 (Asc2 branch order is already handled in sub-task 1's `asc2`).\n\n### Golden tests\n- C harness: add key `\"great_circle\"`: chars `['R','C','T','H','J']` × battery → `{hsys, armc, geolat, eps, cusps:[1..12], cusp_speed:[1..12]}`. Regenerate houses.json.\n- Rust test `great_circle`: cusps eps 1e-9, speeds eps 1e-7 (analytical — try 1e-9). Include the near-polar geolat (±64) cases to exercise the polar 180° shift.\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::great_circle -- --nocapture` passes.\n- All prior houses tests still pass.\n\n### Escape hatch\nSame as sub-task 1 (stop after two attempts on >1e-8; read swehouse.c for FP; escalate to Opus). The polar-shift subset differences (T vs R/C/H/J) are the most likely correctness trap — verify per ref §5 before debugging trig.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented R/C/T/H/J per c-ref-houses.md §5, sharing a new `polar_shift_subset` helper for the C/H/J/R polar-circle 180° flip (T flips all 12 cusps inline since its affected range differs). Two golden-test failures surfaced ref-doc abstraction gaps, each resolved by reading swehouse.c directly per project policy:\n\n1. Horizon (H) co-latitude reassignment: ref doc said `fi' = (fi>=0) ? 90-fi : -90-fi`, but the actual C condition is strict `fi > 0`. Only diverges at geolat==0 exactly (case armc=0, geolat=0: cusp[1] off by ~180°). Fixed by reading swehouse.c:1083-1095.\n2. Savard-A (J) `|fi| < VERY_SMALL` fallback: ref doc said `xs2=1/3; xs1=2/3` (implying these degree values feed asc1/AscDash directly), but C's `xs2=asind(xs2); xs1=asind(xs1)` runs unconditionally after BOTH branches of the if/else, so the fallback values are also asind()'d. Fixed by reading swehouse.c:1182-1213.\n\nAlso confirmed via direct read that T's \"unconditional\" polar shift (swehouse.c:1432-1458) is still gated by the same `diff_degrees(ac,mc)<0` condition as Campanus — only the affected cusp-index range differs (all 12 vs the {1,2,3,10,11,12} subset); the ref doc's phrasing was ambiguous but my literal implementation already matched.\n\nAll 4 houses golden tests pass (great_circle: 150 cases, cusps + speeds both at 1e-9 eps — fully bitwise-exact-tolerance, no need for the 1e-7 fallback). cargo clippy --all-targets clean.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "6947e46"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782844830431,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 61
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782847876408,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782847882625,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782847923764,
+      "kind": "status_changed",
+      "payload": {
+        "from": "done",
+        "to": "needs-review"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1782849145593,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-review",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Reviewed together with swisseph-rs/62 via Codex (combined diff 743f5e9..474b5f1, since these are sequential commits in the same module). No findings against this task's scope (R/C/T/H/J polar-shift subsets, Horizon's recompute/unconditional-180/restore sequencing) — Codex confirmed these match the C reference. See swisseph-rs/62 for the one confirmed finding, which is scoped to the Placidus/Gauquelin Newton helper added in that task. Verdict: approve.",
+      "ts": 1782849018125
+    }
+  ],
+  "created_at": 1782844830431,
+  "updated_at": 1782849145593,
+  "completed_at": 1782849145593,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-8c3c-76e0-9a08-5f64cd724cd1",
+      "edge_type": "refines",
+      "source": "swisseph-rs/61",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845049916
+    },
+    {
+      "id": "019f19d8-ba75-7942-9d17-d79d31907c56",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/61",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845061749
+    },
+    {
+      "id": "019f19d9-2bcd-7d50-a1e5-58308bdbf665",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/61",
+      "note": null,
+      "created_at": 1782845090765
+    },
+    {
+      "id": "019f19d9-31fe-7562-b62a-e40c1daca28b",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/61",
+      "note": null,
+      "created_at": 1782845092350
+    }
+  ]
+}

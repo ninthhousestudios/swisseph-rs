@@ -1,0 +1,135 @@
+{
+  "id": "019f1e18-a9e8-7e73-a0cc-879af19abd3c",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/74",
+  "sequence_number": 74,
+  "title": "RSE 7/12: Solar eclipse global search (swe_sol_eclipse_when_glob)",
+  "description": "### Summary\nPort `swe_sol_eclipse_when_glob`: find the next/previous solar eclipse anywhere on Earth from `tjd_start`, with full contact-time array and eclipse-type classification. Exposes `Ephemeris::sol_eclipse_when_glob` (`&self`).\n\nDepends on **RSE 5** (`eclipse_where`, `calc_planet_star`, types) and **RSE 3** (`find_maximum`/`find_zero` in `math.rs`).\n\n### Files\n- `src/eclipse.rs` — add `SolarEclipseGlobal` result struct, `sol_eclipse_when_glob`.\n- `src/context.rs` — `pub fn sol_eclipse_when_glob(&self, tjd_start, ifl: CalcFlags, ifltype: EclipseFlags, backward: bool) -> Result<SolarEclipseGlobal, Error>`.\n- `src/lib.rs` — re-export `SolarEclipseGlobal`.\n- `tests/c-gen/gen_eclipse.c` — add key `sol_when_glob`; regenerate `eclipse.json`.\n- `tests/golden/eclipse.rs` — add `#[test] sol_when_glob`.\n\n### Implementation steps\nRead `docs/c-ref-eclipse-solar.md` §5.1–§5.9 and §7 (parabola helpers, already ported to `math.rs` in RSE 3).\n\n1. **`SolarEclipseGlobal`**: fields = `tret[0..10]` per §5.8 (maximum, `tret[1]`=RA-conjunction/local-noon instant, C1..C4 contact times, centre-line begin/end, ...) + the returned type bitmask. Name fields exactly per §5.8 (flag §5.8 as the GLOBAL-search semantics — different from local, RSE 8).\n2. **`sol_eclipse_when_glob`** (§5): \n   - `ifltype` validation/normalisation (§5.1).\n   - Lunation stepping (§5.2): Meeus synodic-month step using the K/T argument (constants in §5.2); the F-argument (Moon argument of latitude) filter eliminating ~70% of new moons (threshold in §5.2).\n   - Iterative refinement to minimum Sun–Moon separation via `find_maximum` (§5.3).\n   - Confirm & classify total/annular/partial (§5.4), calling `eclipse_where` at the max instant.\n   - Contact-time refinement C1..C4 (§5.5) via `find_zero`.\n   - Annular-total (hybrid) detection (§5.6).\n   - `tret[1]` RA-conjunction instant (§5.7).\n   - Return the eclipse-type bitmask (§5.9).\n   - `backward` flips the stepping direction.\n\n### C reference\n`docs/c-ref-eclipse-solar.md` §5 (all subsections), §7, §0.\n\n### Golden tests\n- **C harness** add key `sol_when_glob`: for `tjd_start ∈ {2451545.0 /*2000*/, 2459000.5 /*2020*/}`, `backward ∈ {0,1}`, `ifltype ∈ {0 /*all types*/}`, call `swe_sol_eclipse_when_glob(tjd_start, SEFLG_MOSEPH, ifltype, tret, backward, serr)`. Emit `{tjd_start, backward, retval, tret:[0..10]}`. Regenerate `eclipse.json`.\n- **Rust test** `#[test] sol_when_glob`: assert `tret[0..10]` via `assert_f64_eps(.., 1e-5)` (≈1 s on contact instants); assert returned flags == `retval`.\n- `cargo test --test golden eclipse::sol_when_glob -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::sol_when_glob -- --nocapture` passes (1e-5 day).\n\n### Escape hatch\nIf contact times fail > 1e-4 day after two attempts, STOP and report failing `(tjd_start, backward)` + which `tret[]` slot diverges + the eclipse type mismatch if any. Read `swecl.c:1185–1515` directly. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo build + cargo clippy --all-targets clean"
+    },
+    {
+      "done": true,
+      "text": "cargo test --test golden eclipse::sol_when_glob -- --nocapture passes (1e-5 day)"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward 1:1 port; all 4 golden cases passed on first attempt (no debugging session needed). One deliberate deviation from C, documented inline and in codebase-map.md: C's find_zero (swecl.c:4148) can return ERR on a negative discriminant, but swe_sol_eclipse_when_glob's caller ignores that return value and leaves dt1/dt2 (and hence tret[i1]/tret[i2]) at whatever stale value they held from a previous find_zero call or their zero-initialized declaration. Rust's find_maximum/find_zero (math.rs) return Option and there's no natural \"stale global\" to carry forward statelessly, so on None we leave tret[i1]/tret[i2] at 0.0 (matching C's actual first-ever-call behavior, just not its cross-call staleness). This is unreachable for well-conditioned real eclipses (the contact-time parabolas always have real roots) and was flagged rather than silently diverged from.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d735aa0"
+    },
+    {
+      "type": "git:commit",
+      "value": "11037ac"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916360680,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 74
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782940204600,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782940735489,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782940784581,
+      "kind": "status_changed",
+      "payload": {
+        "from": "done",
+        "to": "needs-review"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1782948585130,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-review",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review: approve with notes. sol_eclipse_when_glob verified against swecl.c:1185-1515 — the duplicated d>180 reduction and signed a<1e-10 break are literal C quirks (confirmed in source), contact_dc cross-quirk (penumbra/cos_umbra) matches, hybrid detection + type filters + 3-pass ET→UT all exact. One note: on find_zero()→None the Rust leaves tret[i1]/tret[i2]=0.0 and skips refinement, while C assigns tjd+dta (zero-init dt1/dt2) and refines anyway; the code comment mischaracterizes C (\"leaves tret at whatever they held before\"). Practically unreachable for real eclipses; fix the comment at minimum.",
+      "ts": 1782948346999
+    }
+  ],
+  "created_at": 1782916360680,
+  "updated_at": 1782948585130,
+  "completed_at": 1782948585130,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-9f8e-7152-b729-58cedcfa5d8d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/74",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916489102
+    },
+    {
+      "id": "019f1e1a-a3a2-7e62-8210-17394f2f9fc8",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/74",
+      "target": "swisseph-rs/70",
+      "note": null,
+      "created_at": 1782916490146
+    },
+    {
+      "id": "019f1e1a-be9e-7843-b8a4-2201d370a53d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/78",
+      "target": "swisseph-rs/74",
+      "note": null,
+      "created_at": 1782916497054
+    },
+    {
+      "id": "019f1e1a-fde3-7970-ad4f-8d6e01a4da5d",
+      "edge_type": "refines",
+      "source": "swisseph-rs/74",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916513251
+    }
+  ]
+}

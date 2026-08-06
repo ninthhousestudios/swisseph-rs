@@ -1,0 +1,91 @@
+{
+  "id": "019f28f6-8eea-7681-a1fb-fba2e900eda1",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/124",
+  "sequence_number": 124,
+  "title": "Utility completeness: time_equ/lmt↔lat, name lookups, delta_t_userdef, centisecond formatters",
+  "description": "### Summary\nPort the remaining small public utility functions found missing in the swisseph-rs/15 gap sweep: `swe_time_equ`/`swe_lmt_to_lat`/`swe_lat_to_lmt`, the name lookups (`swe_get_planet_name`, `swe_house_name`, `swe_get_ayanamsa_name`), the user-defined deltaT override, and the centisecond string formatters. All small, all spec'd in docs/c-ref-utilities.md.\n\n### Files\n- `src/context.rs` — `Ephemeris::time_equ`, `lmt_to_lat`, `lat_to_lmt`, `get_planet_name`\n- `src/types.rs` — `HouseSystem::name() -> &'static str`, `SiderealMode::name() -> Option<&'static str>` (None for User mode — C returns NULL, §5)\n- `src/config.rs` + `src/deltat/mod.rs` — `delta_t_userdef: Option<f64>` config field + short-circuit in the calc_deltat dispatcher (insertion point ~line 372 per the ref doc)\n- `src/format.rs` (new) — `cs2timestr`, `cs2lonlatstr`, `cs2degstr`, `csroundsec` (csnorm/difcsn/d2l already live in math.rs — leave them; format.rs holds only the string producers)\n- `src/lib.rs` — `pub mod format;` + re-exports\n- `tests/golden/utilities.rs`, `tests/golden-data/utilities.json`, `tests/c-gen/gen_utilities.c` (new)\n\n### Implementation steps\n1. Read docs/c-ref-utilities.md in full. Then per function:\n2. **time_equ** (§1): the swe_calc call it makes (body/flags per the doc), sidereal-time usage, formula and sign convention, exactly as §1 specifies. `Ephemeris::time_equ(&self, jd_ut: f64) -> Result<f64>` (days).\n3. **lmt_to_lat / lat_to_lmt** (§2): thin wrappers over time_equ with the geolon term — follow §2's formula and iteration (if any) exactly.\n4. **get_planet_name** (§3): dispatcher over Body: fixed names table (verbatim strings from §3), fictitious via the seorbel.txt-aware name path (§3a — note the ref doc's finding: when seorbel.txt is present it wins over the built-in name table for ALL fictitious bodies, not just 55–58; coordinate with the swisseph-rs/122 catalog if it landed, else read names via a minimal parse), asteroids via the already-ported `sweph_file::parse::extract_asteroid_name` + the seasnam.txt fallback-override logic per §3b. Signature `Ephemeris::get_planet_name(&self, body: Body) -> Result<String>` (needs &self for file access).\n5. **house_name** (§4) and **ayanamsa_name** (§5): static tables verbatim from the doc, methods on the existing enums.\n6. **delta_t_userdef** (§6): config field, honored via one short-circuit at the top of the deltat dispatcher; document the interaction with tidal_acceleration per §6 (which paths bypass the override, if any — follow the doc's choke-point analysis).\n7. **Centisecond formatters** (§7): exact output formats — cs2timestr/cs2lonlatstr round with the `+50` bias, cs2degstr TRUNCATES (no bias), csroundsec has the zodiac-cusp round-down guard. Return `String`; match C byte-for-byte including padding/separator chars.\n\n### C reference\ndocs/c-ref-utilities.md §1–§7 + Porting notes. Do not read the C source; ambiguity = escape hatch.\n\n### Golden tests\n- `gen_utilities.c` (normal libswe.a link): time_equ at 12 epochs spanning 1600–2100; lmt_to_lat/lat_to_lmt at 6 (jd, geolon) pairs incl. negative longitudes; swe_get_planet_name for ipl 0–23, 40–58, and asteroids {SE_AST_OFFSET+433, +5, +7066} with ephe path set; swe_house_name for all 25 system chars; swe_get_ayanamsa_name for sidm 0–46 (record NULL as JSON null); swe_cs2timestr/cs2lonlatstr/cs2degstr/csroundsec over a battery of centisecond values hitting the rounding-bias, truncation, and cusp-guard edges (§7 lists them — encode each documented edge case).\n- `utilities.rs`: times eps 1e-9 day (time_equ is calc-derived; if it matches exactly, tighten to assert_f64_exact and note it), strings compared exactly (==), ayanamsa None ↔ null.\n- Run: `cargo test --test golden utilities -- --nocapture`\n\n### Acceptance criteria\n- `cargo test --test golden utilities -- --nocapture` passes; all string comparisons exact\n- Unit test: config with delta_t_userdef set returns exactly that value from the deltat dispatcher; unset behaves as before (existing deltat golden tests stay green)\n- Full `cargo test` green; `cargo clippy` clean\n- docs/codebase-map.md updated (format.rs entry, new methods, test entry)\n\n### Escape hatch\nIf golden tests fail after two debugging attempts (numeric > 1e-8 or any string mismatch), STOP and report failing cases + actual/expected + attempts; escalate to Opus. String formatters are the likely tripwire (rounding bias vs truncation per function — the doc is explicit; trust it over intuition).",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented all 7 sections in order. Key divergence from plan: the C ref doc's claim that SEFLG_EQUATORIAL is vestigial in swe_time_equ was wrong — the equation-of-time formula needs the Sun's Right Ascension (from EQUATORIAL), not its ecliptic longitude. Discovered on first golden test run when E was off by ~3.6 minutes. Also: C's cs2timestr/cs2degstr produce garbage for negative centisecond inputs (undefined behavior via char arithmetic on negative remainders) — excluded negative values from the golden battery since no real caller passes them. Asteroid name lookup simplified from the plan's file-cache-search approach to just calling open_asteroid_file directly each time (simpler, matches C's behavior).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "71a3253"
+    },
+    {
+      "type": "git:commit",
+      "value": "c65e860"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "polish"
+  ],
+  "history": [
+    {
+      "ts": 1783098674922,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 124
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783184129761,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783185396794,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. 4 findings fixed in c65e860:\\n1. [high] Comet/PlanetMoon names used offset-stripped IDs instead of raw C IDs → fixed with body.to_raw_id()\\n2. [medium] Chiron/Pholus MPC alias missing → added in get_planet_name only (not in normalize_asteroid_aliases — that changes the calc pipeline routing and breaks the asteroid golden test for body 12060)\\n3. [medium] seasnam.txt parser: ? abort + no bracket stripping → fixed\\n4. [medium] Centisecond formatters could overflow on extreme i32 → i64 arithmetic",
+      "ts": 1783186023653
+    }
+  ],
+  "created_at": 1783098674922,
+  "updated_at": 1783186028343,
+  "completed_at": 1783185396794,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f6-face-7130-980e-e0232e61e058",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/124",
+      "target": "swisseph-rs/15",
+      "note": "gap found during the 15 planning sweep (unported utility functions)",
+      "created_at": 1783098702542
+    },
+    {
+      "id": "019f28f7-001a-7050-b760-5cded6f0056e",
+      "edge_type": "relates_to",
+      "source": "swisseph-rs/124",
+      "target": "swisseph-rs/122",
+      "note": "get_planet_name's fictitious-name path should reuse 122's seorbel catalog if it has landed",
+      "created_at": 1783098703898
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "id": "019f251e-3d0e-7142-868c-f888bd0b6f7f",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/103",
+  "sequence_number": 103,
+  "title": "Asteroid H/G/diameter consumers: pheno + eclipse/riseset radius + goldens",
+  "description": "# Thread asteroid H/G/diameter into phenomena and eclipse/riseset radius; re-enable Ceres pheno coverage\n\n## Summary\nConsume the per-file `AsteroidMeta` (swisseph-rs/100) at every site that stubs C's `swed.ast_H/ast_G/ast_diam` today: pheno's Bowell §5k magnitude branch, pheno's §4 apparent diameter, `eclipse::body_radius_au`, and riseset's disc diameter. Re-enables the pheno golden coverage for Ceres..Vesta deferred from swisseph-rs/83 (shipped 120 cases instead of the spec'd 132) and adds numbered-asteroid pheno goldens.\n\n## Files\n- `src/context.rs` — `asteroid_meta` accessor on `Ephemeris`.\n- `src/phenomena.rs` — §5k else-arm (line ~295-305) + §4 apparent-diameter stub (comment at line ~177).\n- `src/eclipse.rs` — `body_radius_au` (line 166) + its 4 call sites (~242, ~489, ~2487, ~2821).\n- `src/riseset.rs` — the ast_diam stub (~line 463, flagged in c-ref-asteroid.md §4.3's porting-implication note).\n- `tests/c-gen/gen_pheno.c`, `tests/golden/pheno.rs` (extend).\n\n## Implementation steps\n1. **Accessor** (context.rs): `pub(crate) fn asteroid_meta(&self, body: Body) -> Option<&crate::sweph_file::AsteroidMeta>` — `Body::Asteroid(n)` → find in `self.asteroid_files` by `planets()[0].body_id == 10000 + n` → `header().asteroid.as_ref()`; every other body → `None`. Main asteroids (Chiron..Vesta) deliberately return `None`: C never populates the globals from seas files, and their magnitude/diameter data live in `MAG_ELEM` / `PLANETARY_DIAMETERS` (c-ref-asteroid.md §4.1, §4.3).\n2. **pheno §5k** (phenomena.rs ~301): replace the `return Err(EphemerisNotAvailable)` arm with `let meta = eph.asteroid_meta(ipl).ok_or(Error::EphemerisNotAvailable { body, source: eph.config().ephemeris_source })?; [meta.h, meta.g]`. Keep the 1566-Icarus override arm ordered BEFORE it (C checks Icarus first — §4.1). Remove the now-stale TODO comment and update the fn doc (lines 103-106) that documents the gap.\n3. **pheno §4 apparent diameter** (~177): numbered asteroids get `dd = meta.diameter_km * 1000.0` (km→m, NOT halved — downstream `attr[3]` computation divides, c-ref-asteroid.md §4.2 table, swe_pheno row). No meta → `dd = 0.0` point-source fallback (§4.2 fallback paragraph); in practice meta exists whenever calc succeeded for the body, since both read the same loaded file.\n4. **`body_radius_au`** (eclipse.rs:166): change signature to take `eph: &Ephemeris` as first param; add the numbered-asteroid arm before the fallback: `meta.diameter_km / 2.0 * 1000.0 / AUNIT` (§4.2 table, eclipse_where row); keep starname→0.0 and the `PLANETARY_DIAMETERS` arm unchanged; unresolved meta → 0.0 (silent point-source, matching C). Update the 4 call sites (all have `eph` in scope) and delete the stub comment block (lines 174-177).\n5. **riseset.rs ast_diam stub** (~463): same pattern, `dd = meta.diameter_km * 1000.0` not halved (§4.2 table, swe_rise_trans row), 0.0 fallback.\n6. **gen_pheno.c**: switch `swe_set_ephe_path(\"../swisseph/ephe\")` → `swe_set_ephe_path(\"ephe\")` (run from repo root; `<repo>/ephe` is a superset — verify by regenerating that the existing 120 cases are BYTE-IDENTICAL, acceptance below). Add:\n   - Main asteroids `SE_CHIRON, SE_PHOLUS, SE_CERES, SE_PALLAS, SE_JUNO, SE_VESTA` × the existing 4 epochs × `SWIEPH` only = 24 cases (SWIEPH-only for asteroids: the MOSEPH rows in this generator would poison/depend on process state per c-ref-asteroid.md §1.5 — add a comment saying exactly that so the constraint survives).\n   - Numbered `SE_AST_OFFSET+433`, `+7066`, `+136199` × 4 epochs × `SWIEPH` = 12 cases. (All epochs are within the short files' 1500–2100 coverage; 2378500.5 > 2268922.5 ✓.)\n   - Update the header comment (the long OMITTED paragraph, lines 6-16) — the gap it documents is now closed.\n   - Total 120 + 36 = 156 cases.\n7. **tests/golden/pheno.rs**: extend the body mapping for 15..=20 and `>= 10000` → `Body::asteroid(id - 10000)`; construct the Ephemeris with `ephe_path = PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")).join(\"ephe\")` and `asteroid_numbers: vec![433, 7066, 136199]`; bump the count assertion to `>= 156`; keep the existing tolerances unchanged for old cases and apply them to the new ones. The Eros rows are the end-to-end verification of swisseph-rs/100's MPC parsing: its attr[4] depends on H=10.38/G=0.15 and attr[3] on the H-estimated diameter (blank field → 1329/√0.15·10^(−0.2H) ≈ 28.8 km).\n\n## C reference\n`docs/c-ref-asteroid.md` §4 (all three subsections — consumption sites, exact scaling expressions, the halved/not-halved split, population timing/staleness), §1.5 (why asteroid MOSEPH pheno rows are excluded from gen_pheno). `docs/c-ref-phenomena.md` §5k (Bowell expressions — already implemented, unchanged). No C source reading.\n\n## Golden tests\n- Rebuild/rerun gen_pheno per its header comment, from repo root.\n- `cargo test --test golden pheno -- --nocapture`.\n\n## Acceptance criteria\n- `cargo test --test golden pheno -- --nocapture` passes with ≥156 cases at existing tolerances.\n- Regenerated `pheno.json`: `git diff` shows the pre-existing 120 cases unchanged (pure addition). If ANY old case changes value, stop — the ephe-path switch changed inputs; report instead of committing.\n- Full `cargo test --test golden` + `cargo test` pass (eclipse/riseset signatures ripple compiles everywhere).\n- `cargo clippy --all-targets` clean.\n- Both stub comments (phenomena.rs Bowell gap, eclipse.rs body_radius_au gap) and the gen_pheno OMITTED paragraph are gone.\n\n## Escape hatch\nIf asteroid pheno magnitudes (attr[4]) or diameters (attr[3]) mismatch > 1e-8 after two attempts: report per-body expected/actual. Diagnostic split worth stating: main asteroids wrong → Bowell/MAG_ELEM path (pre-existing code, §5k); only numbered wrong → H/G/diam parsing (swisseph-rs/100) or the meta lookup; only attr[3] wrong → the halved/not-halved or km→m scaling (§4.2 table). Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented in two commits: (1) 37caedf — library-side: Ephemeris::asteroid_meta accessor + pheno/eclipse/riseset consumers. (2) 9993178 — gen_pheno.c extended to 156 cases, pheno.rs test updated. All 7 plan steps executed as-is, no deviations. No escape-hatch needed — all 36 new cases passed on first attempt.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "9993178"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "asteroids"
+  ],
+  "history": [
+    {
+      "ts": 1783034166542,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 103
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783081747826,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783082281587,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve. No ship-blocking defects. Scaling (halved/not-halved), body normalization, and Icarus ordering all verified correct. Suggestion: add eclipse/riseset asteroid golden cases for coverage parity with pheno (follow-up, not blocking).",
+      "ts": 1783084289117
+    }
+  ],
+  "created_at": 1783034166542,
+  "updated_at": 1783082281587,
+  "completed_at": 1783082281587,
+  "arc_id": "019f234e-3702-7000-8c49-3da4757e0d6d",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f251e-60a6-75f2-be8a-d7585f4d1847",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/103",
+      "target": "swisseph-rs/100",
+      "note": null,
+      "created_at": 1783034175654
+    },
+    {
+      "id": "019f251e-65df-7822-9325-4d8e906edf4b",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/103",
+      "target": "swisseph-rs/101",
+      "note": null,
+      "created_at": 1783034176991
+    },
+    {
+      "id": "019f251e-737b-7522-8b0d-903ce1d2fd00",
+      "edge_type": "refines",
+      "source": "swisseph-rs/103",
+      "target": "swisseph-rs/95",
+      "note": null,
+      "created_at": 1783034180475
+    }
+  ]
+}

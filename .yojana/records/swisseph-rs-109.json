@@ -1,0 +1,96 @@
+{
+  "id": "019f2525-930b-7101-a1be-3ac412100db4",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/109",
+  "sequence_number": 109,
+  "title": "Heliacal 6/8: heliacal_pheno_ut + Yallop lunar crescent",
+  "description": "### Summary\nPort `swe_heliacal_pheno_ut` (the per-instant visibility phenomena report) → `Ephemeris::heliacal_pheno_ut`, including the Yallop lunar-crescent machinery (WidthMoon, LengthMoon, qYallop), the interpolation helpers (crossing, x2min, funct2), and DeterTAV.\n\nRead docs/codebase-map.md first. Do NOT read ../swisseph C source — docs/c-ref-heliacal-pheno.md is the source of truth. Two documented traps: (a) the C function's own header comment is STALE — darr[26] actually holds elongation (not CVA) and slots 28/29 are never written; trust the doc's slot table which was transcribed from the code, not the comment. (b) The Yallop grade table in this C checkout has SIX grades A–F with thresholds 0.216/-0.014/-0.16/-0.232/-0.293 (strict inequalities) — the catalogue-internal.md §15.5 five-grade summary is WRONG; follow pheno doc §1.\n\n### Files\n- `src/heliacal.rs` — crescent geometry + interpolation helpers + `DeterTAV` + `pub fn heliacal_pheno_ut(...)` + `HeliacalPheno` output struct.\n- `src/context.rs` — `Ephemeris::heliacal_pheno_ut` delegate.\n- `src/lib.rs` — re-export `HeliacalPheno`.\n- `tests/c-gen/gen_heliacal.c` — extend with `\"pheno\"` key; regenerate heliacal.json.\n- `tests/golden/heliacal.rs` — extend.\n\n### Implementation steps\n1. `width_moon`, `length_moon`, `q_yallop` per pheno doc §1 — exact formulas incl. the crescent-width geometry `W = 0.27245·π·(1+sin·sin)·(1−cos·cos)` shape as §1 spells it, and the full 6-grade q table with fall-through-to-0 boundary behavior. Note §5's trap: WidthMoon's parallax argument is computed independently (GeoAltO − AltO), NOT reused from pheno's attr[5] — port as §1/§4 specify.\n2. `crossing`, `x2min`, `funct2` per §2 (linear crossing + parabola-minimum fitting).\n3. `deter_tav(eph, dobs, jd_ut, dgeo, datm, object_name, epheflag, helflag) -> Result<f64, Error>` per §3 (builds on 5/8's topo_arc_visionis / 4/8's vis-lim core exactly as §3's call chain shows).\n4. `HeliacalPheno` struct: 28 named f64 fields mapping darr[0..27] per §4's slot table (name them from the table's meanings: tc_altitude, tc_apparent_altitude, gc_altitude, azimuth, tc_sun_altitude, sun_azimuth, tav_act, arcv_act, daz_act, arcl_act, kact, minTAV, t_first_vr, t_best_vr, t_last_vr, t_bvr, t_first_ut, t_best_ut, t_last_ut, t_sunrise/... — use §4's exact per-slot semantics; slot 26 = elongation, slot 27 = object magnitude). Provide `pub fn as_array(&self) -> [f64; 28]` for test convenience (OrbitalElements precedent).\n5. `pub fn heliacal_pheno_ut(eph, tjd_ut, dgeo, datm, dobs, object_name, event: HeliacalEventType, epheflag, helflag) -> Result<(HeliacalPheno, HeliacalFlags?), Error>` — full walkthrough per §4: default params, object/Sun/Moon geometry via 3/8's object_loc/azalt_cart, rise/set anchoring via rise_set, the Moon-branch (Yallop q + crescent width/length) vs non-Moon branch, TypeEvent-dependent slot population, which slots stay 0.0 in which branches, error paths. The dead `if((0))` block (§4 notes it would write darr[30] OOB) is NOT ported.\n6. Delegate in context.rs (after heliacal_angle), lib.rs re-export.\n7. Extend gen_heliacal.c `\"pheno\"` key (~15 cases): \"moon\" × TypeEvent=3 (evening first) at two known young-crescent evenings — 2005-04-09 ~17:30 UT and 2005-05-09 ~17:45 UT at Mecca dgeo [39.83,21.42,300.0]; \"venus\" × TypeEvent=1 (morning first) at 2453720.0 and TypeEvent=2 at 2453000.0, Cairo; \"sirius\" × TypeEvent=1 near its heliacal-rising season (2453586.0, early Aug 2005) Cairo; each also × one HIGH_PRECISION variant. Record retval + darr[0..27] (dump 28 values). SEFLG_SWIEPH, ephe path + star-name buffer per gen_eclipse.c pattern.\n8. Regenerate heliacal.json; extend tests/golden/heliacal.rs: assert all 28 slots. Tolerances: instantaneous geometry slots eps 1e-7; the time-of-visibility slots (t_first/t_best/t_last families, per §4 these come from crossing/parabola fits over sampled curves) eps 1e-5 day.\n9. Update docs/codebase-map.md heliacal entry.\n\n### C reference\ndocs/c-ref-heliacal-pheno.md §1–§5 (call contracts into vision doc §7/§9 functions).\n\n### Golden tests\n- Same gen_heliacal build/run as 4/8–5/8.\n- `cargo test --test golden heliacal -- --nocapture`.\n\n### Acceptance criteria\n- `cargo test --test golden heliacal -- --nocapture` passes (all keys incl. 4/8–5/8 after regeneration).\n- `cargo test` full suite green; no new clippy warnings.\n\n### Escape hatch\nIf golden tests fail with geometry errors > 1e-6 or time-slot errors > 1e-4 day after two debugging attempts, STOP and report failing cases/slots, actual vs expected, what you tried. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented in two commits: (1) 6229ef7 — main implementation + bug fixes + golden tests; (2) 110620d — codebase-map update. Found and fixed two pre-existing bugs in heliacal.rs: object_loc angle=7 TOPOCTR ordering (geocentric altitude was incorrectly getting topocentric correction), and calc_rise_and_set SET+below-horizon day-anchoring interval was [tjd0-1,tjd0] instead of C's [tjd0,tjd0+1] (caused Jupiter to find previous day's set event). Both bugs were in code from sub-task 3/8 (swisseph-rs/106), never golden-tested before because vis_limit_mag doesn't exercise rise_set or angle=7 object_loc.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "110620d"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "heliacal"
+  ],
+  "history": [
+    {
+      "ts": 1783034647307,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 109
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783091118822,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783092265671,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. Two findings: (1) [medium, fixed in 3c67faa] acronychal event variants 5/6 silently fell through RS assignment — now rejected at entry; (2) [medium, follow-up] golden _hp cases use SE_HELFLAG_AVKIND_VR not SE_HELFLAG_HIGH_PRECISION, so the NONUT|TRUEPOS skip path is unexercised. Filed as follow-up, not a blocker.",
+      "ts": 1783092639752
+    }
+  ],
+  "created_at": 1783034647307,
+  "updated_at": 1783092265671,
+  "completed_at": 1783092265671,
+  "arc_id": "019efa3c-5420-7750-9de1-93c44d1a9bdf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f2526-d5d8-7ca0-b173-5cb8759ccd86",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/109",
+      "target": "swisseph-rs/106",
+      "note": null,
+      "created_at": 1783034729944
+    },
+    {
+      "id": "019f2526-d8bd-7791-b3c3-133294ed43bf",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/109",
+      "target": "swisseph-rs/108",
+      "note": null,
+      "created_at": 1783034730685
+    },
+    {
+      "id": "019f2527-2651-7330-9025-85aab1c9f37a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/109",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034750545
+    }
+  ]
+}

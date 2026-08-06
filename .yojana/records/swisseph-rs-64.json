@@ -1,0 +1,133 @@
+{
+  "id": "019f19d6-af95-7662-8e0a-9f69da5bf873",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/64",
+  "sequence_number": 64,
+  "title": "Houses 6/9: Sunshine houses (I/i) — Treindl + Makransky + sundec plumbing",
+  "description": "### Summary\nAdd the two Sunshine house systems: Treindl (`HouseSystem::Sunshine`, C `'I'`) and Makransky (`HouseSystem::SunshineAlt`, C `'i'`). These require the Sun's declination, passed explicitly via `calc_h`'s `sundec: Option<f64>` parameter (NO global cache — see the stateless requirement in ref §11). Both use finite-difference cusp speeds (`do_interpol`).\n\n### Files\n- `src/houses.rs` — replace stub arms for Sunshine/SunshineAlt in `calc_h`; add `fn sunshine_init(lat, dec) -> ([f64;13], bool)`, `fn sunshine_solution_treindl(th, fi, ekl, sundec, h: &mut CalcH) -> Result<(), Error>`, `fn sunshine_solution_makransky(...) -> Result<(), Error>`. Wire `sundec` validation in `houses_armc` / `calc_h`.\n- `tests/c-gen/gen_houses.c` — add `\"sunshine\"` key.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add `sunshine` test.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §5 \"I/i\", §9 (full solution algorithms), §11 (sundec flow — stateless port), §3 step 3 (I/i are in the mirror-exclusion set).\n1. **sundec wiring**: in `calc_h`, when `hsys` is Sunshine/SunshineAlt, require `sundec = Some(d)` with `-24 <= d <= 24`, else `return Err(Error::CError(\"House system Sunshine needs valid Sun declination\".into()))`. Do NOT implement the C `static saved_sundec` cache or the `ascmc[9]==99` sentinel (ref §11 — that is global state we explicitly omit). Non-Sunshine systems ignore `sundec`.\n2. **calc_h Sunshine arm** — ref §5 \"I/i\": ac/dc swap (and for `'I'`/Treindl, the `mc+180` flip is DEAD CODE under `SUNSHINE_KEEP_MC_SOUTH=0` — do NOT port it); set `cusps[4]=degnorm(cusps[10]+180)`, `cusps[7]=degnorm(cusps[1]+180)`; dispatch to treindl (Sunshine) or makransky (SunshineAlt). On Makransky ERR (Sun circumpolar) → call `fill_porphyry` + return (mirrors `goto porphyry`). Set `do_interpol=true`. I/i are mirror-EXCLUDED — do not run the 12-cusp opposite mirror.\n3. **sunshine_init** — ref §9: ascensional difference `ad` from `tand(dec)*tand(lat)` (clamped), nocturnal/diurnal semiarcs `nsa/dsa`, fill `xh[2,3,5,6]` (nocturnal) and `xh[8,9,11,12]` (diurnal). Return ERR-flag when `|arg|>=1`.\n4. **sunshine_solution_treindl** (`'I'`) — ref §9 \"treindl\": per non-cardinal house, great-circle chord `xhs`, spherical solve for `c`, `zd`, `rax`, `pole`, then `cusps[ih]=asc1(a, pole, sine, cose)`. `mc_under_horizon` final `+180` to all non-cardinal cusps (always applies since KEEP_MC_SOUTH=0). The `c<1e-6` degeneracy sets an error flag but does NOT early-return (cusps still filled) — model as accumulating a soft error; for the port, proceed and fill cusps (return Ok unless you choose to surface a warning — positions must still match C). `sunshine_init`'s ERR is IGNORED here.\n5. **sunshine_solution_makransky** (`'i'`) — ref §9 \"makransky\": THE most intricate function. Per non-cardinal house: `md`, `rah`, zenith distance `zd` (3-branch on `md`), `pole`, `q`, `w`, then `cu` via the 4-to-8-way quadrant case-split on `w` and `sign(z-90)`. PORT VERBATIM — preserve exact branch order and boundaries; the C author flags the `z>90` remap as uncertain, so behavioral (not \"mathematical-intent\") replication is mandatory. Read swehouse.c:2906–3046 DIRECTLY for this function (ref doc abstracts the branch detail) — this is the one function where reading the C is expected, not a fallback.\n\n### C reference\n`docs/c-ref-houses.md` §9 (both solutions), §5 \"I/i\", §11 (stateless sundec), §3 step 3. For Makransky, read swehouse.c:2906–3046 directly.\n\n### Golden tests\n- C harness: key `\"sunshine\"`: for chars `['I','i']` × battery, set `ascmc[9] = <sundec>` BEFORE calling `swe_houses_armc_ex2` (the C ARMC entry reads sundec from ascmc[9]). Use a small set of sundec values spanning the year: `{-23.0, -10.0, 0.0, 10.0, 23.0}` (one per case, or cross-product with a reduced armc/lat set to bound case count ≤ ~60). Emit `{hsys, armc, geolat, eps, sundec, cusps:[1..12], cusp_speed:[1..12]}`. Regenerate houses.json.\n- Rust test `sunshine`: pass `Some(sundec)` into `houses_armc`; assert cusps eps 1e-9 (Sunshine is closed-form per house — 1e-9 should hold; Makransky's case-split may need 1e-8), speeds eps 1e-7 (finite-diff). Also add one negative test: `houses_armc(.., Sunshine, None)` returns `Err`.\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::sunshine -- --nocapture` passes.\n- The `None`-sundec error case is asserted.\n- All prior houses tests still pass.\n\n### Escape hatch\nSame as sub-task 1, but expect to read swehouse.c:2906–3046 (Makransky) from the start — it is not portable from the ref doc alone. Stop after two attempts on >1e-8 mismatches; escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo clippy --all-targets clean"
+    },
+    {
+      "done": true,
+      "text": "cargo test --test golden houses::sunshine -- --nocapture passes"
+    },
+    {
+      "done": true,
+      "text": "The None-sundec error case is asserted"
+    },
+    {
+      "done": true,
+      "text": "All prior houses tests still pass"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Both sunshine_solution_treindl and sunshine_solution_makransky return bool (true=OK/false=ERR) and are handled uniformly by the calc_h dispatcher's Porphyry-fallback branch, rather than only checking Makransky's return value as the task description suggested.",
+      "rationale": "Direct reading of swehouse.c:1156-1181 shows `if (retc == ERR)` applies to both branches of the 'I'/'i' switch case, regardless of which solver set it; the C comment '// only Makransky version does this' is an empirical observation about when ERR is hit in practice, not a statement about the code's control flow.",
+      "rejected_alternatives": [
+        "Only check Makransky's return value and always treat Treindl as Ok, per the literal task description text — rejected because it would silently diverge from C behavior if a c<1e-6 degeneracy is ever hit by Treindl."
+      ]
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Implemented per the task's own spec with one deviation discovered by reading swehouse.c:1156-1181 directly: the task description claimed Treindl never returns ERR at this call site, but the C dispatcher checks retc==ERR uniformly for both 'I' and 'i' — implemented sunshine_solution_treindl to return false on its c<1e-6 degeneracy and fall back to Porphyry like Makransky. Also replicated a subtle C detail not in the ref doc: in sunshine_solution_makransky, the southern-latitude cu+=180 correction only applies in the general (w!=90,270) branch.\n\nFollow-up (b43fc13): Codex adversarial review (commit ef8714f vs base 96097c3) caught that the original 60-case golden battery never exercised the Makransky ERR->Porphyry fallback (no circumpolar geolat/sundec combo in range). Added a dedicated 16-case sub-battery (geolat {70,-70} x sundec {23,-23}) that does trigger it for both I/i, confirming Makransky's fallback is sundec-independent (as expected) while Treindl computes normally at the same inputs. Test count 60->76.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "ef8714f"
+    },
+    {
+      "type": "git:commit",
+      "value": "b43fc13"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782844927893,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 64
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782860021669,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782860030353,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Codex review (adversarial-review, base=96097c3): verdict needs-attention, 1 medium finding (confidence 0.9) — the Sunshine golden battery never exercised Makransky's retc==ERR -> Porphyry fallback (no circumpolar geolat/sundec combo in the original 60-case battery). Everything else scrutinized (uniform retc==ERR handling across I/i, the southern-latitude branch placement in sunshine_solution_makransky, FP fidelity, sundec validation range, do_interpol/skip_mirror flags) came back clean.\n\nFixed in b43fc13: added 16 golden cases (geolat {70,-70} x sundec {23,-23}, all four sign combinations satisfy |tand(geolat)*tand(sundec)|>=1) for both I and i. Confirmed Makransky's fallback cusps are independent of sundec sign at those geolats (matches C) while Treindl computes distinct values (never short-circuits on the condition). Golden test count 60->76, all 80 project tests pass, clippy clean.",
+      "ts": 1782860560007
+    }
+  ],
+  "created_at": 1782844927893,
+  "updated_at": 1782860566636,
+  "completed_at": 1782860030353,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-9dcd-7d62-9e87-ef9f40f48649",
+      "edge_type": "refines",
+      "source": "swisseph-rs/64",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845054413
+    },
+    {
+      "id": "019f19d8-ca75-7091-a14c-c58fb1e81b64",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/64",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845065845
+    },
+    {
+      "id": "019f19d8-cf64-7af1-b335-873b555d3686",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/64",
+      "note": null,
+      "created_at": 1782845067108
+    },
+    {
+      "id": "019f19d8-d5eb-7602-aced-4b9eb65d4a5e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/64",
+      "note": null,
+      "created_at": 1782845068779
+    }
+  ]
+}

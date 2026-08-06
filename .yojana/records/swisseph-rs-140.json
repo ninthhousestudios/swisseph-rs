@@ -1,0 +1,90 @@
+{
+  "id": "019f2f86-30ac-7751-b9f2-e479dbc9424e",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/140",
+  "sequence_number": 140,
+  "title": "FFI: ephemeris file introspection — lib accessor + swisseph_get_current_file_data wrapper",
+  "description": "### Summary\nswisseph.dart's public API exposes `swe_get_current_file_data(ifno)` (file path, start/end JD, DE number of the ephemeris file backing the last calculation) and the lib crate has no public equivalent — the audit (swisseph-rs/139) found this is the only Dart-used C function with no lib-crate surface at all. Add a small introspection method to the lib crate and its FFI wrapper.\n\n### Design note (stateless twist)\nC's version reports the file used by the LAST swe_calc — global state we don't have. The stateless equivalent: `Ephemeris::file_data(kind, jd)` where kind mirrors C's ifno (0=planet, 1=moon, 2=main asteroid, 3=other asteroid, 4=planet moon) and `jd` selects which file would serve that epoch (the same selection logic calc uses — reuse it, don't duplicate). Returns path, tfstart, tfend, denum. JPL config: kind 0 → the JPL file's data. Moshier: no file → None/error code.\n\n### Files\n- `src/context.rs` (or `src/sweph_file/mod.rs` if the selection helper lives there): `pub fn file_data(&self, kind: …, jd: f64) -> Option<FileData>` + `pub struct FileData { path, start_jd, end_jd, denum }`\n- `swisseph-ffi/src/lib.rs` (or wherever introspection fns land): `swisseph_get_file_data(h, ifno: i32, jd: f64, path_buf: *mut c_char, path_cap, tfstart: *mut f64, tfend: *mut f64, denum: *mut i32) -> i32`\n- Header regen; tests in both crates\n\n### Tests\nLib: Swiss config → planet/moon file data matches the .se1 header (denum, range) for an epoch in sepl_18; boundary epoch selects the right file; Moshier → None; JPL → the .eph data. FFI: parity vs the lib method incl. path string write-back; Moshier → documented error code.\n\n### Acceptance criteria\n- `cargo test` (root) and `cargo test -p swisseph-ffi` pass\n- Header documents the ifno kinds and the jd-selects-the-file semantics (deliberate divergence from C's last-call semantics — say so)\n\n### Escape hatch\nIf exposing file paths requires holding data `SwissEphFile` doesn't retain (e.g. the path wasn't stored at open time), store it at open time — that's a compatible addition, not interior mutability.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward implementation — no surprises. SwissEphFile and JplFile didn't store their paths at open time (escape hatch in the task description anticipated this); added PathBuf field to both. File selection for the stateless API uses header-level time_range (not per-body), which is correct for introspection (C's swe_get_current_file_data returns file-level tfstart/tfend). Asteroid (ifno=3) and PlanetMoon (ifno=4) return None since stateless has no 'last used file' concept — documented in the enum variants. JPL kind=0 returns the JPL file data when ephemeris_source is Jpl. 10 lib tests + 3 FFI tests, all pass. Full suite 187+23 tests green.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d9e5d78"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208751276,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 140
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783267583725,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783268194768,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review (verdict: needs-attention)\n\nFinding 1 [high → downgraded to low]: JPL out-of-range fallthrough is dead code. file_data_planet falls through to sweph_planet_files() after the JPL range check, but Ephemeris::new sets (planet_files, moon_files) = (Vec::new(), Vec::new()) for JPL configs, so the fallthrough always returns None. This is consistent with how calc() behaves (no Swiss fallback under JPL config). Not a bug, but the dead fallthrough could be documented or shortcircuited.\n\nFinding 2 [medium → low]: file_data uses file-level time_range, not per-body selection with BOUNDARY_SLOP. This is a deliberate design choice per the execution_record — matches C's swe_get_current_file_data which also returns file-level tfstart/tfend. The doc comment says \"the same selection logic that calc uses\" which is slightly imprecise; more accurate to say \"file-level selection\" but not a correctness bug.\n\nFinding 3 [medium]: FFI write_err silently truncates path on success. swisseph_get_file_data returns 0 even when the path was truncated due to small path_cap. Callers get a partial path with no way to detect it. Low practical impact (ephe paths are short) but a real API contract gap — consistent with C's own behavior but the Rust FFI could do better.",
+      "ts": 1783274825397
+    },
+    {
+      "author": "agent",
+      "text": "Review: approve with notes. Clean implementation that correctly adapts C's stateful swe_get_current_file_data to a stateless API. One minor FFI contract gap (silent path truncation on success) worth addressing in the FFI capstone (swisseph-rs/138) rather than here.",
+      "ts": 1783274832388
+    }
+  ],
+  "created_at": 1783208751276,
+  "updated_at": 1783268194768,
+  "completed_at": 1783268194768,
+  "edges": [
+    {
+      "id": "019f2f86-55e1-7a71-92b4-6a7db5d53c5a",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/140",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208760801
+    },
+    {
+      "id": "019f2f86-57d3-7642-a2c0-77b0975527ca",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/140",
+      "note": null,
+      "created_at": 1783208761299
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "id": "019f855d-16fa-75a1-8e74-72f028d7f35f",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/158",
+  "sequence_number": 158,
+  "title": "calcPctr: extend SwephProvider for numbered asteroids and planet moons",
+  "description": "SwephProvider currently only routes main asteroid bodies (Chiron–Vesta, IDs 12–17) to main_asteroid_files. Numbered asteroids (Body::Asteroid, individual .se1 files) and planet moons (Body::PlanetMoon, sepm files) hit the else branch and look up in planet_files, which doesn't contain them → BeyondEphemerisLimits.\n\nSame pattern as the c3c27cb fix: add asteroid_files and planet_moon_files to SwephProvider, route by body type. For numbered asteroids, the AsteroidProvider pattern (evaluate from individual file, add sun_bary) applies. For planet moons, the PlanetMoonProvider pattern (evaluate offset from parent's barycentric position) applies.\n\nNote: JPL (DE441) doesn't include asteroids or planet moons. Returning an error for those bodies under JPL mode is correct — don't add a silent fallback to .se1 files.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward extension — added `asteroid_files` and `planet_moon_files` fields to SwephProvider, routed Body::Asteroid (evaluate + sun_bary) and Body::PlanetMoon (parent bary + offset) in positions(), updated all 10 construction sites. pctr_bary_state now passes real file refs from Ephemeris; all other sites pass &[] since they use the dedicated wrapper providers. No golden tests added (no .se1 asteroid/plmoon pctr test data yet) — this unblocks the path but verification requires golden data generation.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "c3c27cb",
+      "label": "main asteroid fix pattern"
+    },
+    {
+      "type": "sutra:symbol",
+      "value": "SwephProvider",
+      "label": "struct to extend"
+    },
+    {
+      "type": "sutra:symbol",
+      "value": "AsteroidProvider",
+      "label": "existing pattern for numbered asteroids"
+    },
+    {
+      "type": "sutra:symbol",
+      "value": "PlanetMoonProvider",
+      "label": "existing pattern for planet moons"
+    },
+    {
+      "type": "git:commit",
+      "value": "a330a4f"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1784648898298,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 158
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1784655924666,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1784656120894,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. Two medium findings: (1) nodaps_osc_body_j2000 passes empty asteroid_files — pre-existing, filed as follow-up. (2) calc_pctr missing alias normalization — fixed in d0d976e.",
+      "ts": 1784656525657
+    }
+  ],
+  "created_at": 1784648898298,
+  "updated_at": 1784656120894,
+  "completed_at": 1784656120894,
+  "edges": []
+}

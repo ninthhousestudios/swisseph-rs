@@ -1,0 +1,130 @@
+{
+  "id": "019f2f7f-9fe9-7512-86b9-eb4ab44c4908",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/138",
+  "sequence_number": 138,
+  "title": "FFI 8/8: capstone — C-side smoke test, concurrent ABI test, header audit, docs",
+  "description": "### Summary\nClose out the FFI layer: prove the ABI from the C side, prove concurrent use through the extern fns, audit the header, and update the docs. Runs after FFI 2/8–7/8 land. Read docs/ffi-design.md first.\n\n### Files\n- `swisseph-ffi/tests/c_smoke.rs` + `swisseph-ffi/tests/c/smoke.c` (new)\n- `swisseph-ffi/tests/concurrency.rs` (new)\n- `swisseph-ffi/README.md` (new)\n- `docs/ffi-design.md` (status update), `docs/codebase-map.md` (add swisseph-ffi section)\n\n### Implementation steps\n1. **C smoke test**: a small `smoke.c` that includes `include/swisseph.h`, calls `swisseph_version`, `swisseph_config_default`, `swisseph_new` (Moshier), `swisseph_calc_ut` for the Sun, checks the return code and a plausible longitude range, `swisseph_free`, and exercises one error path (bad ipl → negative code + non-empty err_buf). Compile and run it from `c_smoke.rs` using the `cc` crate as a dev-dependency (or fall back to invoking `$CC`/`cc` via std::process with a graceful skip + eprintln if no C compiler is present). This is the only test that validates the GENERATED HEADER actually compiles as C — the freshness test alone doesn't.\n2. **Concurrent ABI test**: port tests/send_sync.rs's determinism test to the FFI layer — one handle, 8 threads calling `swisseph_calc_ut` through the extern fn (raw pointer shared as usize, mirroring the Dart isolate pattern of passing the handle as an int), 10 planets × 100 epochs, results bitwise-identical to a serial baseline. Also assert err_buf isolation: each thread uses its own buffer, no cross-talk.\n3. **Handle-as-int round trip**: explicit test casting `*mut SweEphemeris` → usize → back, calling through it — documents the Dart isolate-sharing pattern in executable form.\n4. **Header audit**: every extern fn has a doc comment with out-param sizes, NULL semantics, units, and return convention (0=OK vs positive-flags families); error-code enum values all documented; no accidentally exported internal types (check the header diff by eye). Fix gaps found.\n5. **README.md**: build instructions (`cargo build -p swisseph-ffi --release`), artifact locations (.so/.a + header), linking example, the three return-code conventions, the handle model and isolate-sharing pattern, thread-safety guarantee (point at concurrency.rs), AGPL note.\n6. **docs/ffi-design.md**: flip status to implemented; record any divergences that emerged during 2/8–7/8 (e.g. the crossings return-convention divergence from C). **docs/codebase-map.md**: add the swisseph-ffi crate layout.\n\n### Acceptance criteria\n- `cargo test -p swisseph-ffi` passes incl. c_smoke (or shows the documented graceful skip when no C compiler) and concurrency\n- Root `cargo test` passes\n- README exists; ffi-design.md status updated; codebase-map.md updated\n\n### Escape hatch\nIf the C smoke test surfaces a header defect (wrong type mapping, missing include), fix it via cbindgen.toml config or the Rust-side type — never by hand-editing the generated header. If concurrency through the ABI diverges bitwise where tests/send_sync.rs doesn't, STOP and report — that would mean the FFI layer introduced state.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "All 6 deliverables landed in 3 commits:\\n\\n1. **C smoke test** (smoke.c + c_smoke.rs): exercises swisseph_version, config_default, new/calc_ut/free lifecycle, invalid-body error path, julday/revjul, degnorm. Compiles via system CC, graceful skip if no compiler. Validates the generated header actually compiles as C.\\n\\n2. **Concurrent ABI test** (concurrency.rs): 4 tests — (a) 8 threads × 1000 calc_ut calls bitwise-identical to serial baseline, (b) same via usize round-trip (Dart isolate pattern), (c) err_buf isolation across threads, (d) explicit ptr→usize→ptr identity + calc through recovered pointer.\\n\\n3. **Handle-as-int round trip**: included in concurrency.rs as a dedicated test.\\n\\n4. **Header audit**: added per-variant doc comments to all SweErrorCode values; documented silent truncation contract on all string-output functions (get_file_data, fixstar2, get_planet_name, get_ayanamsa_name); added units to fixstar2 xx out-param; regenerated swisseph.h. No accidentally exported internal types found.\\n\\n5. **README.md**: build instructions, artifact table, linking example, handle model code sample, isolate/thread sharing pattern with code, three return-code conventions table, thread-safety guarantee, AGPL note.\\n\\n6. **Doc updates**: ffi-design.md status→implemented with 3 recorded divergences (crossings return convention, string truncation, eclipse_where attr[]); codebase-map.md swisseph-ffi section added.\\n\\nAll 143 swisseph-ffi tests + 190 root tests pass.\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d31208c"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208321001,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 138
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783275365577,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783275800610,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "From swisseph-rs/140 review: write_err silently truncates on success. swisseph_get_file_data (and potentially other FFI wrappers) return 0 even when a string output was truncated due to small buffer capacity. Callers get a partial string with no way to detect it. Address in the header audit pass — either return a dedicated buffer-too-small error code, or document the truncation contract explicitly in the header comments for all write_err call sites.",
+      "ts": 1783274920939
+    },
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes (2 medium findings, both fixed in 6feb0f9).\\n\\n1. [medium, fixed] C smoke test hard-coded `../target/debug` ignoring CARGO_TARGET_DIR — could silently link a stale library. Fixed: honor CARGO_TARGET_DIR, make `-ldl` Linux-conditional.\\n\\n2. [medium, fixed] get_file_data doc claimed \\\"256 bytes\\\" was sufficient for the full path — unfounded since path length depends on ephe_path config. Removed the misleading claim; truncation contract documented but detection remains silent (follow-up: programmatic truncation signaling across all string out-params).",
+      "ts": 1783276155705
+    }
+  ],
+  "created_at": 1783208321001,
+  "updated_at": 1783275800610,
+  "completed_at": 1783275800610,
+  "edges": [
+    {
+      "id": "019f2f7f-e589-7d10-8ad6-b6d1b61be406",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/132",
+      "note": null,
+      "created_at": 1783208338825
+    },
+    {
+      "id": "019f2f7f-eb24-7a50-925e-48e15c91852d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/133",
+      "note": null,
+      "created_at": 1783208340260
+    },
+    {
+      "id": "019f2f7f-ef13-74d0-aba9-435d6bd13fda",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/134",
+      "note": null,
+      "created_at": 1783208341267
+    },
+    {
+      "id": "019f2f7f-f2bd-7101-aff4-db614e8016d9",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/135",
+      "note": null,
+      "created_at": 1783208342205
+    },
+    {
+      "id": "019f2f7f-f657-70e3-91a7-5aae93c86e10",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/136",
+      "note": null,
+      "created_at": 1783208343127
+    },
+    {
+      "id": "019f2f7f-f922-7d12-a0b4-2bf210e31627",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/137",
+      "note": null,
+      "created_at": 1783208343842
+    },
+    {
+      "id": "019f2f86-57d3-7642-a2c0-77b0975527ca",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/140",
+      "note": null,
+      "created_at": 1783208761299
+    }
+  ]
+}

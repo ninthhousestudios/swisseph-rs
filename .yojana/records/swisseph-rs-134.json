@@ -1,0 +1,85 @@
+{
+  "id": "019f2f7e-70fd-75a1-9340-9e0f03e59d09",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/134",
+  "sequence_number": 134,
+  "title": "FFI 4/8: houses, house position, Gauquelin sectors, azalt, refraction",
+  "description": "### Summary\nFFI wrappers for the house-system and horizontal-coordinate surface. Array layouts mirror C swisseph exactly (cusps[13]/[37], ascmc[10]) — that's what the Dart successor binding already speaks. Read docs/ffi-design.md and the established swisseph-ffi patterns first.\n\n### Files\n- `swisseph-ffi/src/houses.rs` (new module), header regen, `swisseph-ffi/tests/houses.rs`\n\n### Functions to add\n1. `swisseph_houses(h, tjd_ut, geolat, geolon, hsys: i32 /* ASCII char, e.g. 'P' */, cusps: *mut f64, ascmc: *mut f64) -> i32` — cusps must be sized 13, or 37 for hsys='G' (Gauquelin); document, mirror C's caller-sizes-the-buffer convention. HouseSystem from the char via its existing conversion (`HouseSystem` maps to/from C letters — check src/types.rs:379 impl; InvalidArg on unknown letter). Wraps `Ephemeris::houses` (context.rs:470).\n2. `swisseph_houses_ex(h, tjd_ut, iflag, ...)` and `swisseph_houses_ex2(h, ..., cusp_speed: *mut f64, ascmc_speed: *mut f64, err_buf...)` (context.rs:482/499). Flatten `HouseResult`/`AscMc` into the C arrays: ascmc[0..7] = Asc, MC, ARMC, Vertex, equatorial Asc, co-Asc (Koch), co-Asc (Munkasey), polar Asc — copy the slot order from C swe_houses docs / the AscMc struct doc comments; ascmc[8..9] zeroed.\n3. `swisseph_houses_armc(...)` + `swisseph_houses_armc_ex2` — free-fn port (src/houses.rs:1523); takes armc/geolat/eps directly, plus sidereal handling only if the lib signature carries it (wrap what exists, don't extend).\n4. `swisseph_house_pos(armc, geolat, eps, hsys, xpin: *const f64 /*[2] lon,lat*/, hpos out, err_buf...) -> i32` (src/houses.rs:2135). Sunshine needs the sun-declination input — check the lib signature for how sundec is threaded and mirror it (nullable `*const f64`).\n5. `swisseph_gauquelin_sector(h, tjd_ut, ipl, starname nullable, iflag, imeth, geopos[3], atpress, attemp, dgsect out, err_buf...) -> i32` (context.rs:1531). Circumpolar error → its mapped code; document.\n6. `swisseph_azalt(h, tjd_ut, calc_flag: i32 /* SE_ECL2HOR=0, SE_EQU2HOR=1 */, geopos[3], atpress, attemp, xin: *const f64, xaz: *mut f64 /*[3]*/)` + `swisseph_azalt_rev(...)` (context.rs:639/661). Note the lib uses AzAltDir/HorDir enums because C's constants collide (SE_ECL2HOR==SE_HOR2ECL==0) — the C ABI must use C's numbering; map int+function to the right enum.\n7. `swisseph_refrac(inalt, atpress, attemp, calc_flag) -> f64` + `swisseph_refrac_extended(inalt, geoalt, atpress, attemp, lapse_rate, calc_flag, dret: *mut f64 /*[4]*/) -> f64` (src/azalt.rs:46/95) — handle-free pure fns.\n\n### Audit amendments (swisseph-rs/139 — swisseph.dart uses this)\n- `swisseph_house_name(hsys: i32, buf: *mut c_char, cap) -> i32` — handle-free; `HouseSystem::name()` (types.rs:412) after the char→HouseSystem conversion; unknown letter → InvalidArg.\n\n### Tests\nParity vs lib: houses_ex2 for {P, K, W, G, I} at 2 epochs/2 latitudes (incl. a polar latitude for the Placidus fallback path), cusps AND speeds bitwise; house_pos for Placidus + Gauquelin + Sunshine (with sundec); azalt/azalt_rev round-trip; refrac_extended both directions; gauquelin_sector imeth 0 and 2; hsys='G' with a 37-slot buffer; house_name for all implemented systems; error paths (bad hsys letter, circumpolar gauquelin).\n\n### Acceptance criteria\n- `cargo test -p swisseph-ffi` and root `cargo test` pass; header freshness green\n- Header documents the cusps sizing rule (13 vs 37 for 'G') and every ascmc slot index\n\n### Escape hatch\nIf AscMc doesn't expose a field the C ascmc[] layout wants, zero that slot and note it in the header comment — do not extend the lib crate's public types from this task.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "67de9fe"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208243453,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 134
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783263069904,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783263600024,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with fixes landed (90d30f2). Four findings — all addressed:\\n1. [medium] atpress=0 header doc said \\\"no refraction\\\" but lib auto-estimates pressure → fixed doc to \\\"auto-estimates from altitude\\\"\\n2. [medium] hsys_from_char i32→u8 wrapping on negative/overflow values → added u8::try_from guard + tests for -1 and 'P'+256\\n3. [medium] void azalt/azalt_rev lacked panic containment → added catch_unwind\\n4. [low] ascmc layout undocumented on some functions → added slot-by-slot layout to all ascmc-returning functions\"",
+      "ts": 1783264233167
+    }
+  ],
+  "created_at": 1783208243453,
+  "updated_at": 1783263600024,
+  "completed_at": 1783263600024,
+  "edges": [
+    {
+      "id": "019f2f7f-c332-7091-b844-c3d5a0008362",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/134",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208330034
+    },
+    {
+      "id": "019f2f7f-ef13-74d0-aba9-435d6bd13fda",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/134",
+      "note": null,
+      "created_at": 1783208341267
+    }
+  ]
+}

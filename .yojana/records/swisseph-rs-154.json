@@ -1,0 +1,60 @@
+{
+  "id": "019f4db4-ea3e-7613-9d36-a03f235f0979",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/154",
+  "sequence_number": 154,
+  "title": "checkout third column in this command",
+  "description": "swetest -p0123456789 -b10.07.2026 -fldtz -g, -- in rust, print --ZD--; should print values",
+  "category": "bug",
+  "status": "done",
+  "slice_type": null,
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": "The 'z' format specifier (zenith distance) set needs.equatorial but not needs.azalt. The xaz data it reads was only populated by the azalt block, which forces TOPOCTR and fails without a configured topographic position. C's swetest computes zenith distance from the plain (non-TOPOCTR) equatorial position via swe_azalt — a coordinate transform, not a parallax correction.",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "1092e66"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783715129918,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 154
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781116753,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781322228,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783715129918,
+  "updated_at": 1783781322228,
+  "completed_at": 1783781322228,
+  "edges": []
+}

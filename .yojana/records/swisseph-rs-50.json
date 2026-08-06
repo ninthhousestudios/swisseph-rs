@@ -1,0 +1,96 @@
+{
+  "id": "019f14c9-1220-70b3-9613-c4bb7ef97b74",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/50",
+  "sequence_number": 50,
+  "title": "Scalar ayanamsa computation (get_ayanamsa) + golden tests",
+  "description": "### Summary\nImplement the scalar ayanamsa value computation: `swi_get_ayanamsa_ex` (Method 1 traditional + Method 2 ecliptic-of-date), `get_aya_correction`, the two-point speed derivative, and the public nutation-adding wrapper, plus thin `Ephemeris` accessor methods. This produces the ayanamsa angle for a given JD; the calc-pipeline projection that APPLIES it is the next sub-task. Fixed-star ayanamsa modes are DEFERRED (return an error).\n\n### Architecture notes\n- Stateless: all functions take `&EphemerisConfig` (or its fields) + `&AstroModels` explicitly. No global `swed`. The C save/restore of `xxsv` around the ayanamsa call (to protect a global sun cache for TRUE_CITRA) is UNNECESSARY here — we have no global cache; do not port it.\n- Depends on the table + `set_sidereal_mode` from the prior sub-task (swisseph-rs/49).\n\n### Files\n- **src/ayanamsa.rs**: add the four functions below.\n- **src/error.rs**: add `Error::SiderealModeRequiresFixedStars(SiderealMode)` variant + a `Display` arm (e.g. \"sidereal mode {mode:?} requires the fixed-star subsystem (not yet implemented)\"). Add `use crate::types::SiderealMode;` if needed.\n- **src/context.rs**: add `Ephemeris::get_ayanamsa_ex`, `get_ayanamsa_ut`, `get_ayanamsa` methods (thin wrappers over the free functions using `self.config` + `self.config.astro_models`).\n- **src/lib.rs**: re-export the public free functions if convenient (optional).\n- **tests/c-gen/gen_ayanamsa.c**, **tests/golden-data/ayanamsa.json**, **tests/golden/ayanamsa.rs**, and add `mod ayanamsa;` to **tests/golden/main.rs**.\n\n### Key Rust APIs to use (already exist)\n- `crate::precession::precess(pos: &mut [f64;3], jd: f64, flags: CalcFlags, models: &AstroModels, dir: PrecessionDirection)` — `PrecessionDirection::DateToJ2000` for \"precess date→J2000\", `J2000ToDate` for \"J2000→t0/date\".\n- `crate::obliquity::obliquity(jd, flags, models) -> Epsilon` — `.eps` is mean obliquity in RADIANS. Call with `CalcFlags::empty()` to match C's `swi_epsiln(t, 0)`.\n- `crate::math::rotate_x(v: [f64;3], angle_rad) -> [f64;3]` — this is C's `swi_coortrf` on a CARTESIAN vector (positive angle = equatorial→ecliptic). Use this, NOT `math::cotrans` (cotrans is the polar/degree wrapper; the C ayanamsa code does explicit cartpol/coortrf/polcart on cartesian, so use rotate_x + cartesian_to_polar + polar_to_cartesian to match FP order).\n- `crate::math::cartesian_to_polar([f64;3]) -> [f64;3]` (C `swi_cartpol`), `polar_to_cartesian([f64;3]) -> [f64;3]` (C `swi_polcart`).\n- `crate::math::normalize_degrees(f64) -> f64` (C `swe_degnorm`).\n- `crate::deltat::calc_deltat(jd_ut, config) -> f64` for t0_is_ut conversion.\n- `crate::nutation::nutation(jd, flags, models)` returns a type with `.dpsi` (radians) for the public wrapper.\n\n### Implementation steps\n\n1. **`fn get_ayanamsa_ex(config, jd_tt, flags, models) -> Result<f64, Error>`** (core, NO nutation). Cite docs/c-ref-ayanamsa.md §\"swi_get_ayanamsa_ex()\". The bare index = `config.sidereal_mode` (treat `None` as `SiderealMode::FaganBradley`). \n   - **Deferred check first**: if index ∈ {17,27,28,29,30,31,32,33,35,36,39,40} → `return Err(Error::SiderealModeRequiresFixedStars(mode))`.\n   - Resolve `t0 = config.sidereal_t0; if config.sidereal_t0_is_ut { t0 += calc_deltat(t0, config); }` and `ayan_t0 = config.sidereal_ayan_t0`.\n   - **Method 2** if `config.sidereal_bits.contains(SiderealBits::ECL_DATE)` (cite §\"Method 2 — ECL_DATE\"):\n     1. `let mut x = [normalize_degrees(ayan_t0) * DEGTORAD, 0.0, 1.0];` (ecliptic polar at t0)\n     2. `x = polar_to_cartesian(x);` (ecliptic cartesian at t0)\n     3. `let eps_t0 = obliquity(t0, empty, models).eps; x = rotate_x(x, -eps_t0);` (ecliptic→equatorial, NEGATIVE eps)\n     4. `if t0 != J2000 { precess(&mut x, t0, flags, models, DateToJ2000); }` (t0→J2000)\n     5. `precess(&mut x, jd_tt, flags, models, J2000ToDate);` (J2000→date)\n     6. `let eps_d = obliquity(jd_tt, empty, models).eps; x = rotate_x(x, eps_d);` (equatorial→ecliptic of date, POSITIVE eps)\n     7. `x = cartesian_to_polar(x); let lon = normalize_degrees(x[0] * RADTODEG);`\n   - **Method 1** (default) otherwise (cite §\"Method 1 — default\"):\n     1. `let mut x = [1.0, 0.0, 0.0];` (vernal point at date, equatorial cartesian)\n     2. `if jd_tt != J2000 { precess(&mut x, jd_tt, flags, models, DateToJ2000); }`\n     3. `precess(&mut x, t0, flags, models, J2000ToDate);`\n     4. `let eps_t0 = obliquity(t0, empty, models).eps; x = rotate_x(x, eps_t0);` (POSITIVE eps)\n     5. `x = cartesian_to_polar(x);`\n     6. `let lon = -x[0] * RADTODEG + ayan_t0;` — **FP note 1: write exactly `-x[0] * RADTODEG + ayan_t0`, not `ayan_t0 - x[0]*RADTODEG`.**\n   - Common tail: `let corr = get_aya_correction(config, flags, models); Ok(normalize_degrees(lon - corr))`.\n   - NOTE: `precess` is passed `flags` here; NONUT/ephe bits don't affect precession output but pass them through for parity.\n\n2. **`fn get_aya_correction(config, flags, models) -> f64`**. Cite §\"get_aya_correction()\". Index = config.sidereal_mode (FaganBradley if None). Look up `prec_offset = AYANAMSA[index].prec_offset` (0 if index==255/USER).\n   - Return `0.0` if any: `config.sidereal_t0 == J2000`, `config.sidereal_bits.contains(NO_PREC_OFFSET)`, `prec_offset == 0`, `prec_offset < 0`, or `prec_model == prec_offset` where `prec_model = config.astro_models.prec_longterm as i32`.\n   - Else: resolve `t0` (UT→TT as above). `let mut x = [1.0, 0.0, 0.0];`\n     - `precess(&mut x, t0, flags, models, DateToJ2000);` (t0→J2000, CURRENT model)\n     - Build a `models_orig` copy of `models` with `prec_longterm = prec_shortterm = PrecessionModel::try_from(prec_offset).unwrap()`; `precess(&mut x, t0, flags, &models_orig, J2000ToDate);` (J2000→t0, ORIGINAL model). [In C this is done by swapping the global model temporarily; stateless port uses a local AstroModels copy.]\n     - `let eps = obliquity(t0, empty, models).eps; x = rotate_x(x, eps); x = cartesian_to_polar(x); let mut corr = x[0] * RADTODEG; if corr > 350.0 { corr -= 360.0; } corr` (FP note 3 — the >350 clamp is intentional).\n\n3. **`fn get_ayanamsa_ex_nut(config, jd_tt, flags, models) -> Result<f64, Error>`** (public, adds nutation). Cite §\"swe_get_ayanamsa_ex()\". `let mut daya = get_ayanamsa_ex(config, jd_tt, flags, models)?; if !flags.contains(CalcFlags::NONUT) { daya += nutation(jd_tt, flags, models).dpsi * RADTODEG; } Ok(daya)`. (dpsi is radians; *RADTODEG → degrees.)\n\n4. **`fn get_ayanamsa_with_speed(config, jd_tt, flags, models) -> Result<[f64;2], Error>`**. Cite §\"swi_get_ayanamsa_with_speed()\". `const TINTV: f64 = 0.001; let d0 = get_ayanamsa_ex(config, jd_tt, flags, models)?; let d2 = get_ayanamsa_ex(config, jd_tt - TINTV, flags, models)?; Ok([d0, (d0 - d2) / TINTV])`. NOTE: uses the NO-nutation core (matches C: the calc pipeline subtracts non-nutated ayanamsa).\n\n5. **`Ephemeris` methods** (src/context.rs): \n   - `pub fn get_ayanamsa_ex(&self, jd_tt: f64, flags: CalcFlags) -> Result<f64, Error>` → `ayanamsa::get_ayanamsa_ex_nut(&self.config, jd_tt, flags, &self.config.astro_models)`.\n   - `pub fn get_ayanamsa_ut(&self, jd_ut: f64, flags: CalcFlags) -> Result<f64, Error>` → `let dt = calc_deltat(jd_ut, &self.config); self.get_ayanamsa_ex(jd_ut + dt, flags)`.\n   - `pub fn get_ayanamsa(&self, jd_tt: f64) -> Result<f64, Error>` → legacy, no nutation: `ayanamsa::get_ayanamsa_ex(&self.config, jd_tt, CalcFlags::empty(), &self.config.astro_models)`.\n\n### C reference\ndocs/c-ref-ayanamsa.md §\"swi_get_ayanamsa_ex()\", §\"get_aya_correction()\", §\"swe_get_ayanamsa_ex()\", §\"swi_get_ayanamsa_with_speed()\", §\"Nutation Interaction\", FP-Fidelity Notes 1-5.\n\n### Golden tests\n**C harness** `tests/c-gen/gen_ayanamsa.c` (compile header: `cc -Wall -I../../../swisseph -o gen_ayanamsa gen_ayanamsa.c ../../../swisseph/libswe.a -lm`, run `./gen_ayanamsa > ../golden-data/ayanamsa.json`). It must `#include \"swephexp.h\"` and declare the internal `extern int32 swi_get_ayanamsa_with_speed(double, int32, double*, char*);`. For each of the 35 NON-deferred indices (0-16, 18-26, 34, 37, 38, 41-46) × ~8 epochs (reuse a spread like the sidereal_time gen: e.g. 1356175.5, 1757583.5, 2415020.0, 2433282.5, 2451545.0, 2455197.5, 2458849.5, 2488070.0):\n  - `swe_close(); swe_set_ephe_path(NULL); swe_set_sid_mode(index, 0, 0);`\n  - `double daya; swe_get_ayanamsa_ex(tjd, SEFLG_MOSEPH, &daya, serr);` → field `with_nut`.\n  - `swe_get_ayanamsa_ex(tjd, SEFLG_MOSEPH|SEFLG_NONUT, &daya, serr);` → field `no_nut`.\n  - `double dd[2]; swi_get_ayanamsa_with_speed(tjd, SEFLG_MOSEPH, dd, serr);` → field `speed` = dd[1].\n  - Also emit ONE USER-mode group: `swe_set_sid_mode(SE_SIDM_USER, 2433282.5, 24.0); swe_get_ayanamsa_ex(2451545.0, SEFLG_MOSEPH|SEFLG_NONUT,...)`.\n  Emit JSON: `{\"cases\":[{\"index\":N,\"tjd\":..,\"with_nut\":..,\"no_nut\":..,\"speed\":..}, ...], \"user\":[{...}]}`.\n**Rust test** `tests/golden/ayanamsa.rs`: deserialize; for each case build `EphemerisConfig` with `ephemeris_source = Moshier` (default) and `set_sidereal_mode(index, 0.0, 0.0)`; assert:\n  - `get_ayanamsa_ex_nut(cfg, tjd, MOSEPH, models)` ≈ `with_nut` (eps 1e-8).\n  - `get_ayanamsa_ex(cfg, tjd, MOSEPH|NONUT, models)` ≈ `no_nut` (eps 1e-8).\n  - `get_ayanamsa_with_speed(cfg, tjd, MOSEPH, models)[1]` ≈ `speed` (eps 1e-7).\n  - USER group via `set_sidereal_mode(255, 2433282.5, 24.0)`.\n  NOTE: C `swe_get_ayanamsa_ex` with `SEFLG_MOSEPH` uses Moshier delta-T (TIDAL_DE404 = -25.580). If values mismatch and you trace it to delta-T, pin `cfg.tidal_acceleration = Some(TIDAL_DE404)` — see tests/golden/sidereal_time.rs `config_for_model` for the precedent.\n\n### Acceptance criteria\n- `cargo test --test golden ayanamsa -- --nocapture` passes for all 35 modes + USER.\n- `cargo clippy --all-targets -- -D warnings` clean.\n- Value tolerance 1e-8 deg, speed 1e-7 deg/day.\n\n### Escape hatch\nIf golden tests fail with errors > 1e-8 after two debugging attempts, STOP and report: which mode indices/epochs fail, actual vs expected, what you tried. Prime suspects in order: (1) rotate_x sign for equ↔ecl (Method 2 uses NEGATIVE eps for ecl→equ, POSITIVE for equ→ecl); (2) delta-T tidal accel mismatch (pin TIDAL_DE404); (3) FP note 1 expression order; (4) get_aya_correction sign (it is SUBTRACTED: `lon - corr`). Per CLAUDE.md, read the actual C (sweph.c:3002-3208) for FP-order issues, not just the ref doc. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "3787e00"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "ayanamsa"
+  ],
+  "history": [
+    {
+      "ts": 1782760149536,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 50
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782761375082,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782761607734,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, batch 49-52): approve. Scalar ayanamsa golden tests pass (no_nut/with_nut/speed/user, eps 1e-8/1e-7). FP-order notes honored (Method 1 `-polar[0]*RADTODEG + ayan_t0`, lon-corr subtraction, >350 clamp). Minor: pub(crate) fn aya_init is dead code (#[allow(dead_code)]); AYANAMSA is indexed directly everywhere — drop it or use it.",
+      "ts": 1782764905330
+    }
+  ],
+  "created_at": 1782760149536,
+  "updated_at": 1782761607734,
+  "completed_at": 1782761607734,
+  "arc_id": "019efa3c-0958-7191-8176-140a89304f9a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f14ca-b7a4-77d3-bbfe-2db8a88bbccb",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/50",
+      "target": "swisseph-rs/49",
+      "note": null,
+      "created_at": 1782760257444
+    },
+    {
+      "id": "019f14ca-bb54-7c40-8fe8-39df63bed710",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/51",
+      "target": "swisseph-rs/50",
+      "note": null,
+      "created_at": 1782760258388
+    },
+    {
+      "id": "019f14ca-c823-7fb2-8cca-8fc0b16c412f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/50",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760261667
+    }
+  ]
+}

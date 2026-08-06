@@ -1,0 +1,96 @@
+{
+  "id": "019f1398-d6a5-7543-b286-a153c15d0c31",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/46",
+  "sequence_number": 46,
+  "title": "Wire JPL backend into calc dispatch (EphemerisSource::Jpl)",
+  "description": "Make `EphemerisSource::Jpl` work end-to-end: open the JPL file at `Ephemeris` construction, implement a `PositionProvider` backed by `jpl_pleph`, route the calc dispatch through the shared apparent-position pipeline, and golden-test against `swe_calc(SEFLG_JPLEPH)`.\n\nDepends on swisseph-rs/44 (`jpl_pleph`) and swisseph-rs/45 (the `PositionProvider` trait + `apparent_*` pipeline). Read `docs/c-ref-jpl.md` §\"Integration Contract — jplplan\".\n\n## Architecture invariants\n- Stateless: the open `JplFile` is read-only config stored in `Ephemeris`; all calc methods stay `&self`.\n- Application modules go through calc.rs, not directly to the backend (the JPL provider lives in calc.rs alongside SwephProvider).\n\n## Files\n- `src/context.rs`:\n  - Add `jpl_file: Option<crate::jpl::JplFile>` to `Ephemeris` (struct at src/context.rs:49).\n  - In `Ephemeris::new` (src/context.rs:56), replace the `EphemerisSource::Jpl => Err(UnsupportedEphemeris)` arm (src/context.rs:73-75): open `<ephe_path>/<jpl_filename>` (default `jpl_filename` to `\"de441.eph\"` if `None`; require `ephe_path` else `Error::FileFormat`), store `Some(JplFile)`. Set `planet_files`/`moon_files` to empty for the Jpl source.\n  - In `calc_inner` (src/context.rs:142), add a JPL branch parallel to the `EphemerisSource::Swiss` arm (src/context.rs:178-200): dispatch to `calc_body_jpl`. JPL has no Moshier-fallback (unlike Swiss → Moshier at src/context.rs:182-192); on `BeyondEphemerisLimits` return the error (DE441 spans -13200..+17191, so practical epochs are always in range).\n  - Add `fn calc_body_jpl(&self, jd, body, eps_j2000, flags, models) -> Result<[f64;24], Error>` mirroring `calc_body_sweph` (src/context.rs:229): match Sun/Moon/planets → `crate::calc::calc_planet_jpl`/`calc_sun_jpl`/`calc_moon_jpl` passing `self.jpl_file.as_ref().unwrap()`; other bodies → `Error::EphemerisNotAvailable { body, source: Jpl }`.\n- `src/calc.rs`:\n  - Implement `struct JplProvider<'a> { file: &'a JplFile }` with `impl PositionProvider`:\n    - `positions(body, jd, need_speed)`: map `body` → J_* index (Sun→J_SUN, Mercury..Pluto→J_MERCURY..J_PLUTO). Compute `planet_bary = jpl_pleph(file, jd, j_target, J_SBARY, need_speed)`, `earth_bary = jpl_pleph(file, jd, J_EARTH, J_SBARY, ..)`, `sun_bary = jpl_pleph(file, jd, J_SUN, J_SBARY, ..)`, `earth_helio = jpl_pleph(file, jd, J_EARTH, J_SUN, ..)`. (For body==Sun, `planet_bary` = sun_bary; fine.) Assemble `SwephPositions`.\n    - `moon_geo(jd, need_speed)`: `jpl_pleph(file, jd, J_MOON, J_EARTH, need_speed)`.\n  - Add thin entry points `pub fn calc_planet_jpl/calc_sun_jpl/calc_moon_jpl(jd, [body], file: &JplFile, eps_j2000, flags, models) -> Result<[f64;24], Error>` that build a `JplProvider` and call `apparent_planet/apparent_sun/apparent_moon` from swisseph-rs/45.\n- `tests/`: `tests/c-gen/gen_calc_jpl.c`, `tests/golden/calc_jpl.rs`, register `mod calc_jpl;` in main.rs.\n\n## Frame subtlety (the one real risk)\nThe shared pipeline expects barycentric **equatorial J2000** positions and applies `frame_bias(GcrsToJ2000)` when `!ICRS`. JPL DE403+ raw output is ICRF/equatorial-J2000 — nominally the same frame the SE1 path delivers, so the shared pipeline should apply unchanged. HOWEVER, C's JPL path applies an `swi_icrs2fk5` step that the SE1 path does not (c-ref-jpl.md §\"Post-Processing Pipeline\" step 2). If a small, ~constant offset appears (mas-scale, consistent across bodies/epochs), the fix is an ICRS↔FK5 frame adjustment applied **inside `JplProvider`** (so the shared pipeline stays frame-agnostic), NOT in the shared pipeline. Investigate this only if the golden test shows a systematic offset; positions matching to 1e-8 means no adjustment is needed. Document the outcome in execution_record.\n\n## C reference\n`docs/c-ref-jpl.md` §\"Integration Contract — jplplan\" (body mapping `pnoint2jpl`, center selection: Moon→J_EARTH, others→J_SBARY; output frame/units; downstream pipeline).\n\n## Golden tests\n- **`gen_calc_jpl.c`**: clone `tests/c-gen/gen_calc_sweph.c` but (a) `swe_set_jpl_file(\"de441.eph\")` + `swe_set_ephe_path(\"<repo>/ephe\")`, (b) flags use `SEFLG_JPLEPH` instead of `SEFLG_SWIEPH`, (c) same 12 flag combos, bodies 0-9 (Sun..Pluto), 7 epochs. Emit `tests/golden-data/calc_jpl.json` (same schema as calc_sweph.json: `{body, body_name, jd, flags, flag_name, output:[6]}`).\n- **`calc_jpl.rs`**: clone `tests/golden/calc_sweph.rs`; `EphemerisConfig { ephemeris_source: Jpl, ephe_path: Some(<repo>/ephe), jpl_filename: Some(\"de441.eph\"), ..default() }`. `ephe_path()` here = `CARGO_MANIFEST_DIR/ephe` (the repo's own ephe dir — NOT ../swisseph/ephe). Gate the whole test on `ephe/de441.eph` existence (skip-return if absent). Tolerances: positions `1e-8`, speeds `1e-7` (JPL vs C swe_calc; allow 1e-8 positions since stateless light-time iteration + Chebyshev accumulation differ slightly from C's cached path — tighten to 1e-9/1e-10 if it passes). Apply the same SPEED3 file-boundary relaxation only if needed (JPL has no file boundaries, so SPEED3 should be clean — assert 1e-7).\n\n## Acceptance criteria\n- `cargo build` clean; `cargo clippy --all-targets` no new warnings.\n- `cargo test --test golden calc_jpl -- --nocapture` passes (must actually run — de441.eph present).\n- `cargo test --test golden calc_sweph` still passes (refactor + JPL addition didn't regress sweph).\n- `cargo test` full suite passes.\n- No new blocking forbidden_dep violations.\n\n## Escape hatch\nIf positions diverge > 1e-8 after two attempts:\n- First check for a systematic constant offset → ICRS/FK5 frame issue (see \"Frame subtlety\"); try the `JplProvider`-level adjustment as attempt 2.\n- If still failing, STOP and report: failing (body, jd, flag), actual vs expected for all 6 comps, whether the offset is constant or scattered, and the `default`-flag (no-frame-transforms) result vs `ICRS`-flag result (isolates frame vs pipeline). Escalate to Opus. Do not chase past two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [
+    {
+      "decision": "No ICRS↔FK5 frame adjustment in JplProvider",
+      "rationale": "Positions match C's swe_calc(SEFLG_JPLEPH) at 1e-8 without any frame correction. The shared pipeline's frame_bias(GcrsToJ2000) is sufficient.",
+      "rejected_alternatives": "Applying swi_icrs2fk5 inside JplProvider (would have broken the golden tests)."
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Implemented as planned. JplProvider struct with PositionProvider impl makes 3 jpl_pleph calls per positions() (planet_bary, earth_bary, sun_bary barycentric vs J_SBARY; earth_helio computed as earth_bary - sun_bary). Entry points calc_planet/sun/moon_jpl build JplProvider and delegate to the shared apparent_planet/sun/moon pipeline. context.rs: added jpl_file field, Jpl arm in Ephemeris::new opens JplFile, calc_inner dispatches to calc_body_jpl (no Moshier fallback). Frame subtlety: no ICRS↔FK5 offset detected — positions match at 1e-8, confirming no adjustment needed. C generator gen_calc_jpl.c required dup2 suppression of stdout during swe_calc to prevent libswe.a DEFLSPD debug printfs from corrupting the JSON output.\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "57da186"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-3",
+    "jpl"
+  ],
+  "history": [
+    {
+      "ts": 1782740211365,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 46
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782743760288,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782744306224,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782740211365,
+  "updated_at": 1782744306224,
+  "completed_at": 1782744306224,
+  "arc_id": "019efa3b-ffd4-7111-894d-963830d91b4a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1398-f5df-78c1-b447-bd4e0ef30aca",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/46",
+      "target": "swisseph-rs/44",
+      "note": null,
+      "created_at": 1782740219359
+    },
+    {
+      "id": "019f1398-f983-7ad0-a57f-21c5441a36e7",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/46",
+      "target": "swisseph-rs/45",
+      "note": null,
+      "created_at": 1782740220291
+    },
+    {
+      "id": "019f1399-0760-7241-a47b-e92a2d735a4e",
+      "edge_type": "refines",
+      "source": "swisseph-rs/46",
+      "target": "swisseph-rs/8",
+      "note": null,
+      "created_at": 1782740223840
+    }
+  ]
+}

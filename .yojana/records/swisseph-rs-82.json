@@ -1,0 +1,84 @@
+{
+  "id": "019f201c-9a3c-7c71-a6ee-15e9dcb61d9e",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/82",
+  "sequence_number": 82,
+  "title": "PNOC 1/9: Activate sutra architectural constraints for Phase 12 app modules",
+  "description": "### Summary\nEdit `.sutra/rules.toml` so the `app-uses-calc-not-backends` forbidden_dep constraints fire for every module Phase 12 (arc swisseph-rs/~13) touches or creates. Pure config edit — no Rust code changes. (The overdue azalt/riseset blocks were already uncommented directly at the swisseph-rs/13 planning checkpoint — do not touch them.)\n\n### Files\n- `.sutra/rules.toml` — the only file to modify.\n\n### Implementation steps\n1. **Uncomment the phenomena block** (3 constraints: `app-uses-calc-not-backends:phenomena→{moshier,jpl,sweph}`). Two of the three have STALE single-file globs — fix while uncommenting: `to = \"src/jpl.rs\"` → `to = \"src/jpl/**\"` and `to = \"src/sweph_file.rs\"` → `to = \"src/sweph_file/**\"` (both became directory modules; same correction the houses/eclipse blocks record in their ACTIVATED notes). Precede with an `ACTIVATED 2026-07-01 — Phase 12 (swisseph-rs/13 → PNOC 2): the phenomena port begins this arc, so phenomena.rs gets real code. Globs corrected from the stale single-file form.` comment, matching the ACTIVATED comment style used for the houses/eclipse/azalt/riseset blocks above it.\n2. **Add three NEW live constraint blocks** for the modules this arc creates, following the exact TOML shape of the existing houses block (kind = \"forbidden_dep\", severity = \"blocking\", provenance = \"yojana:swisseph-rs §module-tree\"), 3 constraints each:\n   - `app-uses-calc-not-backends:nodaps→{moshier,jpl,sweph}` with `from = \"src/nodaps.rs\"`\n   - `app-uses-calc-not-backends:orbit→{moshier,jpl,sweph}` with `from = \"src/orbit.rs\"`\n   - `app-uses-calc-not-backends:crossings→{moshier,jpl,sweph}` with `from = \"src/crossings.rs\"`\n   Targets: `src/moshier/**`, `src/jpl/**`, `src/sweph_file/**`. Precede the group with a comment: `# ACTIVATED 2026-07-01 — Phase 12 (swisseph-rs/13 → PNOC 3-7): nodaps.rs / orbit.rs / crossings.rs are created this arc. Bound at planning time so they fire as the arc is implemented; inert (dead_constraint) only until each file lands within this arc.`\n3. **Leave the heliacal block commented** — heliacal.rs remains an empty stub until Phase 14 (swisseph-rs/14). Do not touch it or the commented app-modules-independent section at the bottom.\n4. Verify: run `mcp__sutra__sutra_constraints action=list workspace=/home/josh/nhs/soft/astrology/swisseph-rs` and confirm the file parsed and the twelve new/uncommented constraint names appear (phenomena 3, nodaps 3, orbit 3, crossings 3).\n\n### C reference\nNone — config-only task.\n\n### Golden tests\nNone. Verification is sutra-level, not cargo-level.\n\n### Acceptance criteria\n- `sutra_constraints action=list` output includes live constraints named `app-uses-calc-not-backends:phenomena→*`, `:nodaps→*`, `:orbit→*`, `:crossings→*` (3 each), all severity=blocking.\n- The phenomena block's jpl/sweph globs are the directory form (`src/jpl/**`, `src/sweph_file/**`), not the stale single-file form.\n- The heliacal block and the app-modules-independent section remain commented.\n- No Rust changes (`git diff --stat` touches only `.sutra/rules.toml`).\n\n### Escape hatch\nIf sutra rejects the file (parse error) after two fix attempts, STOP and report the exact sutra error output and the diff you applied.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "2061628"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "pnoc"
+  ],
+  "history": [
+    {
+      "ts": 1782950173244,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 82
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782950370992,
+      "kind": "updated",
+      "payload": {
+        "field": "title",
+        "from": "PNOC 1/9: Activate sutra architectural constraints for Phase 12 app modules (+ overdue azalt/riseset)",
+        "to": "PNOC 1/9: Activate sutra architectural constraints for Phase 12 app modules"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782999713061,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782999716104,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782950173244,
+  "updated_at": 1782999716104,
+  "completed_at": 1782999716104,
+  "arc_id": "019efa3c-46ed-7b32-818d-be319d217d53",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f201c-bd98-7d91-83e3-a68ed66b1466",
+      "edge_type": "refines",
+      "source": "swisseph-rs/82",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950182296
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "id": "019f3426-ba0b-7c93-8eee-f58235ca26ad",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/143",
+  "sequence_number": 143,
+  "title": "swisseph-ffi: refcounted handle sharing (swisseph_share / Arc-backed free)",
+  "description": "## Parent\n\nyojana:swisseph-rs-dart/20 (PRD v2) — upstream prerequisite for the Dart sharing surface. Decision record: swisseph.rs.dart/docs/adr/0002 (Arc at the FFI boundary).\n\n## What to build\n\nMake the opaque handle refcounted at the FFI boundary so co-equal handles can be freed in any order: internally wrap the engine in Arc; add `swisseph_share(handle)` returning a new handle that clones the Arc; `swisseph_free` becomes a refcount drop (last drop frees the engine). Regenerate the cbindgen header.\n\n## Acceptance criteria\n\n- [ ] `swisseph_share` exported, documented in swisseph.h with ownership semantics (every handle freed exactly once, any order)\n- [ ] `swisseph_free` on a shared handle does not invalidate siblings; last free releases engine memory (asserted via FFI test)\n- [ ] Concurrency test: N threads calc over shared handles while others free theirs — no UB under miri/sanitizer where feasible\n- [ ] Zero behavior change for single-handle users; existing FFI tests green\n- [ ] Version bump so the Dart shim can pin a rev containing this\n\n## Blocked by\n\nNone — can start immediately.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": "## Approach\n\nWrap the inner `Ephemeris` in `Arc` at the FFI boundary so handles are refcounted. Add `swisseph_share(handle)` that clones the `Arc` and returns a new opaque pointer. `swisseph_free` becomes a refcount drop — the last drop frees the engine. All 61 existing handle-dereference sites (`&(*handle).0`) continue to work identically because the `Arc` transparently derefs to `Ephemeris`.\n\nThis is a purely FFI-layer change — `swisseph` (the Rust crate) doesn't change. `Ephemeris` is already `Send + Sync` by construction (pinned in `tests/send_sync.rs`), so wrapping it in `Arc` is sound.\n\n## Files\n\n- **Modify**: `swisseph-ffi/src/lib.rs` (lines ~21, ~117-162) — change `SweEphemeris` from `(Ephemeris)` to `(Arc<Ephemeris>)`, update `swisseph_new` to wrap in `Arc`, rewrite `swisseph_free` to drop the `Arc`, add `swisseph_share`\n- **Modify**: `swisseph-ffi/Cargo.toml` — bump version `0.1.0` → `0.2.0`\n- **Regenerate**: `swisseph-ffi/include/swisseph.h` — `cbindgen` (header freshness test will fail otherwise)\n- **Modify**: `swisseph-ffi/tests/handle.rs` — add share/free-order tests\n- **Modify**: `swisseph-ffi/tests/concurrency.rs` — add concurrent-calc-while-freeing test\n- **Modify**: `swisseph-ffi/tests/c/smoke.c` — add `swisseph_share` smoke call from C\n\n## Steps\n\n### Step 1: Change `SweEphemeris` to wrap `Arc<Ephemeris>`\n\nIn `swisseph-ffi/src/lib.rs`:\n\n```rust\nuse std::sync::Arc;\n\n/// Opaque handle wrapping an `Ephemeris`. Never `#[repr(C)]` — Dart/C sees only `*mut SweEphemeris`.\npub struct SweEphemeris(Arc<Ephemeris>);\n```\n\nAll 61 dereference sites use `&(*handle).0` which yields `&Arc<Ephemeris>`. Since `Arc<T>` implements `Deref<Target = T>`, the downstream `eph.calc_ut(...)` calls auto-deref to `&Ephemeris` without any further changes. Verify by compiling.\n\n### Step 2: Update `swisseph_new` to wrap in `Arc`\n\n```rust\nOk(eph) => {\n    let boxed = Box::new(SweEphemeris(Arc::new(eph)));\n    unsafe { *out = Box::into_raw(boxed) };\n    SweErrorCode::Ok as i32\n}\n```\n\nThe ownership model: each `*mut SweEphemeris` is a `Box<SweEphemeris>` that owns one `Arc<Ephemeris>`. `Box::from_raw` in `swisseph_free` drops the `SweEphemeris`, which drops the `Arc`, which decrements the refcount.\n\n### Step 3: Add `swisseph_share`\n\n```rust\n/// Clone a handle's refcount. Returns a new handle that shares the same engine.\n/// Both handles must be freed independently via `swisseph_free`; the engine is\n/// released when the last handle is freed. Order of frees does not matter.\n///\n/// # Safety\n/// - `handle` must be a valid, non-NULL handle from `swisseph_new` or `swisseph_share`.\n/// - `out` must point to a writable `*mut SweEphemeris`.\n#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn swisseph_share(\n    handle: *const SweEphemeris,\n    out: *mut *mut SweEphemeris,\n    err_buf: *mut c_char,\n    err_cap: usize,\n) -> i32 {\n    ffi_guard!(err_buf, err_cap, {\n        if handle.is_null() || out.is_null() {\n            unsafe { write_err(err_buf, err_cap, \"null pointer argument\") };\n            return SweErrorCode::InvalidArg as i32;\n        }\n        let arc_clone = unsafe { (*handle).0.clone() };\n        let boxed = Box::new(SweEphemeris(arc_clone));\n        unsafe { *out = Box::into_raw(boxed) };\n        SweErrorCode::Ok as i32\n    })\n}\n```\n\n### Step 4: Update `swisseph_free` doc comment\n\nThe implementation is unchanged — `drop(Box::from_raw(handle))` already does the right thing with `Arc`. Only the doc comment needs updating to say \"decrements refcount; last free releases engine memory\" and that handles from `swisseph_share` are also valid.\n\n```rust\n/// Free an ephemeris handle. Null-safe (no-op on NULL).\n///\n/// If this is the last handle sharing the engine (created via `swisseph_new` or\n/// `swisseph_share`), the engine memory is released. Otherwise, only the refcount\n/// is decremented. Handles may be freed in any order.\n///\n/// # Safety\n/// `handle` must be NULL or a pointer previously returned by `swisseph_new` or\n/// `swisseph_share` that has not already been freed.\n```\n\n### Step 5: Bump version\n\nIn `swisseph-ffi/Cargo.toml`, change `version = \"0.1.0\"` to `version = \"0.2.0\"`. Also update the `swisseph_version()` static string in `lib.rs` from `b\"0.1.0\\0\"` to `b\"0.2.0\\0\"`, and update the assertion in `tests/handle.rs::version_not_null` accordingly.\n\n### Step 6: Regenerate cbindgen header\n\n```bash\ncd swisseph-ffi && cbindgen --crate swisseph-ffi --output include/swisseph.h\n```\n\nThe new `swisseph_share` function will appear. The `header_freshness` test asserts the checked-in header matches `cbindgen` output.\n\n### Step 7: Add handle-sharing tests in `tests/handle.rs`\n\n```rust\n#[test]\nfn share_and_free_original_first() {\n    unsafe {\n        let config = default_config();\n        let mut handle: *mut SweEphemeris = ptr::null_mut();\n        let mut err = [0u8; 256];\n        swisseph_ffi::swisseph_new(&config, &mut handle, err.as_mut_ptr() as *mut c_char, err.len());\n\n        let mut shared: *mut SweEphemeris = ptr::null_mut();\n        let ret = swisseph_ffi::swisseph_share(handle, &mut shared, err.as_mut_ptr() as *mut c_char, err.len());\n        assert_eq!(ret, SweErrorCode::Ok as i32);\n        assert!(!shared.is_null());\n\n        // Free original first — shared must still work\n        swisseph_ffi::swisseph_free(handle);\n\n        let mut xx = [0.0f64; 6];\n        let mut flags_used: i32 = 0;\n        let ret = swisseph_ffi::swisseph_calc_ut(\n            shared, 2451545.0, 0, 256,\n            ptr::null(), ptr::null(), xx.as_mut_ptr(), &mut flags_used,\n            err.as_mut_ptr() as *mut c_char, err.len(),\n        );\n        assert_eq!(ret, 0);\n\n        swisseph_ffi::swisseph_free(shared);\n    }\n}\n\n#[test]\nfn share_and_free_shared_first() {\n    // Same pattern but free the shared handle first, then use the original\n    // ...\n}\n\n#[test]\nfn share_null_returns_invalid_arg() {\n    unsafe {\n        let mut out: *mut SweEphemeris = ptr::null_mut();\n        let mut err = [0u8; 256];\n        let ret = swisseph_ffi::swisseph_share(\n            ptr::null(), &mut out,\n            err.as_mut_ptr() as *mut c_char, err.len(),\n        );\n        assert_eq!(ret, SweErrorCode::InvalidArg as i32);\n    }\n}\n```\n\n### Step 8: Add concurrent share/free test in `tests/concurrency.rs`\n\nN threads compute over shared handles while others free theirs — no UB, no panics. This is the acceptance-criteria concurrency test.\n\n```rust\n#[test]\nfn concurrent_shared_handles_with_interleaved_free() {\n    let original = unsafe { make_handle() };\n    let baseline = unsafe { compute_all_ffi(original) };\n\n    // Create N shared handles\n    let n = 8;\n    let handles: Vec<*mut SweEphemeris> = (0..n).map(|_| unsafe {\n        let mut shared: *mut SweEphemeris = ptr::null_mut();\n        let mut err = [0u8; 256];\n        let ret = swisseph_ffi::swisseph_share(original, &mut shared, err.as_mut_ptr() as *mut c_char, err.len());\n        assert_eq!(ret, SweErrorCode::Ok as i32);\n        shared\n    }).collect();\n\n    // Free the original — all shared handles still valid\n    unsafe { swisseph_ffi::swisseph_free(original) };\n\n    // N threads each calc on their own shared handle then free it\n    std::thread::scope(|s| {\n        let threads: Vec<_> = handles.into_iter().enumerate().map(|(i, h)| {\n            s.spawn(move || {\n                let results = unsafe { compute_all_ffi(h) };\n                unsafe { swisseph_ffi::swisseph_free(h as *mut _) };\n                (i, results)\n            })\n        }).collect();\n        for t in threads {\n            let (i, results) = t.join().expect(\"thread panicked\");\n            assert_eq!(results, baseline, \"shared handle thread {i} diverged\");\n        }\n    });\n}\n```\n\n### Step 9: Update C smoke test\n\nAdd a `swisseph_share` call to `swisseph-ffi/tests/c/smoke.c`:\n\n```c\n// Share the handle, compute on shared, free both\nSweEphemeris *shared = NULL;\nret = swisseph_share(handle, &shared, err, sizeof(err));\nassert(ret == 0);\nassert(shared != NULL);\n// ... compute on shared ...\nswisseph_free(shared);\n```\n\n### Step 10: Verify\n\nRun the full FFI test suite:\n```bash\ncargo test -p swisseph-ffi\n```\n\nThis covers: header freshness (step 6), existing handle tests (step 1-4 backward compat), new share tests (step 7), concurrency (step 8), and C smoke (step 9).\n\n## Acceptance criteria coverage\n\n- [x] \"`swisseph_share` exported, documented in swisseph.h with ownership semantics\" → Steps 3, 4, 6\n- [x] \"`swisseph_free` on a shared handle does not invalidate siblings; last free releases engine memory\" → Steps 1-4, 7 (share_and_free_original_first / share_and_free_shared_first)\n- [x] \"Concurrency test: N threads calc over shared handles while others free theirs\" → Step 8\n- [x] \"Zero behavior change for single-handle users; existing FFI tests green\" → Steps 1-2 (transparent `Arc` deref), Step 10 (all existing tests pass)\n- [x] \"Version bump so the Dart shim can pin a rev containing this\" → Step 5",
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d6e9198"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783286381067,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 143
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783342512910,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783342856942,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review: **approve**. No material findings. Arc clone/drop lifecycle correctly represented at the FFI boundary, shared handles remain distinct Box allocations, explicit date derefs correct for DeltaT bound, header exports/documents swisseph_share ownership semantics.",
+      "ts": 1783343091994
+    }
+  ],
+  "created_at": 1783286381067,
+  "updated_at": 1783342856942,
+  "completed_at": 1783342856942,
+  "edges": [
+    {
+      "id": "019f342a-7516-74e3-9dbe-8394f1b28da4",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs-dart/36",
+      "target": "swisseph-rs/143",
+      "note": null,
+      "created_at": 1783286625558
+    }
+  ]
+}

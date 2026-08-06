@@ -1,0 +1,92 @@
+{
+  "id": "019efa43-85db-7330-b9b8-3ddf789e1d69",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/9",
+  "sequence_number": 9,
+  "title": "Plan: Ayanamsa & Sidereal mode",
+  "description": "Port ayanamsa computation from sweph.c (~500 lines). 47 predefined ayanamsas + user-defined.\n\n## Core function: swi_get_ayanamsa_ex() (sweph.c:3002, catalogue-internal §8.1)\n\n**Two computation methods** selected by SE_SIDBIT_ECL_DATE:\n\n**Method 1 (traditional, default):** Track how far the vernal point has moved on the ecliptic of t₀:\n1. Start with vernal point at J2000: x = (1,0,0)\n2. Precess to observation epoch\n3. Precess to reference epoch t₀\n4. Convert to ecliptic of t₀ (apply ε(t₀))\n5. Convert to polar → get longitude\n6. ayanamsa = −longitude + initial_value\n\n**Method 2 (ecliptic of date):** Measure ayanamsa on ecliptic of date — more consistent.\n\n**True star ayanamsas** (SE_SIDM_TRUE_CITRA, etc.): compute reference star with swe_fixstar(), subtract fixed degree (Spica=180°, ζ Psc=359°50', δ Cnc=106°, λ Sco=240°). Requires Phase 9 (fixed stars) or can stub with hardcoded positions initially.\n\n**Galactic ayanamsas:** use galactic pole position, require SEFLG_TRUEPOS.\n\n**Speed:** two-point numerical derivative: (ayanamsa(t) − ayanamsa(t−0.001)) / 0.001\n\n## Configuration\n- `swe_set_sid_mode(sid_mode, t0, ayan_t0)` → `EphemerisConfig.sidereal: Option<SiderealConfig>`\n- Projection bits: ECL_T0, SSY_PLANE, ECL_DATE, USER_UT, NO_PREC_OFFSET, PREC_ORIG\n\n## Testing\n- setest/suite_04_ayanamsa.c — dedicated test suite\n- Golden data: compute all 47 ayanamsas at J2000 and current date\n\n## C source reference\n- sweph.c:3002-3210 — swi_get_ayanamsa_ex, ayanamsa speed\n- sweph.c swe_set_sid_mode, swe_get_ayanamsa_name\n\n## Dependencies\n- Phase 3 (precession, obliquity), Phase 5 (calc for true star ayanamsas — can stub), Phase 9 (fixed stars — for true star ayanamsas)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315189723,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 9
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782760298581,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782760302677,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315189723,
+  "updated_at": 1782760302677,
+  "completed_at": 1782760302677,
+  "arc_id": "019efa3c-0958-7191-8176-140a89304f9a",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f14ca-c41b-7af0-a3d5-d70ee7fe6241",
+      "edge_type": "refines",
+      "source": "swisseph-rs/49",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760260635
+    },
+    {
+      "id": "019f14ca-c823-7fb2-8cca-8fc0b16c412f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/50",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760261667
+    },
+    {
+      "id": "019f14ca-cc38-7622-aca9-b82969fb8e8a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/51",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760262712
+    },
+    {
+      "id": "019f14ca-cded-7c00-a6df-88763a25ecf4",
+      "edge_type": "refines",
+      "source": "swisseph-rs/52",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760263149
+    }
+  ]
+}

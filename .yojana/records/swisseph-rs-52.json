@@ -1,0 +1,88 @@
+{
+  "id": "019f14ca-a626-7a93-97dc-c0276fd7ed0b",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/52",
+  "sequence_number": 52,
+  "title": "ECL_T0 + SSY_PLANE sidereal projection (J2000 coordinate plumbing)",
+  "description": "### Summary\nImplement the two projection-mode sidereal branches — `SE_SIDBIT_ECL_T0` (project onto ecliptic of epoch t0) and `SE_SIDBIT_SSY_PLANE` (project onto the solar-system invariable plane). Both need the planet's J2000 equatorial Cartesian coordinates (`x2000`), which must be threaded out of the per-body calc functions. This unblocks the standard-equinox modes (J2000, J1900, B1950, GalAlign_Mardyks — auto-flagged ECL_T0) plus any user mode with explicit ECL_T0/SSY_PLANE bits.\n\n### Architecture notes\n- Stateless. `x2000` is the value of `xx` immediately BEFORE `precess_and_ephem` in each per-body function (post-frame-bias J2000 equatorial Cartesian + speed). C saves it as `xxsv`/`x2000` before precessing to date.\n- Depends on the default-branch wiring from swisseph-rs/51 (this task replaces the `Err(UnsupportedFlags(SIDEREAL))` stub in `apply_sidereal`).\n- This task has wider but mechanical churn (threading one extra return value through ~9 functions). If the diff approaches 600 lines, commit the plumbing and the projection math as separate commits but keep them in this one task.\n\n### Files\n- **src/constants.rs**: add `SSY_PLANE_NODE_E2000`, `SSY_PLANE_INCL` (values below).\n- **src/calc.rs**: \n  - Capture `x2000` in `calc_planet`, `calc_sun`, `calc_moon`, and their `_sweph` / `_jpl` siblings; return it. Recommended: change each from `Result<[f64;24], Error>` to `Result<([f64;24], [f64;6]), Error>`.\n  - Add `pub fn trop_ra2sid_lon(x2000: &[f64;6], config, models, flags) -> ([f64;6], [f64;6])` (ecliptic-sidereal cart, equatorial-sidereal cart) and `pub fn trop_ra2sid_lon_sosy(x2000: &[f64;6], config, models, flags) -> [f64;6]` (ecliptic-sidereal cart).\n- **src/context.rs**: \n  - `calc_inner` / `calc_body_moshier` / `calc_body_sweph` / `calc_body_jpl` propagate the new `x2000` out (return `([f64;24],[f64;6],CalcFlags)` from calc_inner, or stash x2000 on a small struct). The mean-node/apogee and ecl-nut paths have no meaningful x2000 — return `[0.0;6]` for them (they cannot use ECL_T0/SSY anyway).\n  - `apply_sidereal` (added in swisseph-rs/51) gains the `x2000` argument and replaces the stub: dispatch ECL_T0 → `trop_ra2sid_lon`, SSY_PLANE → `trop_ra2sid_lon_sosy`, else default.\n- **tests/c-gen/gen_ayanamsa_calc.c** (extend), **tests/golden-data/ayanamsa_calc.json** (regenerate), **tests/golden/ayanamsa_calc.rs** (extend).\n\n### Implementation steps\n\n1. **Constants** (src/constants.rs). Cite docs/c-ref-ayanamsa.md §\"swi_trop_ra2sid_lon_sosy()\":\n```rust\npub const SSY_PLANE_NODE_E2000: f64 = 107.582569 * DEGTORAD; // node on ecliptic J2000\npub const SSY_PLANE_INCL: f64 = 1.578701 * DEGTORAD;          // inclination\n```\n   (`DEGTORAD` is const in this module.)\n\n2. **Thread `x2000`** through the per-body functions. In `calc_planet` (src/calc.rs:300-408), the line `let (eps, nut_val, nutv) = precess_and_ephem(&mut xx, jd, flags, models);` is preceded by the J2000 equatorial Cartesian state. Insert `let x2000 = xx;` (copy) immediately before that call, and return `Ok((app_pos_rest(&mut xx, ...), x2000))`. Do the same in `calc_sun`, `calc_moon`, and the `_sweph` / `_jpl` variants (find the analogous `precess_and_ephem` call in each). Update `calc_body_*` dispatchers and `calc_inner` in src/context.rs to thread the tuple through. For the EclipticNutation / MeanNode / MeanApogee early-return branches in `calc_inner`, return `[0.0;6]` as x2000.\n\n3. **`trop_ra2sid_lon(x2000, config, models, flags)`** (ECL_T0). Cite §\"swi_trop_ra2sid_lon()\". Inputs/outputs in CARTESIAN. Use `precess` on the [0..3] and [3..6] halves SEPARATELY (C calls swi_precess twice — position then speed), `rotate_x` for the equ→ecl rotation (C `swi_coortrf2` with seps/ceps = rotation by +eps), `cartesian_to_polar_with_speed`, `polar_to_cartesian_with_speed`:\n```\nlet mut x = *x2000;\nlet t0 = resolve_t0(config); // UT→TT per config.sidereal_t0_is_ut\nif config.sidereal_t0 != J2000 {  // compare RAW t0 (pre-deltaT) as C does: C tests sip->t0\n    precess(&mut x[0..3], t0, flags, models, J2000ToDate);\n    precess(&mut x[3..6], t0, flags, models, J2000ToDate);\n}\nlet xequ = x; // equatorial sidereal output (frame of t0)\nlet eps = obliquity(t0, flags, models).eps; // C: calc_epsilon(sidd.t0, iflag) — pass flags here\n// equ→ecl: rotate position (and speed if SPEED) by +eps\nrotate position [0..3] by eps; if SPEED rotate [3..6] by eps;\nlet mut pol = cartesian_to_polar_with_speed(x); // pol[0] = lon RADIANS\nlet corr = get_aya_correction(config, flags, models); // DEGREES\npol[0] -= config.sidereal_ayan_t0 * DEGTORAD;          // RADIANS (FP note 2)\npol[0] = normalize_radians(pol[0] + corr * DEGTORAD);\nlet xecl = polar_to_cartesian_with_speed(pol);\nreturn (xecl, xequ);\n```\n   Use `crate::math::normalize_radians` (C `swe_radnorm`). NOTE the obliquity for t0 here is passed `flags` (matches C `calc_epsilon(sidd.t0, iflag)`), UNLIKE the scalar ayanamsa which uses 0 — keep this distinction.\n\n4. **`trop_ra2sid_lon_sosy(x2000, config, models, flags)`** (SSY_PLANE). Cite §\"swi_trop_ra2sid_lon_sosy()\". Uses J2000 obliquity (`obliquity(J2000, flags, models)`), `SSY_PLANE_NODE_E2000`, `SSY_PLANE_INCL`. Two sub-paths (planet + zero-point), then measure planet relative to zero point in DEGREES (FP note 2 — this one works in degrees after `*RADTODEG`, opposite of ECL_T0):\n```\n// planet path: equ→ecl (rotate +eps_j2000), cartpol, x[0]-=node, polcart, tilt (rotate +incl pos & speed), cartpol\n// zero-point path: x0=[1,0,0]; if t0!=J2000 precess t0→J2000 (DateToJ2000); equ→ecl; cartpol; -node; polcart; tilt(+incl); cartpol\n// measure: x[0] -= x0[0]; x[0] *= RADTODEG; corr=get_aya_correction(); x[0]-=ayan_t0; x[0]=normalize_degrees(x[0]+corr)*DEGTORAD; polcart_sp → xout\n```\n   Follow the ref doc's step list (a)-(e) and the zero-point block exactly; use `rotate_x` for the `swi_coortrf` tilt and `cartesian_to_polar`/`polar_to_cartesian` (no-speed) where the C uses the non-_sp variants in the zero-point path, and the `_with_speed` variants in the planet path where C uses `_sp`.\n\n5. **`apply_sidereal` dispatch** (src/context.rs, replacing the stub from swisseph-rs/51):\n```rust\nlet bits = self.config.sidereal_bits;\nlet models = &self.config.astro_models;\nif bits.contains(SiderealBits::ECL_T0) {\n    let (xecl, xequ) = crate::calc::trop_ra2sid_lon(x2000, &self.config, models, flags);\n    xreturn[6..12].copy_from_slice(&xecl);\n    xreturn[18..24].copy_from_slice(&xequ);\n    // refresh polar [0..6] and [12..18] from the new cartesian, in DEGREES\n    recompute_polar(xreturn); // cartesian_to_polar_with_speed → *RADTODEG on angle components\n} else if bits.contains(SiderealBits::SSY_PLANE) {\n    let xecl = crate::calc::trop_ra2sid_lon_sosy(x2000, &self.config, models, flags);\n    xreturn[6..12].copy_from_slice(&xecl);\n    recompute_polar_ecliptic_only(xreturn);\n} else {\n    let daya = crate::ayanamsa::get_ayanamsa_with_speed(&self.config, jd_tt, flags, models)?;\n    crate::calc::apply_sidereal_default(xreturn, daya, flags.contains(CalcFlags::SPEED));\n}\nOk(())\n```\n   For the polar refresh, mirror app_pos_rest Step 4-5 (src/calc.rs:268-295): `cartesian_to_polar_with_speed` on the cartesian halves, then `*RADTODEG` on indices 0,1,3,4 (ecliptic) and 12,13,15,16 (equatorial).\n\n### C reference\ndocs/c-ref-ayanamsa.md §\"swi_trop_ra2sid_lon()\", §\"swi_trop_ra2sid_lon_sosy()\", §\"Sidereal Projection in the Calc Pipeline\" (Branches 1 & 2), FP-Fidelity Notes 2, 4, 5. The §\"Constants Summary\" has SSY_PLANE values.\n\n### Golden tests\nExtend `tests/c-gen/gen_ayanamsa_calc.c` with an ECL_T0 group: modes {18 (J2000), 19 (J1900), 20 (B1950), 34 (GalAlign_Mardyks)} × bodies {SE_SUN, SE_MOON, SE_MARS} × epochs {2415020.0, 2451545.0, 2458849.5} via `swe_calc(tjd, body, SEFLG_MOSEPH|SEFLG_SIDEREAL|SEFLG_SPEED, xx, serr)` (swe_set_sid_mode auto-sets ECL_T0 for these). Add a USER-ECL_T0 case: `swe_set_sid_mode(SE_SIDM_USER|SE_SIDBIT_ECL_T0, 2451545.0, 25.0)`. Add ONE SSY_PLANE case: `swe_set_sid_mode(SE_SIDM_LAHIRI|SE_SIDBIT_SSY_PLANE, 0,0)` for Sun at J2000. Emit into new JSON keys `ecl_t0` and `ssy`. Regenerate ayanamsa_calc.json.\n**Rust test** (`tests/golden/ayanamsa_calc.rs`): for ECL_T0 build config with `set_sidereal_mode(index,0,0)` (auto ECL_T0); for USER use `set_sidereal_mode(255 | 256, 2451545.0, 25.0)`; for SSY use `set_sidereal_mode(1 | 512, 0,0)`. Assert lon/lat/dist eps 1e-9, lon_speed eps 1e-7.\n\n### Acceptance criteria\n- `cargo test --test golden ayanamsa_calc -- --nocapture` passes (default + ECL_T0 + SSY groups).\n- `cargo test --test golden calc` and `calc_sweph` and `jpl_pleph`/`sweph_eval` still pass (x2000 threading must not change non-sidereal output — pure additive return value).\n- `cargo clippy --all-targets -- -D warnings` clean.\n\n### Escape hatch\nIf golden positions fail > 1e-8 after two attempts, STOP and report failing mode/body/epoch, actual vs expected, what you tried. Likely causes: (1) precessing position+speed in ONE call instead of two separate swi_precess calls (ECL_T0); (2) ECL_T0 works in RADIANS but SSY works in DEGREES for the ayan_t0 subtraction (FP note 2) — do not unify; (3) obliquity flag arg: ECL_T0/SSY pass `flags`, scalar ayanamsa passes empty — keep distinct; (4) the `sip->t0 != J2000` test uses the RAW config.sidereal_t0, not the delta-T-adjusted t0. Per CLAUDE.md read sweph.c:3273-3356 directly for FP order. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Two commits: 2f10465 (plumbing + math) and d27d0e2 (golden tests). Placed trop_ra2sid_lon / trop_ra2sid_lon_sosy in ayanamsa.rs (not calc.rs) to avoid circular dep — ayanamsa.rs already imports EphemerisConfig. Used [0.0;6] sentinel for MeanNode/MeanApogee/EclipticNutation paths (no meaningful x2000), guarded by != in apply_sidereal. SSY_PLANE_NODE_E2000/SSY_PLANE_INCL already existed in constants.rs — a duplicate addition was caught and removed. Sutra guard on context.rs required calling sutra_impact to acknowledge before edits could proceed.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d27d0e2"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "ayanamsa"
+  ],
+  "history": [
+    {
+      "ts": 1782760252966,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 52
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782762223810,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782763543453,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, batch 49-52): approve with notes. x2000 threading is clean pure-additive (Result<([f64;24],[f64;6]),_>), non-sidereal golden tests (calc/calc_sweph/jpl) unchanged — 63 passed. ECL_T0/SSY math matches C FP notes (ECL_T0 in radians, SSY in degrees; position+speed precessed in separate calls; obliquity uses flags not 0). FOLLOW-UP swisseph-rs/53: the SSY/ECL_T0 branches break lon_speed (→0) under SIDEREAL|SPEED3 because apply_sidereal recomputes from x2000's zeroed velocity on that path. Verified empirically. Not blocking the SPEED/analytic path which is correct and tested.",
+      "ts": 1782764912573
+    }
+  ],
+  "created_at": 1782760252966,
+  "updated_at": 1782763543453,
+  "completed_at": 1782763543453,
+  "arc_id": "019efa3c-0958-7191-8176-140a89304f9a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f14ca-c1d1-7912-a0a4-5beae7284ea0",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/52",
+      "target": "swisseph-rs/51",
+      "note": null,
+      "created_at": 1782760260049
+    },
+    {
+      "id": "019f14ca-cded-7c00-a6df-88763a25ecf4",
+      "edge_type": "refines",
+      "source": "swisseph-rs/52",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760263149
+    }
+  ]
+}

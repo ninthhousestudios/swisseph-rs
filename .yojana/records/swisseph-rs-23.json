@@ -1,0 +1,130 @@
+{
+  "id": "019efef2-0974-79c3-9c9c-460ab1773f38",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/23",
+  "sequence_number": 23,
+  "title": "Sidereal time (4 models + equation of equinoxes)",
+  "description": "Port sidereal time functions from swephlib.c. Depends on obliquity and nutation being available (sidereal time = GMST + equation of equinoxes, where EoE depends on nutation in longitude and obliquity).\n\n## Functions\n\n### swe_sidtime0 (swephlib.c:3464)\n`(tjd_ut, eps, nut) → f64` — Greenwich Apparent Sidereal Time in hours.\nCaller provides pre-computed obliquity (eps) and nutation in longitude (nut).\n4 models for GMST:\n- IAU 1976\n- IAU 2006\n- IERS 2010 (default? — verify)\n- Long-term (Vondrák-style)\n\nGMST is a polynomial in T (Julian centuries from J2000 UT1).\n\n### swe_sidtime (swephlib.c ~3550)\n`(tjd_ut) → f64` — convenience wrapper that auto-computes obliquity and nutation, then calls swe_sidtime0.\nIn our stateless design this becomes: compute obliquity + nutation internally, call the core function.\n\n### Equation of equinoxes\nGAST = GMST + EoE\nEoE = Δψ × cos(ε) + 33-term Fourier expansion (complementary terms for IAU 2000+)\nThe 33 coefficients are a small const array.\n\n## Output\nSidereal time in hours (0–24), matching C API convention.\n\n## Testing\n- setest/suite_03_misc.c likely covers sidereal time\n- Golden tests: sidereal time at known epochs for each model\n- Verify against published IAU values at J2000.0\n\n## C source reference\n- swephlib.c:3464–3600 (swe_sidtime0, swe_sidtime, equation of equinoxes, GMST models)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "swe_sidtime0 with all 4 GMST models"
+    },
+    {
+      "done": false,
+      "text": "swe_sidtime convenience function computing obliquity+nutation internally"
+    },
+    {
+      "done": false,
+      "text": "equation of equinoxes with 33-term Fourier complementary terms"
+    },
+    {
+      "done": false,
+      "text": "golden tests for all models at multiple epochs"
+    },
+    {
+      "done": false,
+      "text": "no mutable state"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "sidereal_time0 takes eps/nut in degrees (matching C)",
+      "rationale": "Bitwise-exact golden test match requires following C's floating-point path through the degree conversions. The radians→degrees→radians round-trip in C's EoE formula (240.0 * nut_deg * cos(eps_deg * DEGTORAD)) produces different bits than direct radians computation.",
+      "rejected_alternative": "Radians-based API (plan's original choice) — cleaner Rust convention but impossible to match C bitwise due to RADTODEG*DEGTORAD != 1.0 in IEEE 754"
+    }
+  ],
+  "implementation_plan": "## Approach\n\nCreate `src/sidereal_time.rs` as a single-file module implementing all 4 GMST models (IAU 1976, IAU 2006, ERA/IERS 2010, long-term), the Equation of the Equinoxes with 33-term Fourier complementary terms, and a convenience wrapper that computes obliquity/nutation internally. Reuse `planetary_args_iau2000` from `nutation/mod.rs` by widening its visibility to `pub(crate)` — the complementary terms use identical fundamental arguments (verified against C source: same coefficients, same normalization).\n\nAll functions are pure (`&`-only, no mutable shared state). The public API takes eps/nut in **radians** (matching our internal convention), diverging from C's degree-based `swe_sidtime0` signature. The polynomial GMST computations follow the C unit flow exactly (sidereal seconds for IAU 1976/2006, degrees for ERA) to preserve bitwise-exact floating-point behavior; radians→degrees conversion happens only at the EoE boundary.\n\nAlternative considered: extracting fundamental arguments into a shared `fundamental_args.rs` module. Rejected — functions are small (13 + 18 lines), only two consumers. Widening visibility is simpler.\n\n## Files\n\n- **Create**: `src/sidereal_time.rs` — all sidereal time algorithms + coefficient tables\n- **Modify**: `src/nutation/mod.rs` (line 195) — widen `planetary_args_iau2000` from `fn` to `pub(crate) fn`\n- **Modify**: `src/lib.rs` (line 22) — add `pub mod sidereal_time;`\n- **Modify**: `src/constants.rs` (~line 65) — add 4 long-term model boundary constants\n- **Create**: `tests/c-gen/gen_sidereal_time.c` — C golden data generator\n- **Create**: `tests/golden-data/sidereal_time.json` — generated reference data\n- **Create**: `tests/golden/sidereal_time.rs` — golden test runner\n- **Modify**: `tests/golden/main.rs` — add `mod sidereal_time;`\n\n## Steps\n\n### Step 1: Widen fundamental argument visibility\n\nIn `src/nutation/mod.rs` line 195, change `fn` to `pub(crate) fn`:\n\n```rust\npub(crate) fn planetary_args_iau2000(t: f64) -> [f64; 14] {\n```\n\nNo logic change — just visibility for sidereal_time to import.\n\n### Step 2: Add long-term boundary constants\n\nIn `src/constants.rs`, after the existing precession century-limit block:\n\n```rust\n// Sidereal time long-term model boundaries (swephlib.c:3460–3463)\npub const SIDT_LTERM_T0: f64 = 2396758.5;            // 1 Jan 1850\npub const SIDT_LTERM_T1: f64 = 2469807.5;            // 1 Jan 2050\npub const SIDT_LTERM_OFS0: f64 = 0.000378172 / 15.0; // pre-1850 offset (hours)\npub const SIDT_LTERM_OFS1: f64 = 0.001385646 / 15.0; // post-2050 offset (hours)\n```\n\n### Step 3: Create sidereal_time.rs — imports + coefficient tables\n\n```rust\nuse crate::constants::*;\nuse crate::context::EphemerisConfig;\nuse crate::deltat::calc_deltat;\nuse crate::flags::CalcFlags;\nuse crate::math::{\n    cartesian_to_polar, normalize_degrees, polar_to_cartesian, rotate_x,\n};\nuse crate::nutation;\nuse crate::obliquity;\nuse crate::precession;\nuse crate::types::*;\n\n// 33 pairs (sin, cos) in microarcseconds — swephlib.c:3341–3375\nstatic STCF: [[f64; 2]; 33] = [\n    [2640.96, -0.39], [63.52, -0.02], [11.75, 0.01], [11.21, 0.01],\n    [-4.55, 0.00], [2.02, 0.00], [1.98, 0.00], [-1.72, 0.00],\n    [-1.41, -0.01], [-1.26, -0.01], [-0.63, 0.00], [-0.63, 0.00],\n    [0.46, 0.00], [0.45, 0.00], [0.36, 0.00], [-0.24, -0.12],\n    [0.32, 0.00], [0.28, 0.00], [0.27, 0.00], [0.26, 0.00],\n    [-0.21, 0.00], [0.19, 0.00], [0.18, 0.00], [-0.10, 0.05],\n    [0.15, 0.00], [-0.14, 0.00], [0.14, 0.00], [-0.14, 0.00],\n    [0.14, 0.00], [0.13, 0.00], [-0.11, 0.00], [0.11, 0.00],\n    [0.11, 0.00],\n];\n\n// 33×14 integer multipliers for [l, l', F, D, Om, L_Me..L_Ne, p_A]\n// swephlib.c:3378–3412\nstatic STFARG: [[i8; 14]; 33] = [\n    // all 33 rows transcribed from C ref doc\n];\n```\n\n### Step 4: Implement complementary_terms\n\n33-term Fourier series for ERA-based sidereal time. Returns correction in **degrees**.\n\n```rust\nfn complementary_terms(tt: f64) -> f64 {\n    let delm = nutation::planetary_args_iau2000(tt);\n    let mut dadd = -0.87 * delm[4].sin() * tt;\n\n    for i in 0..33 {\n        let darg: f64 = (0..14).map(|j| f64::from(STFARG[i][j]) * delm[j]).sum();\n        dadd += STCF[i][0] * darg.sin() + STCF[i][1] * darg.cos();\n    }\n\n    dadd / (3600.0 * 1_000_000.0)\n}\n```\n\n### Step 5: Implement gmst_iau1976\n\nGMST via IAU 1976 polynomial (Aoki et al. 1982). Returns sidereal **seconds**.\n`tu` is UT1 centuries from J2000. IAU 1976 does NOT use TT for the polynomial.\n\n```rust\nfn gmst_iau1976(jd0: f64, secs: f64) -> f64 {\n    let tu = (jd0 - J2000) / 36525.0;\n    let gmst_0h = ((-6.2e-6 * tu + 9.3104e-2) * tu + 8640184.812866) * tu + 24110.54841;\n    let msday =\n        1.0 + ((-1.86e-5 * tu + 0.186208) * tu + 8640184.812866) / (86400.0 * 36525.0);\n    gmst_0h + msday * secs\n}\n```\n\n### Step 6: Implement gmst_iau2006\n\nGMST via IAU 2006 polynomial (Capitaine et al. 2003). Returns sidereal **seconds**.\nUses TT at UT midnight for the polynomial (distinct from IAU 1976 which uses UT1).\n\n```rust\nfn gmst_iau2006(jd0: f64, secs: f64, tu: f64, config: &EphemerisConfig) -> f64 {\n    let tt = (jd0 + calc_deltat(jd0, config) - J2000) / 36525.0;\n\n    let gmst_0h = (((-0.000000002454 * tt - 0.00000199708) * tt - 0.0000002926) * tt\n        + 0.092772110)\n        * tt * tt\n        + 307.4771013 * (tt - tu)\n        + 8640184.79447825 * tu\n        + 24110.5493771;\n\n    let msday = 1.0\n        + ((((-0.000000012270 * tt - 0.00000798832) * tt - 0.0000008778) * tt\n            + 0.185544220) * tt\n            + 8640184.79447825)\n            / (86400.0 * 36525.0);\n\n    gmst_0h + msday * secs\n}\n```\n\n### Step 7: Implement gmst_era\n\nGMST via ERA + polynomial correction + complementary terms (IERS 2010 / Longterm in-range).\nReturns sidereal **seconds**. Uses full tjd for TT (not midnight).\n\n```rust\nfn gmst_era(tjd_ut: f64, config: &EphemerisConfig) -> f64 {\n    let jdrel = tjd_ut - J2000;\n    let tt = (tjd_ut + calc_deltat(tjd_ut, config) - J2000) / 36525.0;\n\n    // ERA (degrees)\n    let mut gmst = normalize_degrees((0.7790572732640 + 1.00273781191135448 * jdrel) * 360.0);\n\n    // Polynomial correction: arcsec → degrees\n    gmst += (0.014506\n        + tt * (4612.156534\n        + tt * (1.3915817\n        + tt * (-0.00000044\n        + tt * (-0.000029956\n        + tt * -0.0000000368)))))\n        / 3600.0;\n\n    // Complementary terms (degrees)\n    gmst = normalize_degrees(gmst + complementary_terms(tt));\n\n    // degrees → sidereal seconds\n    gmst / 15.0 * 3600.0\n}\n```\n\n### Step 8: Implement sidtime_long_term\n\nLong-term model (Simon et al. 1994) for dates outside [1850, 2050]. Returns **hours** [0, 24).\nUses mean Earth longitude → ecliptic→equatorial→precess→ecliptic pipeline.\n\n```rust\nfn sidtime_long_term(\n    tjd_ut: f64,\n    eps: f64,  // true obliquity in radians (0.0 = compute internally)\n    nut: f64,  // dpsi in radians (0.0 = compute internally)\n    config: &EphemerisConfig,\n) -> f64 {\n    let flags = CalcFlags::empty();\n    let models = &config.astro_models;\n    let tjd_et = tjd_ut + calc_deltat(tjd_ut, config);\n    let t = (tjd_et - J2000) / 365250.0;  // Julian millennia\n    let dlt = AUNIT / CLIGHT / 86400.0;\n\n    // Mean Earth longitude (degrees, J2000 ecliptic)\n    let dlon = 100.46645683\n        + (1295977422.83429 * t - 2.04411 * t * t - 0.00523 * t * t * t) / 3600.0;\n    let dlon = normalize_degrees(dlon - dlt * 360.0 / 365.2425);\n\n    // Cartesian on unit sphere\n    let mut xs = polar_to_cartesian([dlon * DEGTORAD, 0.0, 1.0]);\n\n    // Ecliptic → equatorial J2000\n    let eps_j2000 = obliquity::obliquity(J2000 + calc_deltat(J2000, config), flags, models);\n    xs = rotate_x(xs, -eps_j2000.eps);\n\n    // Precess J2000 → date\n    precession::precess(&mut xs, tjd_et, flags, models, PrecessionDirection::J2000ToDate);\n\n    // Obliquity and nutation of date (for equatorial→ecliptic rotation)\n    let eps_date = obliquity::obliquity(tjd_et, flags, models);\n    let nut_date = nutation::nutation(tjd_et, flags, models);\n\n    // Equatorial → ecliptic of date\n    xs = rotate_x(xs, eps_date.eps);\n    let mut pol = cartesian_to_polar(xs);\n    pol[0] *= RADTODEG;  // longitude in degrees\n\n    // UT fraction → hour angle (degrees)\n    let dhour = ((tjd_ut - 0.5) % 1.0) * 360.0;\n\n    // EoE in degrees: dpsi_deg * cos(eps_true_rad)\n    if eps == 0.0 {\n        let eps_true = eps_date.eps + nut_date.deps;\n        pol[0] += (nut_date.dpsi * RADTODEG) * eps_true.cos();\n    } else {\n        pol[0] += (nut * RADTODEG) * eps.cos();\n    }\n\n    normalize_degrees(pol[0] + dhour) / 15.0\n}\n```\n\n### Step 9: Implement sidereal_time0 (main dispatcher)\n\nPublic function. Takes eps (true obliquity) and nut (dpsi) in **radians**. Returns hours [0, 24).\n\n```rust\npub fn sidereal_time0(\n    tjd_ut: f64,\n    eps: f64,\n    nut: f64,\n    config: &EphemerisConfig,\n) -> f64 {\n    let sidt_model = config.astro_models.sidereal_time;\n\n    // Long-term model: outside [1850, 2050] use sidtime_long_term directly\n    if sidt_model == SiderealTimeModel::Longterm {\n        if tjd_ut <= SIDT_LTERM_T0 || tjd_ut >= SIDT_LTERM_T1 {\n            let mut gmst = sidtime_long_term(tjd_ut, eps, nut, config);\n            if tjd_ut <= SIDT_LTERM_T0 {\n                gmst -= SIDT_LTERM_OFS0;\n            } else {\n                gmst -= SIDT_LTERM_OFS1;\n            }\n            if gmst >= 24.0 { gmst -= 24.0; }\n            if gmst < 0.0 { gmst += 24.0; }\n            return gmst;\n        }\n        // else: fall through to ERA path (1850–2050 range)\n    }\n\n    // Compute jd0 (UT midnight) and secs (UT seconds since midnight)\n    let mut jd0 = tjd_ut.floor();\n    let mut secs = tjd_ut - jd0;\n    if secs < 0.5 {\n        jd0 -= 0.5;\n        secs += 0.5;\n    } else {\n        jd0 += 0.5;\n        secs -= 0.5;\n    }\n    secs *= 86400.0;\n    let tu = (jd0 - J2000) / 36525.0;\n\n    // GMST in sidereal seconds (model-dependent)\n    let mut gmst = match sidt_model {\n        SiderealTimeModel::IersConv2010 | SiderealTimeModel::Longterm => {\n            gmst_era(tjd_ut, config)\n        }\n        SiderealTimeModel::IAU2006 => gmst_iau2006(jd0, secs, tu, config),\n        SiderealTimeModel::IAU1976 => gmst_iau1976(jd0, secs),\n    };\n\n    // Equation of the Equinoxes (sidereal seconds)\n    // C: eqeq = 240.0 * nut_deg * cos(eps_deg * DEGTORAD)\n    // Rust: eps/nut in radians, so convert nut to degrees for the 240 factor\n    let eqeq = 240.0 * (nut * RADTODEG) * eps.cos();\n    gmst += eqeq;\n\n    // Normalize to [0, 86400) seconds, convert to hours\n    gmst -= 86400.0 * (gmst / 86400.0).floor();\n    gmst /= 3600.0;\n\n    // Boundary sanitization (considerations §4)\n    if gmst >= 24.0 { gmst = 0.0; }\n\n    gmst\n}\n```\n\n### Step 10: Implement sidereal_time (convenience wrapper)\n\nPublic function. Computes obliquity, nutation, and delta-T internally. Returns hours [0, 24).\n\n```rust\npub fn sidereal_time(tjd_ut: f64, config: &EphemerisConfig) -> f64 {\n    let flags = CalcFlags::empty();\n    let models = &config.astro_models;\n\n    // UT1 → TT (considerations §1: must use TT for obliquity/nutation)\n    let tjd_et = tjd_ut + calc_deltat(tjd_ut, config);\n\n    // Mean obliquity + nutation\n    let eps = obliquity::obliquity(tjd_et, flags, models);\n    let nut = nutation::nutation(tjd_et, flags, models);\n\n    // True obliquity = mean + deps\n    let eps_true = eps.eps + nut.deps;\n\n    sidereal_time0(tjd_ut, eps_true, nut.dpsi, config)\n}\n```\n\n### Step 11: Wire up module in lib.rs\n\nAdd `pub mod sidereal_time;` in alphabetical position (after `precession`, before `stars`).\n\n### Step 12: C golden data generator\n\nCreate `tests/c-gen/gen_sidereal_time.c`. Test matrix:\n- **Models**: all 4 (`SEMOD_SIDT_IAU_1976`, `_IAU_2006`, `_IERS_CONV_2010`, `_LONGTERM`)\n- **Epochs**: ~40-50 spanning deep past (-3000), pre-1850 boundary, 1900, J2000, 2024, post-2050 boundary, far future (+3000)\n- **Test groups**:\n  - `sidtime`: calls `swe_sidtime(tjd_ut)` per model — end-to-end test\n  - `sidtime0`: calls `swe_sidtime0(tjd_ut, eps_deg, nut_deg)` with pre-computed values — tests the dispatcher + polynomial + EoE independently\n\nOutput format: JSON matching existing golden test patterns. Each case: `{ \"tjd_ut\": ..., \"model\": ..., \"result\": ... }`.\n\nCompile: `gcc -O2 -o gen_sidereal_time gen_sidereal_time.c -I../../../swisseph -L../../../swisseph -lswe -lm`\n\n### Step 13: Generate golden data and write test runner\n\nRun the C generator → `tests/golden-data/sidereal_time.json`.\n\nCreate `tests/golden/sidereal_time.rs`:\n- `SidtimeCase` struct with `tjd_ut`, `model` (i32), `result` (f64)\n- `GoldenData` with `sidtime: Vec<SidtimeCase>` (and optionally `sidtime0` group)\n- For `sidtime` group: reconstruct `EphemerisConfig` with the appropriate `SiderealTimeModel`, call `sidereal_time(tjd_ut, &config)`, compare with `assert_f64_exact` (or `assert_f64_eps` with tight epsilon if the UT→TT conversion introduces floating-point divergence)\n\nAdd `mod sidereal_time;` to `tests/golden/main.rs`.\n\n### Step 14: Build, test, verify\n\n`cargo test --test golden sidereal_time` — all cases must pass.\n\n## Acceptance criteria coverage\n\n- [x] \"swe_sidtime0 with all 4 GMST models\" → Steps 5–9 (4 polynomial/ERA functions + dispatcher)\n- [x] \"swe_sidtime convenience function computing obliquity+nutation internally\" → Step 10\n- [x] \"equation of equinoxes with 33-term Fourier complementary terms\" → Steps 3–4 (tables + complementary_terms fn), integrated in Steps 7, 8, 9\n- [x] \"golden tests for all models at multiple epochs\" → Steps 12–14\n- [x] \"no mutable state\" → all functions take `&EphemerisConfig`, only local `mut` variables",
+  "execution_record": "Plan called for radians-based public API (sidereal_time0 taking eps/nut in radians). This caused bitwise-exact golden test failure because C's swe_sidtime pipeline works entirely in degrees — the eps goes through a radians→degrees→radians round-trip in C (swi_epsiln*RADTODEG, then *DEGTORAD in cos()), and RADTODEG*DEGTORAD != 1.0 in IEEE 754. Switched to degrees-based API matching C's convention.\n\nAlso discovered tidal acceleration mismatch: C's swe_sidtime uses swe_deltat_ex(tjd, -1, NULL) which defaults to SEFLG_SWIEPH → TIDAL_DE431 (-25.80), while our EphemerisConfig::default() uses Moshier → TIDAL_DE404 (-25.580). Fixed golden test config by pinning tidal_acceleration to TIDAL_DEFAULT.\n\nBoth fixes were necessary for bitwise-exact match across all 128 golden cases.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "5b9bf3d"
+    }
+  ],
+  "files": [
+    "src/sidereal_time.rs",
+    "src/constants.rs",
+    "src/lib.rs",
+    "src/nutation/mod.rs",
+    "tests/golden/sidereal_time.rs",
+    "tests/golden-data/sidereal_time.json",
+    "tests/c-gen/gen_sidereal_time.c",
+    "tests/golden/main.rs",
+    "docs/codebase-map.md"
+  ],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782393735540,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 23
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782427646092,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782428201742,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review: **approve**. No ship-blocking issues found. Rust implementation matches C source for coefficients, unit flow, EoE formula, long-term boundary behavior, and wrapper computation. All 128 golden cases bitwise-exact. Full test suite (95 tests) passes.",
+      "ts": 1782428466427
+    }
+  ],
+  "created_at": 1782393735540,
+  "updated_at": 1782428201742,
+  "completed_at": 1782428201742,
+  "arc_id": "019efa3b-bfcb-70f3-a6ea-f3430a85c05a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019efef2-2cc9-7452-8125-c82f1e31de7e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/23",
+      "target": "swisseph-rs/18",
+      "note": null,
+      "created_at": 1782393744585
+    },
+    {
+      "id": "019efef2-3095-7020-b187-74c1e2fb0f78",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/23",
+      "target": "swisseph-rs/21",
+      "note": null,
+      "created_at": 1782393745557
+    },
+    {
+      "id": "019efef2-42be-75a3-b5cd-1b2de64e83ac",
+      "edge_type": "refines",
+      "source": "swisseph-rs/23",
+      "target": "swisseph-rs/4",
+      "note": null,
+      "created_at": 1782393750206
+    }
+  ]
+}

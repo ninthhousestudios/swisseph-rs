@@ -1,0 +1,114 @@
+{
+  "id": "019f0451-d48d-7e50-896e-ed34c3e42b56",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/31",
+  "sequence_number": 31,
+  "title": "Light-time iteration and body-specific apparent position paths",
+  "description": "Implement body-specific pre-processing that runs before app_pos_rest, in src/calc.rs.\n\n## 1. Light-time iteration (sweph.c:2545–2596)\n\nNewton iteration for retarded position: t' = t − |Δx|/c.\n- **Moshier backend**: 0 iterations. Uses linear extrapolation: apparent = true − (light_time × velocity). Still computes light-time for the distance correction.\n- **File backends** (future): 1–2 iterations with re-evaluation at retarded time.\n- Speed correction: 3-point difference to get d(dt)/dt, apparent_speed = true_speed × (1 − d(dt)/dt).\n- Light-time = |planet − observer| × AUNIT / CLIGHT / 86400 (days).\n\n## 2. `app_pos_etc_plan()` (sweph.c:2465–2776) — planets\n\nFor Mercury through Pluto:\n1. Apply ICRS→J2000 frame bias (if not ICRS flag) — calls `bias::frame_bias()`\n2. Light-time iteration (step 1 above)\n3. Delegate to `app_pos_rest()` for aberration→deflection→precession→nutation→ecliptic→polar→units\n\nNeeds Earth heliocentric position as input (for aberration/deflection geometry).\n\n## 3. `app_pos_etc_sun()` (sweph.c:~2350–2464) — Sun\n\nSun is special:\n- Geocentric Sun = −(Earth barycentric), already computed by Moshier backend\n- Light-time: constant ~8.3 minutes (compute from distance, don't iterate)\n- Still applies aberration and deflection unless suppressed\n- Planet heliocentric position for deflection = zeros (Sun IS the deflecting body for others, but for the Sun itself, different handling — extract details from c-ref-calc.md)\n\n## 4. `app_pos_etc_moon()` (sweph.c:~2200–2350) — Moon\n\nMoon is special:\n- No light-time iteration (negligible at 1.3 light-seconds)\n- No gravitational deflection (Moon is too close, deflection formula doesn't apply)\n- Aberration: still applied, but Earth velocity used directly\n- Speed: already computed via central differences in Moshier backend\n\n## Architecture note\n\nThese functions take the raw output from `moshier::backend::compute()` (geocentric equatorial J2000 [x,y,z,vx,vy,vz]) and produce corrected coordinates. They are the bridge between backend → output.\n\nEach function also needs access to:\n- Earth heliocentric position (from Moshier backend with body=Sun, negated)\n- Obliquity at J2000 and at date\n- Nutation at date\n- AstroModels for precession/nutation model selection\n\nC source reference: docs/c-ref-calc.md",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "Light-time iteration implemented (0-iteration Moshier path, extensible for file backends)"
+    },
+    {
+      "done": false,
+      "text": "app_pos_etc_plan, app_pos_etc_sun, app_pos_etc_moon all implemented"
+    },
+    {
+      "done": false,
+      "text": "Golden tests: planets at multiple epochs through full correction pipeline"
+    },
+    {
+      "done": false,
+      "text": "Test TRUEPOS vs default to verify corrections are applied correctly"
+    },
+    {
+      "done": false,
+      "text": "Light-time correction magnitude is physically reasonable (~8min Sun, varies for planets)"
+    },
+    {
+      "done": false,
+      "text": "Moon path correctly skips deflection"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Scope was fully implemented under swisseph-rs/30 (commit c6e9d27) and swisseph-rs/34 (commit d801e48 FP fidelity fixes). calc_planet, calc_sun, calc_moon all implemented in src/calc.rs with light-time iteration (0-iter Moshier path), deflection, aberration, frame bias, precession, and nutation. 350-case golden test suite (7 bodies × 5 epochs × 10 flag combos) passes with 1e-10 tolerance. Moon correctly skips deflection. No additional work required.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "c6e9d27"
+    }
+  ],
+  "files": [
+    "src/calc.rs"
+  ],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782483899533,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 31
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782559306643,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782559311237,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782483899533,
+  "updated_at": 1782559311237,
+  "completed_at": 1782559311237,
+  "arc_id": "019efa3b-da1f-77c1-8230-605aa4d4de91",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f0452-aa1b-7803-bef7-a687223dbb45",
+      "edge_type": "refines",
+      "source": "swisseph-rs/31",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483954203
+    },
+    {
+      "id": "019f0452-c089-7271-acd1-b5c49abcdc1c",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/31",
+      "target": "swisseph-rs/30",
+      "note": "Body-specific paths delegate to app_pos_rest",
+      "created_at": 1782483959945
+    },
+    {
+      "id": "019f0452-c681-7d13-9acd-b98fec3e1ff3",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/32",
+      "target": "swisseph-rs/31",
+      "note": "Dispatch routes to body-specific apparent position functions",
+      "created_at": 1782483961473
+    }
+  ]
+}

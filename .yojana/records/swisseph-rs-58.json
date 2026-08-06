@@ -1,0 +1,84 @@
+{
+  "id": "019f192d-0cc6-72f1-852c-5735505635b5",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/58",
+  "sequence_number": 58,
+  "title": "Debug SWIEPH/JPL fixstar xobs coordinate frame: wrong frame causes position failures",
+  "description": "During implementation of swisseph-rs/57 (SWIEPH+JPL fixstar backend support), `calc_fixstar_sweph` and `calc_fixstar_jpl` need an Earth position vector (`xobs`) to pass into `calc_fixstar_inner`. The correct coordinate frame for this vector is unclear, and both candidates produce test failures — just different ones.",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "HITL",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": "Read `docs/c-ref-fixstar.md` Step 5 and the actual C source (`swecl.c` or `sweph.c` near `fixstar_calc_from_struct`) to determine exactly what coordinate frame C passes to `swi_deflect_light` for the SWIEPH/JPL paths. Then read Rust `deflect_light` signature to confirm what frame it expects. The answer to those two questions fully determines the fix.",
+  "execution_record": "Attempt 1 — earth_bary (subagent's original choice):\nSwephPositions::earth_bary = EMB - moon/(EARTH_MOON_MRAT+1) = barycentric Earth (~1 AU from SSB).\nResult: Sirius/Spica/Aldebaran/Regulus PASS. SgrA* fails position [0],[1] ~1.74e-7 deg (>1e-8 tol). GPol/GP1958/SgrA* fail distance speed [5] with sign reversal (0.2-0.6 AU/day >> 0.1 tol).\n\nAttempt 2 — earth_helio:\nSwephPositions::earth_helio = earth_bary - sun_bary = heliocentric Earth (~1 AU from Sun).\nResult: ALL catalog stars now fail with ~2-3e-6 deg error (Sirius, Spica, Aldebaran, Regulus). Clearly worse. Reverted.\n\nCurrent state: earth_bary is still in place. The remaining failures with earth_bary are:\n1. SgrA* position ~1.74e-7 (exceeds 1e-8). SgrA* is special: builtin with epoch=2000, triggering icrs2fk5 in step 4.\n2. Distance speed [5] sign reversal for GPol/GP1958/SgrA* (~0.2-0.6 AU/day vs 0.1 tol).\n\nThe distance speed sign reversal is suspicious — it suggests ev_dt (Earth velocity at t-FIXSTAR_DT) may have the wrong sign or the speed derivative formula `(x_t - x_{t-dt}) / FIXSTAR_DT` is being applied incorrectly for SWIEPH/JPL. Note: xobs_dt = earth position at jd-FIXSTAR_DT, and xobs_dt[3..5] is the velocity at that epoch. In `calc_fixstar_inner` step 9, `ev_dt = [xobs_dt[3], xobs_dt[4], xobs_dt[5]]`. If sweph_positions returns velocity in different units or sign than Moshier's compute_pipeline, that would explain the sign reversal.\n\nFor the SgrA* position error: Moshier passes with the same xobs approach (heliocentric) — meaning the error is NOT from the FK/ICRS transform itself but from the Earth frame difference amplified by SgrA*'s near-ecliptic direction.",
+  "reproduction": "cargo test --test golden fixstar -- --nocapture",
+  "root_cause": "C's swi_deflect_light for SWIEPH/JPL internally derives the observer-Sun vector as e = earth_bary − sun_bary = earth_helio, while the surrounding fixstar pipeline uses barycentric Earth (earth_bary) for parallax and aberration. Rust collapsed all three steps onto a single xobs = earth_helio, so parallax/aberration were computed in the wrong (heliocentric) frame, producing 2–3e-6 deg position errors on every SWIEPH/JPL catalog star. Frame mismatch, not a velocity/sign bug.",
+  "context_refs": [
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/57",
+      "label": "parent task"
+    },
+    {
+      "type": "git:commit",
+      "value": "87991185809149ce5a2905572b75f08b7bd79cb8"
+    }
+  ],
+  "files": [
+    "src/context.rs",
+    "src/calc.rs",
+    "docs/c-ref-fixstar.md"
+  ],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782833810630,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 58
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782842905021,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-info",
+        "to": "ready-for-agent"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782842908265,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782842917495,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Fixed in commit 8799118. Root cause: C's swi_deflect_light for SWIEPH/JPL internally computes e = earth_bary - sun_bary = earth_helio, while the fixstar pipeline uses barycentric Earth for parallax/aberration. Rust was using a single xobs=earth_helio for all three steps — wrong frame for parallax/aberration, causing 2–3e-6 deg errors on all SWIEPH/JPL catalog stars. Fix: added sun_bary param to calc_fixstar_inner; step 8 derives earth_helio = xobs - sun_bary for deflect_light while steps 7/9 use xobs (earth_bary for SWIEPH/JPL, earth_helio for Moshier with sun_bary=0). JPL fixed to use J_EARTH→J_SBARY. All 71 golden tests pass.",
+      "ts": 1782842660334
+    }
+  ],
+  "created_at": 1782833810630,
+  "updated_at": 1782842917495,
+  "completed_at": 1782842917495,
+  "edges": []
+}

@@ -1,0 +1,82 @@
+{
+  "id": "019f2d26-e086-70f0-9928-fa8ce10a61bd",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/129",
+  "sequence_number": 129,
+  "title": "Implement SEFLG_BARYCTR for planets and Moon (Swiss/JPL backends)",
+  "description": "### Problem\n\n`calc(body, SEFLG_BARYCTR)` returns `Err(UnsupportedFlags(BARYCTR))` for all bodies except Earth (swisseph-rs/96). C's `swe_calc` supports BARYCTR for all planets (Mercury–Pluto) and Moon on the Swiss and JPL backends — returning the body's position relative to the solar system barycenter instead of the geocenter. Moshier rejects BARYCTR for everything (no real barycenter in its frame).\n\n### Current state\n\n- Earth BARYCTR: landed (swisseph-rs/96), routed through the Sun pipeline.\n- Planets BARYCTR: `calc_inner` returns `Err(UnsupportedFlags(BARYCTR))` at line ~1615.\n- Moon BARYCTR: same reject.\n- The `apparent_planet` HELCTR branch (calc.rs:1533) already does most of the work — `planet_bary` is available from the PositionProvider. HELCTR subtracts `sun_bary`; BARYCTR would skip that subtraction.\n- The `apparent_moon` HELCTR branch similarly has the infrastructure.\n- `plaus_iflag` already forces `NOABERR|NOGDEFL` for BARYCTR (same as HELCTR).\n\n### Scope\n\n1. **Planets (apparent_planet):** Add a BARYCTR early-branch parallel to the existing HELCTR branch. Skip the sun_bary subtraction. Light-time: use `planet_bary` directly (no helio→bary conversion needed). Use `finish_helctr` for the bias→precess→app_pos_rest tail. For Moshier (`calc_planet`): reject with the existing calc_body_moshier BARYCTR guard (already in place from swisseph-rs/96).\n\n2. **Moon (apparent_moon / calc_moon):** Add a BARYCTR branch. Barycentric Moon = moon_geo + earth_bary. Light-time handling follows the Moon HELCTR pattern (single dt, no iteration loop). Moshier: reject.\n\n3. **calc_inner guard:** Remove the global BARYCTR reject (or make it Moshier-only — the Moshier guard in calc_body_moshier already covers that).\n\n4. **Golden tests:** Add BARYCTR planet+Moon cases to gen_calc_helctr.c (Earth-only filter currently skips them). Swiss/JPL only. Positions eps 1e-9, speeds 1e-7.\n\n### Timing\n\nSchedule before public API. Users will try `calc(Mars, BARYCTR)` and shouldn't get an error on Swiss/JPL.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": "## 1. calc_inner guard (context.rs ~1615)\n\nRemove the global `if flags.contains(CalcFlags::BARYCTR) && body != Body::Earth` reject. The Moshier-specific reject already lives at the top of `calc_body_moshier` (added swisseph-rs/96). calc_body_sweph and calc_body_jpl don't need a guard — they delegate to apparent_planet/apparent_sun/apparent_moon which will handle BARYCTR.\n\n## 2. Planets — apparent_planet (calc.rs ~1533)\n\nAdd a BARYCTR branch after the existing HELCTR branch:\n\n```\nif flags.contains(CalcFlags::BARYCTR) {\n    let mut xx = pos.planet_bary;  // already barycentric\n    if !flags.contains(CalcFlags::TRUEPOS) {\n        // Light-time: same niter=1 pattern as HELCTR but use barycentric distance\n        // (no sun_bary subtraction). Re-eval at t-dt, keep planet_bary directly.\n        let xx0 = pos.planet_bary;\n        let mut dt = 0.0;\n        for _ in 0..=1 {\n            let dist = |xx|;\n            dt = dist * AUNIT / CLIGHT / 86400.0;\n            // Analytic extrapolation from barycentric base\n            xx[i] = xx0[i] - dt * xx0[i+3];\n        }\n        let pos_ret = p.positions(body, jd - dt, true)?;\n        xx = pos_ret.planet_bary;  // barycentric at retarded time\n    }\n    return Ok(finish_helctr(xx, jd, flags, models));\n}\n```\n\nCheck C's swecalc BARYCTR handling (sweph.c ~line 2465-2775 app_pos_etc_plan) to confirm: does C's BARYCTR use the same analytic extrapolation or a different light-time loop? The HELCTR lesson (swisseph-rs/83) notes that the extrapolation base xx0 is BARYCENTRIC — so for BARYCTR the initial dx and xx0 are the same (no helio/bary distinction). Verify against C's code before implementing.\n\n## 3. Moon — apparent_moon (calc.rs) + calc_moon (Moshier)\n\nAdd BARYCTR branch: `xx = moon_geo + earth_bary` (barycentric Moon). Light-time: single dt from `|xx|` (same as HELCTR Moon pattern — no iteration loop). Re-eval at t-dt. No sun_bary subtraction for BARYCTR.\n\nFor Moshier calc_moon: reject (calc_body_moshier guard covers it).\n\n## 4. Golden tests\n\n- gen_calc_helctr.c: remove the `bodies[ib] != SE_EARTH` BARYCTR filter. BARYCTR combos will now generate valid data for all bodies on Swiss/JPL (Moshier skipped on error as before).\n- Update calc_helctr.rs case count assertion.\n- Verify all 3 backends × 11 bodies × 4 BARYCTR flag combos = 132 new cases (minus Moshier skips = ~88 Swiss/JPL cases).\n\n## 5. Docs\n\nUpdate codebase-map.md: remove \"BARYCTR for other bodies still unimplemented\" note.",
+  "execution_record": "Two commits landed:\\n\\n1. 9b082e8: Planets + Moon BARYCTR — BARYCTR early-branches in apparent_planet and apparent_moon, structurally identical to HELCTR but without sun_bary subtraction. Narrowed calc_inner guard to Sun-only. 400 new BARYCTR golden cases.\\n\\n2. 9964886: Sun BARYCTR — C handles this in a separate swecalc branch (sweph.c:733) because SEI_SUN==SEI_EARTH (can't distinguish via main_planet). C's app_pos_etc_sbar returns sun_bary with single analytic light-time. Rust adds an early-return in apparent_sun for !is_earth && is_bary. Initially misread C's code as returning earth_bary for Sun BARYCTR (based on app_pos_etc_sun analysis); golden test failure revealed the separate dispatch path. 40 more Sun BARYCTR cases.\\n\\nTotal: 1760 golden cases (was 1360), BARYCTR now fully implemented for all bodies on Swiss/JPL. Moshier rejects globally (unchanged).\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/96",
+      "label": "HELCTR/BARYCTR Earth (prerequisite, landed)"
+    },
+    {
+      "type": "git:commit",
+      "value": "9b082e8"
+    },
+    {
+      "type": "git:commit",
+      "value": "9964886"
+    }
+  ],
+  "files": [
+    "src/calc.rs",
+    "src/context.rs",
+    "tests/c-gen/gen_calc_helctr.c",
+    "tests/golden/calc_helctr.rs"
+  ],
+  "tags": [
+    "pre-public-api"
+  ],
+  "history": [
+    {
+      "ts": 1783168950406,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 129
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783178216933,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783178221326,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes.\\n\\nOne finding (medium): Codex flagged that MeanNode/MeanApogee/TrueNode/OscuApogee + BARYCTR might bypass the Moshier guard after the global guard removal. Verified as non-issue: calc_inner already has `flags.intersects(HELCTR | BARYCTR)` guards at lines 1540 and 1557 that return all-zero for these bodies, matching C's behavior (sweph.c:860-864, which returns zeros regardless of backend). The old global guard was redundant here.\\n\\nNo constraint violations, no convention violations introduced. 1760 golden cases pass at 1e-9/1e-7. Structural risk 0.9 is driven by calc.rs/context.rs being high-churn hotspots, not by the change itself.\"",
+      "ts": 1783179286741
+    }
+  ],
+  "created_at": 1783168950406,
+  "updated_at": 1783178922309,
+  "completed_at": 1783178221326,
+  "edges": []
+}

@@ -1,0 +1,95 @@
+{
+  "id": "019f04e2-44af-7c93-b51c-92b3d8e37219",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/34",
+  "sequence_number": 34,
+  "title": "Fix calc pipeline: TRUEPOS positions, planet speeds, Moon light-time",
+  "description": "Three remaining categories of golden test failure in the calc pipeline (swisseph-rs/30). All share a root cause: incomplete port of the C pipeline's speed/position correction stages.\n\n## Failures\n\n1. **Planet TRUEPOS positions** (~3-7e-3 degrees, all planets, all epochs): C gives different positions for TRUEPOS vs NOABERR|NOGDEFL despite both skipping deflection+aberration. The only known flag-gated difference is a velocity-only correction (xxsp change-of-dt). Verified empirically in C — the position difference is real, not a golden data issue.\n\n2. **Planet speeds** (~1e-4 deg/day, ALL flag combos including Sun-passing ones): Three missing speed corrections identified from C source reading (sweph.c:2465-2775):\n   - (a) Velocity replacement: C calls swi_moshplan(t,...) at apparent time t=teval-dt and replaces xx[3..5] — my code uses velocity at teval\n   - (b) Change-of-dt (xxsp): correction for changing light-time, applied only when !TRUEPOS\n   - (c) Earth velocity correction: xx[3..5] += xobs - xobs2 after aberration (xobs=Earth@teval, xobs2=Earth@t)\n\n3. **Moon light-time** (~3e-3 degrees positions): C MOSEPH Moon light-time does a barycentric detour — converts geocentric→barycentric, retards, subtracts unretarded Earth. Net effect adds -dt*Earth_vel to geocentric position vs simple retardation.\n\n## Debugging strategy\n\nDO NOT reason about the C code from the ref doc — that approach failed across 3 sessions. Instead:\n\n1. **Instrument the C pipeline**: Write a C program that calls swe_calc internals and dumps intermediate values at each pipeline stage (after light-time, after geocentric conversion, after deflection, after aberration, after precession, etc.) for Mercury TRUEPOS at J2000. \n2. **Add matching Rust dumps**: Print the same intermediate values from calc_planet.\n3. **Diff**: Find the exact divergence point.\n4. **Fix**: Once the divergence point is identified, the fix should be mechanical.\n\nFor the speed corrections, the C source details are in the agent output at:\n/tmp/claude-1000/-home-josh-nhs-soft-astrology-swisseph-rs/0b4dd155-49ad-4199-a1e4-65b6e06abd2d/tasks/ade9d5c1b1bb0e57b.output\n(agent read sweph.c:2465-2775 and documented exact line numbers and logic)",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "All 350 golden_calc test cases pass at 1e-10 tolerance"
+    },
+    {
+      "done": false,
+      "text": "All 62 existing unit tests continue to pass"
+    },
+    {
+      "done": false,
+      "text": "No new clone()/to_owned() or dynamic dispatch introduced"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": "Phase 1 — Empirical diagnosis of TRUEPOS position divergence:\n1. Write C instrumentation program that prints xx[0..5] at each pipeline stage for Mercury TRUEPOS at J2000 (after light-time, after moshplan velocity replacement, after geocentric conversion, after xxsp, before/after deflection, before/after aberration, after bias, after precession, after nutation, final output)\n2. Add temporary debug prints in Rust calc_planet for the same case\n3. Diff to find divergence point\n4. Fix the root cause\n\nPhase 2 — Implement missing speed corrections:\n1. Velocity replacement at apparent time (swi_moshplan(t,...) → compute_pipeline(t,...) and use those velocities)\n2. Change-of-dt xxsp correction (compute xxsp per C algorithm, apply when !TRUEPOS)\n3. Earth velocity correction after aberration (xobs - xobs2)\n\nPhase 3 — Moon light-time:\n1. Add Earth velocity contribution to Moon light-time retardation: xx[i] -= dt * (xx[i+3] + earth_helio[i+3])\n2. Verify Moon cases pass without regressing other bodies\n\nPhase 4 — Verification:\n1. All 350 golden test cases pass at 1e-10\n2. All 62 unit tests pass\n3. Commit and update codebase-map.md",
+  "execution_record": "Started at 1104 failures. First pass (prior sessions): fixed calc pipeline structure (retarded-time velocity, light-time-change correction, Earth velocity correction, deflect_light speed using DeflectOutput struct, q_pert construction matching C). Reduced to 53 failures. Second pass: fixed D angle eval order and missing L normalization → 34 failures. Third pass: identified `l +=` vs `l = l + ...` accumulation order difference by comparing intermediate Moon longitude (L_rad) between C and Rust fprintf/eprintln output → 0 failures. All 350 golden test cases pass at 1e-10 tolerance. Key failed approach: tried using same eps_date obliquity for both main and backward-difference Earth computations (matching C's swed.oec caching) — made component[2] worse; reverted. The obliquity difference over 0.0001 days was too small to matter; the real issue was the Moon longitude FP ordering.",
+  "reproduction": null,
+  "root_cause": "Three FP evaluation order mismatches in embofs_mosh's Moon longitude computation caused ~2e-12 radian position errors that were amplified ~1e12x through backward-difference velocity computation (÷1e-4 day interval) and further through deflect_light's speed correction (÷5e-7 day interval). Specific mismatches: (1) D angle multiplication order `2.0 * d_half * DEGTORAD` vs C's `(2.0 * DEGTORAD) * a` — non-associative FP arithmetic; (2) missing `normalize_degrees(L)` before radians conversion; (3) `l += corrections` evaluates the correction sum first then adds to L (~481k), while C's `L = L + c1 + c2 + ...` accumulates left-to-right with L participating from the start, changing rounding at the ~1e-10 degree level.",
+  "context_refs": [
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/30"
+    },
+    {
+      "type": "git:commit",
+      "value": "c6e9d27"
+    },
+    {
+      "type": "doc:path",
+      "value": "docs/c-ref-calc.md"
+    },
+    {
+      "type": "git:commit",
+      "value": "d801e48"
+    }
+  ],
+  "files": [
+    "src/calc.rs",
+    "src/moshier/backend.rs",
+    "tests/golden/calc.rs",
+    "tests/c-gen/gen_calc.c",
+    "docs/c-ref-calc.md"
+  ],
+  "tags": [
+    "moshier",
+    "calc-pipeline",
+    "golden-test"
+  ],
+  "history": [
+    {
+      "ts": 1782493365423,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 34
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782493674963,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782500437775,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782493365423,
+  "updated_at": 1782500437775,
+  "completed_at": 1782500437775,
+  "edges": []
+}

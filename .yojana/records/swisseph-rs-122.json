@@ -1,0 +1,95 @@
+{
+  "id": "019f28f5-59d2-7bd2-9621-ffa6025af2c4",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/122",
+  "sequence_number": 122,
+  "title": "Fictitious planets 1/2: element layer — built-in table, seorbel.txt parser, swi_kepler, swi_osc_el_plan core",
+  "description": "### Summary\nFirst half of the fictitious-planets port (Uranian points, Isis, Nibiru, Vulcan, etc. — gap found in swisseph-rs/15 planning: `Body::Fictitious` exists but has no dispatch). This task builds the element layer: the built-in `plan_oscu_elem` table, the `seorbel.txt` parser with T-term polynomial evaluation, the Kepler solver, and `swi_osc_el_plan`'s heliocentric-position core. No calc dispatch yet (that's 2/2).\n\n### Files\n- `src/fictitious.rs` (new) — all of the above (module tree mirrors C: this is swemplan.c's fictitious half; the Moshier series half already lives in src/moshier/)\n- `src/lib.rs` — `pub mod fictitious;` (alphabetical) \n- `src/constants.rs` — any SE_FICT_* constants not already present (FICTFILE = \"seorbel.txt\" exists at line 249)\n- `tests/golden/fictitious_elements.rs`, `tests/golden-data/fictitious_elements.json`, `tests/c-gen/gen_fictitious_elements.c` (new)\n\n### Implementation steps\n1. Read docs/c-ref-fictitious.md in full before writing code. Key structures: §1 (built-in table), §3 (file format + check_t_terms), §4 (swi_osc_el_plan).\n2. **Built-in table** (§1): transcribe the live 15-row default set exactly as the ref doc gives it (the C table has 23 rows across #ifdef branches; only the Neely-live rows + shared rows are reachable — port what the doc marks live, preserve its ordering by ipl 40–54). CRITICAL: bodies 55–58 (Vulcan, White Moon, Proserpina, Waldemath) have NO built-in row — without a seorbel.txt they must return an error, matching C (§ boundary conditions).\n3. **FictitiousElements struct**: epoch tjd0, equinox (J2000/JDATE/B1950/explicit JD), mean anomaly M, semi-axis a, eccentricity e, arg perihelion, node, inclination, name — as the ref doc's element order specifies (§3 documents the file column order; §1 the table column order — they differ, follow the doc).\n4. **seorbel.txt parser** (§3): line syntax, `#` comments, `J2000`/`JDATE`/`B1950` equinox sentinels, and `check_t_terms` — the polynomial-in-T expression evaluator for element fields (`+`, `-`, `*`, `T` tokens; the doc has a worked trace — implement to match it exactly). Preserve the C quirk the doc flags: when an element carries T-terms, the mean-anomaly epoch override sets tjd0 = tjd for M only; equinox handling comes ONLY from the JDATE sentinel, regardless of what the misleading C comment says. Pattern-match src/stars.rs `load_catalog`/`parse` for the file-reading shape (path resolution via config ephe_path, io error mapping). Loading is config-time: parse in `Ephemeris::new` when the file exists under ephe_path, fall back to built-ins per body otherwise — store as a field like the StarCatalog (stateless after construction). For THIS task, expose pure functions (`parse_orbel`, `elements_for(idx, jd, &catalog)`) — wiring into Ephemeris::new can land here too if small, but the calc path is 2/2's job.\n5. **swi_kepler port** (§4): net-new (no Rust equivalent exists). Elliptic Kepler-equation solver with C's exact iteration scheme, tolerances, and the high-eccentricity initial guess. MUST reproduce the C bug at swemplan.c:638: `pow(x, 1/3)` with integer division — the exponent is 0, so the \"cube root\" is always 1.0. Port as `x.powf(0.0)` or literal `1.0` with a comment citing the ref doc — do NOT fix it to a real cube root (only Nibiru, ecce 0.981, reaches this branch; bit-parity requires the bug).\n6. **swi_osc_el_plan core** (§4): daily motion from semi-axis (Gauss constant), mean anomaly propagation, Kepler solve, orbital-plane coords, Gaussian P/Q/R vector rotation to ecliptic, equinox-of-elements → J2000 precession where tequ ≠ J2000, and the barycentric shift the doc describes. Signature: takes jd, element set, and the Earth/Sun barycentric state vectors as EXPLICIT parameters (C reads them from swed.pldat globals — stateless port threads them in; 2/2 supplies them from the backend). Output: heliocentric J2000 equatorial cartesian pos+vel (whatever frame the doc says C hands to the apparent pipeline — follow §4/§5 precisely).\n7. Note the doc's finding: built-in Kronos semi-axis (64.81960) differs from shipped ephe/seorbel.txt (64.81690). Golden tests must be generated WITH the same element source the Rust side uses — the C harness sets ephe path, so seorbel.txt wins; make the Rust test load the same file (../swisseph/ephe as ephe_path).\n\n### C reference\ndocs/c-ref-fictitious.md — §1 (table), §2 (names), §3 (file parser, check_t_terms), §4 (swi_osc_el_plan, swi_kepler), Porting Notes. Do not read the C source; if the doc is ambiguous on an algorithm detail, that is an escape-hatch condition.\n\n### Golden tests\n- C harness `gen_fictitious_elements.c`: `#include \"../swisseph/swemplan.c\"` style direct-include to reach static functions (precedent: tests/c-gen harness for heliacal internals includes swehel.c — copy its Makefile/include pattern). Emit JSON: for each ipl 40–58 that resolves × 6 epochs {2451545.0, 2415020.0, 2460600.5, 2378496.5+10, 2500000.5, 1720000.5-safe-range value}: the resolved elements after check_t_terms (tjd0, tequ, M, a, e, peri, node, incl) and the raw heliocentric output of swi_osc_el_plan (needs the Earth/Sun state — call swe_calc first to prime, per the doc's §5 global-coupling note; replicate whatever priming the doc says the real call path does).\n- Rust test `fictitious_elements.rs`: parse the same seorbel.txt, assert resolved elements bitwise-exact (`assert_f64_exact`), and osc_el_plan output at 1e-9 (position) / 1e-7 (velocity) — element resolution is pure arithmetic (exact); the position core may compound through the Kepler iteration (epsilon).\n- Bodies 55–58 without-file error case: unit test with built-ins only → Err.\n- Run: `cargo test --test golden fictitious_elements -- --nocapture`\n\n### Acceptance criteria\n- `cargo test --test golden fictitious_elements -- --nocapture` passes\n- Element resolution bitwise-exact vs C; osc_el_plan core ≤1e-9 pos\n- `cargo test` full suite stays green; `cargo clippy` clean\n\n### Escape hatch\nIf golden tests fail with errors > 1e-8 after two debugging attempts, STOP and report: failing cases, actual vs expected, what you tried. Likely culprits per the ref doc: the pow(1/3) bug branch, T-term evaluation order, equinox precession direction. Escalate to Opus — do not spend a third attempt.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented in one pass, no escape-hatch escalation needed. All 114 golden cases (19 bodies × 6 epochs) pass: element resolution bitwise-exact, osc_el_plan within 1e-9 pos / 1e-7 vel. The check_t_terms parser pre-parses expressions into polynomial coefficients [constant, T^1..T^4] at catalog load time, avoiding re-parsing the file per call. Built-in table uses Neely-revised values only (dead #else branch omitted). C's pow(x,1/3) integer-division bug reproduced as powf(0.0) for Nibiru's high-eccentricity initial guess. FictitiousCatalog::builtin() correctly rejects bodies 55-58 (Vulcan, White Moon, Proserpina, Waldemath) without seorbel.txt. Codebase map updated.\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "45e5123"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "fictitious"
+  ],
+  "history": [
+    {
+      "ts": 1783098595794,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 122
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783179647222,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783180270431,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes (2 high findings fixed in a96a0b9).\\n\\n1. [high/fixed] Built-in fallback normalized angles that C returns raw — Nibiru's -44.567° node became 315.433° via degnorm. Fixed: built-in rows now skip degnorm, matching C's plain `value * DEGTORAD`. New test locks down negative built-in angles.\\n\\n2. [high/fixed] Malformed present seorbel.txt silently fell back to built-ins. C only falls back when the file can't be opened; once opened, parse errors are hard errors. Fixed: load_fictitious_catalog now returns Result, propagating parse errors.",
+      "ts": 1783180802297
+    }
+  ],
+  "created_at": 1783098595794,
+  "updated_at": 1783180270431,
+  "completed_at": 1783180270431,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f6-ec79-7241-9a7c-5fce087716fb",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/122",
+      "target": "swisseph-rs/15",
+      "note": "gap found during the 15 planning sweep (Body::Fictitious had no dispatch)",
+      "created_at": 1783098698873
+    },
+    {
+      "id": "019f28f6-f536-78a0-b7a9-b46ba2ccff0e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/123",
+      "target": "swisseph-rs/122",
+      "note": "dispatch consumes the element layer (catalog, swi_osc_el_plan core)",
+      "created_at": 1783098701110
+    },
+    {
+      "id": "019f28f7-001a-7050-b760-5cded6f0056e",
+      "edge_type": "relates_to",
+      "source": "swisseph-rs/124",
+      "target": "swisseph-rs/122",
+      "note": "get_planet_name's fictitious-name path should reuse 122's seorbel catalog if it has landed",
+      "created_at": 1783098703898
+    }
+  ]
+}

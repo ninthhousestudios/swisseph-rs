@@ -1,0 +1,89 @@
+{
+  "id": "019f28ef-a193-7140-ad21-6004c9132cc6",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/116",
+  "sequence_number": 116,
+  "title": "Polish 3/7: Doc-comment sweep A — core types, flags, error, config, Ephemeris methods (+ swe_* doc aliases)",
+  "description": "### Summary\nDocumentation-only sweep over the core layer: every public item in src/types.rs, src/flags.rs, src/error.rs, src/config.rs, and every public method on `Ephemeris` in src/context.rs gets a doc comment. Add `#[doc(alias = \"swe_...\")]` to each Ephemeris method so rustdoc search finds the C names (this replaces a compat module — decided, don't revisit). NO code changes — docs and attributes only.\n\n### Files\n- `src/types.rs`, `src/flags.rs`, `src/error.rs`, `src/config.rs`, `src/context.rs`\n\n### Implementation steps\n1. **Method docs on Ephemeris** (~50 pub methods, listed by `grep -n \"    pub fn \" src/context.rs`). Per method: one-sentence summary; the C function it ports as a `#[doc(alias = \"swe_calc\")]`-style attribute AND named in prose (\"Port of `swe_calc_ut`\"); parameter units and time scale — this is the highest-value content: JD in TT vs UT1, degrees vs radians, geographic longitude sign convention (east-positive), altitude in meters, pressure in hPa; return-value shape (what's in `CalcResult`, which tret/attr slot maps to which field); error conditions worth calling out (e.g. `CircumpolarBody` from rise/set, TOPOCTR-without-config rejection).\n2. Pull unit/scale facts from the existing implementations and golden tests — do NOT guess. Where a method has a documented C-divergence (see docs/codebase-map.md entries and CLAUDE.md <stateless_tolerance>), a one-line \"Differences from C\" note with a pointer suffices.\n3. **types.rs**: doc every enum + variant-group (Body variants need no per-variant prose; model enums get one line each on what the model is + the C constant name). Doc the newtypes (JdTt/JdUt1: which time scale and why they exist).\n4. **flags.rs**: per-flag doc lines mapping to C SEFLG_* names and stating interactions already enforced in code (e.g. SPEED3 vs SPEED, HELCTR forcing NOABERR|NOGDEFL via plaus_iflag).\n5. **error.rs**: one line per variant, when it's returned.\n6. **config.rs**: per-field docs incl. defaults and which C swe_set_* call each field replaces (ephe_path ↔ swe_set_ephe_path, topographic ↔ swe_set_topo, sidereal_* ↔ swe_set_sid_mode, tidal_acceleration ↔ swe_set_tid_acc, astro_models ↔ swe_set_astro_models).\n7. Keep comment density consistent with existing good examples in the codebase (e.g. config.rs's module doc). No essays — 2–6 lines per item, units always stated.\n\n### C reference\nNone to read — C names come from docs/codebase-map.md and the existing code comments. Do not read C source.\n\n### Golden tests\nNone. `cargo test` must stay green (docs can break doctests if you add fenced code — mark non-compiling fragments as `text` or `no_run`).\n\n### Acceptance criteria\n- `cargo doc --no-deps` builds clean, no rustdoc warnings\n- `RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps` passes\n- `cargo test` passes\n- Spot check: `grep -c \"doc(alias\" src/context.rs` ≥ 45\n\n### Escape hatch\nIf a method's units/time-scale can't be determined from the Rust code + golden tests with certainty, STOP for that item and list it in the completion report rather than writing a plausible-but-unverified claim. Wrong unit docs are worse than missing docs.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Documented all 5 target files: error.rs (16 variants), flags.rs (7 bitflags structs with per-flag docs mapping to C SEFLG_*/SE_* names), config.rs (TopoPosition + EphemerisConfig fields with C swe_set_* equivalents), types.rs (Body, HouseSystem, CalendarType, SiderealMode, EphemerisSource, all model enums, JdTt/JdUt1, Nutation, Epsilon, DegreeParts, UtcComponents, DeltaT trait), context.rs (Ephemeris struct + 51 #[doc(alias)] attributes on pub methods). 15 pre-existing rustdoc-link warnings (links to private items from orbit.rs/phenomena.rs) unchanged — not introduced by this task. All 177 tests pass.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "427722a"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "polish"
+  ],
+  "history": [
+    {
+      "ts": 1783098220947,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 116
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783204878723,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783205833172,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783098220947,
+  "updated_at": 1783205833172,
+  "completed_at": 1783205833172,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f2-19f3-7a51-b342-90d2a47e8773",
+      "edge_type": "refines",
+      "source": "swisseph-rs/116",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098382835
+    },
+    {
+      "id": "019f28f2-52f6-7ba3-8c92-9ebca2d02265",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/116",
+      "target": "swisseph-rs/115",
+      "note": "document the settled API surface, not a moving one",
+      "created_at": 1783098397430
+    },
+    {
+      "id": "019f28f2-5a25-7bb1-afc8-59f444815058",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/117",
+      "target": "swisseph-rs/116",
+      "note": "missing_docs lint activates only after sweep A covered the core layer",
+      "created_at": 1783098399269
+    }
+  ]
+}

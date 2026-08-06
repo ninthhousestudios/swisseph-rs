@@ -1,0 +1,96 @@
+{
+  "id": "019f2526-9c58-7d03-af3e-959a4b759c04",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/111",
+  "sequence_number": 111,
+  "title": "Heliacal 8/8: event drivers + Ephemeris::heliacal_ut (arc completion)",
+  "description": "### Summary\nPort the top-level heliacal event drivers — both search strategies (default vis_lim path and AVKIND arc_vis path) — and the public `swe_heliacal_ut` → `Ephemeris::heliacal_ut`. Completes the heliacal arc (Phase 13).\n\nRead docs/codebase-map.md first. Do NOT read ../swisseph C source — docs/c-ref-heliacal-search.md is the source of truth.\n\n### Files\n- `src/heliacal.rs` — drivers + `pub fn heliacal_ut(...)` + `HeliacalEvent` output struct.\n- `src/context.rs` — `Ephemeris::heliacal_ut` delegate.\n- `src/lib.rs` — re-export `HeliacalEvent`.\n- `tests/c-gen/gen_heliacal.c` — extend with `\"events\"` key; regenerate heliacal.json.\n- `tests/golden/heliacal.rs` — extend.\n- `docs/codebase-map.md` — full heliacal module entry (arc complete).\n\n### Implementation steps\n1. vis_lim-path drivers per search doc §5: `heliacal_ut_vis_lim` (zero-fills all output slots up front, synodic-period stepping with MAX_COUNT_SYNPER=5 — note §8: the C comment says 10 but the literal is 5 — LONG_SEARCH multiplier, conjunction anchoring via 7/8's find_conjunct_sun/get_asc_obl_with_sun, day search via get_heliacal_day, details via get_heliacal_details), `moon_event_vis_lim` (new-moon anchoring via `eph.pheno_ut` per §5's walkthrough), `MoonEventJDut`.\n2. arc_vis-path drivers per §6: `heliacal_ut_arc_vis`, `moon_event_arc_vis`, `HeliacalJDut` — selected by HeliacalFlags::AVKIND bits. Port §6's quirks LITERALLY for golden parity: (a) this path populates only dret[0], leaving [1]/[2] as-is — since our vis_lim path zero-fills, they come out 0.0; (b) the final sanity-bound branch assigns the STALE loop variable (`dret[0] = JDNDaysUT`, not JDNDaysUTinp) — §6/§8 flag it as a likely C bug; reproduce it, with a code comment citing the ref doc; (c) the HeliacalAngle calls always pass AltM=-1, AziM=0 (Moon interference never actually factored — §8). The `#if 0` swe_heliacal_pheno_ut overwrite block is dead — skip.\n3. Top-level dispatch per §7: `heliacal_ut` internal + `pub fn heliacal_ut(eph, tjd_start_ut, dgeo, datm, dobs, object_name: &str, event: HeliacalEventType, epheflag: CalcFlags, helflag: HeliacalFlags) -> Result<HeliacalEvent, Error>` — TypeEvent validation, object-class routing (Sun/Moon rejection rules, planet vs star, the acronychal-event routing §7 describes — note §8: swephexp.h's \"not implemented\" comment on acronychal is stale, they ARE handled), flag preprocessing, dret contract. `HeliacalEvent { start_visible: f64, optimum_visibility: f64, end_visible: f64 }` (dret[0..2]).\n4. Delegate in context.rs; lib.rs re-export.\n5. Extend gen_heliacal.c `\"events\"` key (~14 cases, record retval + dret[0..2]):\n   - \"sirius\" TypeEvent=1 (heliacal rising) from 2453552.5 (2005-07-01) at Cairo [31.25,30.1,30.0] — the historically significant case;\n   - \"venus\" TypeEvent=1 from 2453391.0 and TypeEvent=2 from 2453000.0, Cairo;\n   - \"venus\" TypeEvent=3 and 4 from 2453100.0, Cairo (evening-first/morning-last synodic branches);\n   - \"moon\" TypeEvent=3 (first crescent) from 2453461.5 (just after 2005-04-08 new moon) and one more lunation (2453491.0), Mecca [39.83,21.42,300.0];\n   - \"sirius\" TypeEvent=2 from 2453450.0, Athens [23.7,38.0,100.0];\n   - one LONG_SEARCH variant (venus TypeEvent=1 from a start ~2 synodic periods before the event);\n   - two AVKIND_VR arc_vis cases (venus TypeEvent=1/2, same starts as above);\n   - one HIGH_PRECISION variant of the Sirius rising.\n   All SEFLG_SWIEPH; datm [1013.25,15,40,40], dobs [36,1,0,0,0,0]; ephe path + star buffers per gen_eclipse.c.\n6. Regenerate heliacal.json; extend tests/golden/heliacal.rs: dret times eps 2e-5 day for vis_lim cases; arc_vis cases eps 1e-4 day (coarser search); retval exact. If a case's C retval is an error (e.g. −2 not-found within search window), assert the corresponding Err/None outcome.\n7. Rewrite docs/codebase-map.md's heliacal entry as the full module summary (mark arc complete, list public API + quirks preserved).\n\n### C reference\ndocs/c-ref-heliacal-search.md §5–§8 (call contracts into §1–§4 from 7/8, vision §10 HeliacalAngle, pheno doc for moon_event's pheno_ut usage).\n\n### Golden tests\n- Same gen_heliacal build/run as 4/8–6/8.\n- `cargo test --test golden heliacal -- --nocapture`.\n\n### Acceptance criteria\n- `cargo test --test golden heliacal -- --nocapture` passes (all keys incl. 4/8–6/8 after regeneration).\n- `cargo test` full suite green; no new clippy warnings.\n- docs/codebase-map.md heliacal entry updated.\n\n### Escape hatch\nIf event times diverge by > 1e-3 day (≈86 s) after two debugging attempts, STOP and report: failing cases, actual vs expected dret values, and at which layer the divergence first appears (compare intermediate get_heliacal_day/find_conjunct_sun values against the internals battery). A day-level (≥1.0) divergence usually means a branch went the other way in the synodic stepping — report the branch, don't grind. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented in 3 commits: (1) event drivers + Ephemeris::heliacal_ut (vis_lim + arc_vis paths, HeliacalEvent struct, dispatch logic), (2) golden tests + topo_config fix (12 C-generated event cases at Cairo/Mecca/Athens observers, topo threading via calc_with_config in arc_vis path, TOPOCTR stripped from moon pheno_ut flags), (3) codebase-map update marking arc complete. Key surprise: arc_vis path's swe_calc calls with TOPOCTR failed because C relies on global swe_set_topo state — fixed by threading topo_config through calc_with_config/fixstar2_with_config. moon_event_arc_vis pheno_ut call stripped TOPOCTR (phase angle is geocentric).\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "3c00363"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "heliacal"
+  ],
+  "history": [
+    {
+      "ts": 1783034715224,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 111
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783094015263,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783096172141,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes (2 high findings fixed in 22b05ef).\n\n(1) CError conflated retryable/fatal errors — fixed via is_retryable() classifier + tjdmax guard on inner retry loop.\n(2) AVKIND_VR iteration cap produced JD 0.0 instead of Err — fixed with explicit tb_vr==0 guard.",
+      "ts": 1783096519546
+    }
+  ],
+  "created_at": 1783034715224,
+  "updated_at": 1783096172141,
+  "completed_at": 1783096172141,
+  "arc_id": "019efa3c-5420-7750-9de1-93c44d1a9bdf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f2526-e1d8-7301-ba95-c888c9225953",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/111",
+      "target": "swisseph-rs/108",
+      "note": null,
+      "created_at": 1783034733016
+    },
+    {
+      "id": "019f2526-e4a9-7d22-bca7-8a0046b21cf1",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/111",
+      "target": "swisseph-rs/110",
+      "note": null,
+      "created_at": 1783034733737
+    },
+    {
+      "id": "019f2527-2be6-73e3-ac23-b3cd36b03c1e",
+      "edge_type": "refines",
+      "source": "swisseph-rs/111",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034751974
+    }
+  ]
+}

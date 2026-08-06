@@ -1,0 +1,104 @@
+{
+  "id": "019f2525-0b71-7bf0-8e95-17d74936aa9c",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/108",
+  "sequence_number": 108,
+  "title": "Heliacal 5/8: TopoArcVisionis + HeliacalAngle + public wrappers",
+  "description": "### Summary\nPort the arcus-visionis bisection (TopoArcVisionis) and the optimum-altitude search (HeliacalAngle), plus their public wrappers `swe_topo_arcus_visionis` → `Ephemeris::topo_arcus_visionis` and `swe_heliacal_angle` → `Ephemeris::heliacal_angle`.\n\nRead docs/codebase-map.md first. Do NOT read ../swisseph C source.\n\n### Files\n- `src/heliacal.rs` — `topo_arc_visionis` core, `heliacal_angle_core`, public `topo_arcus_visionis` / `heliacal_angle`.\n- `src/context.rs` — two delegates (after `vis_limit_mag`).\n- `src/lib.rs` — re-export any new output type.\n- `tests/c-gen/gen_heliacal.c` — extend with `\"arcvis\"` and `\"helangle\"` keys; regenerate heliacal.json.\n- `tests/golden/heliacal.rs` — extend.\n\n### Implementation steps\n1. `topo_arc_visionis` per docs/c-ref-heliacal-vision.md §9: bisection over Sun-depression with the exact bracket, iteration/convergence constants, and sign convention §9 gives (the catalogue's [45°,0°] summary is a paraphrase — follow §9). Each probe evaluates object magnitude minus vis_lim_magn at the trial geometry; reuse the 4/8 core, threading the same dobs/datm/helflag.\n2. Public `topo_arcus_visionis(eph, tjd_ut, dgeo, datm, dobs, epheflag, helflag, mag, azi_obj, alt_obj, azi_sun, azi_moon, alt_moon) -> Result<f64, Error>` per §9's wrapper walkthrough (dret[0] only).\n3. `heliacal_angle_core` per §10: the optimum-altitude scan (which altitudes it samples, the parabola/minimum selection, and the dret[0..2] = [optimal altitude, arcus visionis, Sun-altitude-difference] contract per §10). The PLSV==1 branch is DEAD (vision §11) — skip it.\n4. Public `heliacal_angle(...)` per §10 (same parameter shape minus alt_obj). Output: `[f64; 3]` or a small named struct — pick a named struct `HeliacalAngle { optimal_altitude, arcus_visionis, sun_altitude_diff }` for lib.rs re-export (matches project convention of named outputs, e.g. Phenomena).\n5. Delegates in context.rs + lib.rs re-exports.\n6. Extend gen_heliacal.c: `\"arcvis\"` — swe_topo_arcus_visionis over mag ∈ {-4.6, -1.46, 0.5, 2.0} × (azi_obj,alt_obj) ∈ {(120,10),(240,3)} × (azi_sun,azi_moon,alt_moon) ∈ {(90,270,-10),(300,60,20)} × tjd_ut ∈ {2453371.0, 2451545.0} × Cairo dgeo × default datm/dobs × SEFLG_SWIEPH — record retval + dret[0]. `\"helangle\"` — swe_heliacal_angle over the same grid minus alt_obj — record retval + dret[0..2]. ~32 cases total (rotate, don't full-cross).\n7. Regenerate heliacal.json; extend tests/golden/heliacal.rs. Tolerance: bisection converges to §9's epsilon — assert eps 1e-6 on angles (tighten to 1e-7 if it passes).\n\n### C reference\ndocs/c-ref-heliacal-vision.md §9, §10 (+§8 core contract, §11 porting notes).\n\n### Golden tests\n- Same gen_heliacal build/run as 4/8.\n- `cargo test --test golden heliacal -- --nocapture`.\n\n### Acceptance criteria\n- `cargo test --test golden heliacal -- --nocapture` passes (vis_limit battery from 4/8 must still pass after regeneration).\n- `cargo test` full suite green; no new clippy warnings.\n\n### Escape hatch\nIf golden tests fail with errors > 1e-5 (angles) after two debugging attempts, STOP and report failing cases, actual vs expected, what you tried. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "e3c1336"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "heliacal"
+  ],
+  "history": [
+    {
+      "ts": 1783034612593,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 108
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783090324742,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783090642014,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. Two findings fixed in 0500d3d: (1) topo_arcus_visionis now returns Result<f64, Error> for API consistency with neighboring wrappers, (2) suppressed dead_code warnings on unused retval fields in test structs.",
+      "ts": 1783091031856
+    }
+  ],
+  "created_at": 1783034612593,
+  "updated_at": 1783090642014,
+  "completed_at": 1783090642014,
+  "arc_id": "019efa3c-5420-7750-9de1-93c44d1a9bdf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f2526-d13c-7580-a076-4d40f5738dfa",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/108",
+      "target": "swisseph-rs/107",
+      "note": null,
+      "created_at": 1783034728764
+    },
+    {
+      "id": "019f2526-d8bd-7791-b3c3-133294ed43bf",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/109",
+      "target": "swisseph-rs/108",
+      "note": null,
+      "created_at": 1783034730685
+    },
+    {
+      "id": "019f2526-e1d8-7301-ba95-c888c9225953",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/111",
+      "target": "swisseph-rs/108",
+      "note": null,
+      "created_at": 1783034733016
+    },
+    {
+      "id": "019f2527-243d-7433-96ba-4b3ac2fe8760",
+      "edge_type": "refines",
+      "source": "swisseph-rs/108",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034750013
+    }
+  ]
+}

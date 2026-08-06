@@ -1,0 +1,80 @@
+{
+  "id": "019f28f1-f44d-7de2-aa2e-5c037d8df1d1",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/121",
+  "sequence_number": 121,
+  "title": "Scope decision: planet moons (SE_PLMOON, sat/*.se1) and Body::Comet — port, descope, or remove the enum variants",
+  "description": "Gap found during the swisseph-rs/15 planning sweep (same class as the asteroid gap): `Body::PlanetMoon(PlanetMoonId)` and `Body::Comet(CometId)` exist in types.rs (lines 106–127) but have NO dispatch anywhere in calc — they fall through to the error path. Nobody planned the port.\n\nFacts for the decision:\n- C supports planetary moons since SE 2.10 via ipl = SE_PLMOON_OFFSET (9000) + encoded id, reading `sat/sepm*.se1` files. `../swisseph/ephe/sat/` EXISTS in the vendored checkout, so golden data generation is feasible.\n- Implementation would closely follow the asteroid pattern from swisseph-rs/100–101 (SwissEphFile reader + provider wrapper + filename resolution) — estimated 1–2 Sonnet sub-tasks if we do it.\n- Comets: in C 2.10.03 there is no real comet backend behind SE_COMET_OFFSET for swe_calc (comet-like bodies come through fictitious elements in seorbel.txt instead). Our `Body::Comet` variant is speculative API surface with nothing behind it.\n\nOptions:\n1. Port planet moons (1–2 sub-tasks, needs a c-ref doc first) + remove `Body::Comet` until something real backs it.\n2. Descope both for 1.0: keep variants, return a documented clean error (cheapest; variants already error today, just make the README/not-ported list say so — Polish 5/7 covers the README line either way).\n3. Remove both variants from `Body` pre-1.0 (smallest honest API; can re-add without breakage later since adding enum variants is semver-minor with #[non_exhaustive]).\n\nRecommendation: option 1 for planet moons if the Dart consumer will want them (lunar/planetary-moon work is niche but SE 2.10-parity is a clean marketing line); otherwise option 3 — shipping dead enum variants in a 1.0 API is the worst of the three. Decide, then this task becomes either a plan task (spawn c-ref-plmoon.md + implementation sub-task) or a small cleanup task.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "HITL",
+  "acceptance_criteria": [],
+  "decisions": [
+    {
+      "decision": "Option 1: full planetary-moon port (SE_PLMOON + SEFLG_CENTER_BODY) and removal of Body::Comet/CometId pre-1.0",
+      "rationale": "SE 2.10 parity for the Dart consumer; repo ephe/sat/ already vendors all 32 sepm files so golden data is free; sweph_file parser already handles FileType::PlanetaryMoon incl. the exact rmax condition, so the remaining work is loading + dispatch. Comet has nothing behind it in C 2.10.03 (comet-like bodies go through seorbel.txt fictitious elements) — shipping a dead 1.0 enum variant is the worst option.",
+      "rejected_alternatives": "Option 2 (keep both variants, documented clean error) — dead API surface in 1.0; Option 3 (remove both variants) — planet moons are real C 2.10 functionality with vendored data, removing them forfeits parity cheaply within reach."
+    },
+    {
+      "decision": "Port scoped as 3 tasks (125 loading -> 126 dispatch+goldens -> 127 MOSEPH/quirks/error coverage) + 1 independent removal task (128), mirroring the asteroid 100/101/102 split",
+      "rationale": "The ref doc (docs/c-ref-plmoon.md, commit b80e37f) shows plmoon is NOT 'asteroid with a different directory': files hold planetocentric rectangular offsets (SEI_FLG_ROTATE clear, no sun-vector add) added onto the parent planet's barycentric position, and CENTER_BODY-on-planet vs direct 9pmm ipl are one normalization (sweph.c:416-437). So dispatch needs a new PlanetMoonProvider, and CENTER_BODY belongs in the same task as the body dispatch, not a separate one.",
+      "rejected_alternatives": "Single mega-task (too large for one agent pass, loses the asteroid arc's proven review cadence); separate CENTER_BODY task (it is literally the same front-door translation — splitting would force both tasks to touch the same normalization code)."
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Decision made (option 1) + planning executed in one session. Produced docs/c-ref-plmoon.md via a dedicated Sonnet C-reading agent (commit b80e37f) — key finding that reshaped the plan: plmoon .se1 files are planetocentric offset vectors (ROTATE clear, xsunb=NULL at both C call sites), combined by vector addition with the parent planet's independently-computed barycentric position, so the port is a new PlanetMoonProvider, not a re-parameterized AsteroidProvider. Also surfaced: single-step filename retry (not the asteroid 4-attempt cascade); rmax fine-scale is COB-or-Mars-moons only (already correctly implemented in parse.rs:329); the C-side H/G garbage-parse bug on plmoon file opens (do not port); nod_aps hard-rejects plmoon while get_orbital_elements silently degenerates (kept as C parity). Created swisseph-rs/125 (loading), 126 (dispatch + CENTER_BODY + SWIEPH/JPL goldens), 127 (MOSEPH/quirks/error paths/cross-function), 128 (Comet removal); 126 depends_on 125, 127 depends_on 126, 128 independent.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "b80e37f"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783098373197,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 121
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783101227337,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-human",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783101245787,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783098373197,
+  "updated_at": 1783101245787,
+  "completed_at": 1783101245787,
+  "edges": [
+    {
+      "id": "019f28f2-2c71-77a3-817f-22a31db8e558",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/121",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098387569
+    }
+  ]
+}

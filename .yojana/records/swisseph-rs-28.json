@@ -1,0 +1,102 @@
+{
+  "id": "019f0450-f967-72d1-98c4-ad516f7a5eb5",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/28",
+  "sequence_number": 28,
+  "title": "C reference doc for calc module (sweph.c dispatch + pipeline)",
+  "description": "Produce `docs/c-ref-calc.md` by reading the C source (sweph.c). This is the porting reference for the entire calc module — all subsequent implementation sub-tasks depend on it.\n\nCover these functions with algorithm structure, coefficients, loop logic, unit conversions, boundary handling, and line numbers:\n\n1. `plaus_iflag()` (sweph.c:~200–308) — flag validation/normalization: illegal combos, default ephemeris selection, forced SPEED, body-specific flag adjustments\n2. `swe_calc()` entry (sweph.c:309–586) — cache check against savedat, SPEED3 mode (3-call central difference with body-specific dt), result caching\n3. `swecalc()` dispatch (sweph.c:587–~1560) — full body routing table, ECL_NUT special case (returns obliquity+nutation), mean node/apogee speed from 2-point difference\n4. `main_planet()` (sweph.c:1562–1696) — ephemeris cascade selection, Moshier path to sweplan()\n5. `main_planet_bary()` (sweph.c:1697–1819) — raw barycentric without corrections\n6. `sweplan()` (sweph.c:1820–1988) — planet+Earth+Moon orchestration, helio→bary conversion, EMB→Earth formula: earth = emb − moon/(EARTH_MOON_MRAT+1), caching per sub-body\n7. `app_pos_etc_plan()` (sweph.c:2465–2776) — ICRS→J2000 bias, light-time Newton iteration (t'=t−|Δx|/c, iterations=0 for Moshier), speed correction for changing light-delay, then delegates to app_pos_rest\n8. `app_pos_etc_sun()` (sweph.c:~2350–2464) — Sun-specific: geocentric = −(Earth helio), light-time handling, correction path\n9. `app_pos_etc_moon()` (sweph.c:~2200–2350) — Moon-specific: no gravitational deflection, aberration differences, speed already from central differences\n10. `app_pos_rest()` (sweph.c:2777–~3100) — shared pipeline: aberration→deflection→precession→nutation matrix→ecliptic→sidereal(stub)→polar→units, 4 output slots in xreturn[24]\n11. `swi_aberr_light()` (sweph.c:3699–~3740) — Lorentz transform: v in units of c, β=√(1−v²), f₁, f₂ formula, exact coefficients\n12. `swi_deflect_light()` (sweph.c:3743–~3830) — GR light bending: g₁, g₂ formula, meff() call, exact coefficients\n13. `meff()` (sweph.c:~3830–3900) — effective mass factor: tabulated angle/mass pairs, linear interpolation\n14. `swi_mean_node()`, `swi_mean_apog()` — polynomial formulas for mean lunar node and apogee, exact coefficients\n\nFollow the format of existing sibling ref docs (e.g., docs/c-ref-nutation.md). The agent producing this doc should NOT spawn subagents — it reads the C source and writes the doc itself in one context.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "docs/c-ref-calc.md exists and covers all 14 items listed above"
+    },
+    {
+      "done": false,
+      "text": "Line numbers referenced for each function"
+    },
+    {
+      "done": false,
+      "text": "Coefficients and formulas extracted verbatim (not paraphrased)"
+    },
+    {
+      "done": false,
+      "text": "Sufficient detail to implement each function without reading C source"
+    },
+    {
+      "done": false,
+      "text": "Follows format of existing sibling ref docs"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "a2c2578"
+    }
+  ],
+  "files": [
+    "docs/c-ref-calc.md"
+  ],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782483843431,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 28
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782484145164,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782484681904,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782483843431,
+  "updated_at": 1782484681904,
+  "completed_at": 1782484681904,
+  "arc_id": "019efa3b-da1f-77c1-8230-605aa4d4de91",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f0452-a0b2-7921-ad75-e400135168cc",
+      "edge_type": "refines",
+      "source": "swisseph-rs/28",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483951794
+    },
+    {
+      "id": "019f0452-b5a8-7b00-a25b-961bbb5e25d5",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/29",
+      "target": "swisseph-rs/28",
+      "note": "Needs c-ref-calc.md to implement from",
+      "created_at": 1782483957160
+    }
+  ]
+}

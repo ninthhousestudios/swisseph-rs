@@ -1,0 +1,117 @@
+{
+  "id": "019f1e16-b2ca-77f2-9cd6-701ad455d20c",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/69",
+  "sequence_number": 69,
+  "title": "RSE 2/12: Refraction + horizontal coordinates (swe_refrac[_extended], swe_azalt[_rev])",
+  "description": "### Summary\nPort the self-contained atmospheric-refraction and horizontal-coordinate transforms: `swe_refrac`, `swe_refrac_extended`, `swe_azalt`, `swe_azalt_rev` (+ static helpers `calc_astronomical_refr`, `calc_dip`). Pure geometry — no `swe_calc`, no topocentric dependency — so this can land independently and in parallel with RSE 1.\n\n**Architecture correction:** `swe_set_lapse_rate` is a C global setter. In the stateless port there is NO global — `lapse_rate` is an explicit function parameter (default `0.0065`). Do not add a setter.\n\n### Files\n- `src/azalt.rs` (NEW) — the four public functions + two private helpers + the `AzAltDir`/`RefracDir` calc-flag enums (or accept the raw i32 constants; enums preferred).\n- `src/lib.rs` — `pub mod azalt;` and re-export the public fns.\n- `tests/c-gen/gen_azalt.c`, `tests/golden-data/azalt.json`, `tests/golden/azalt.rs` (NEW); `mod azalt;` in `tests/golden/main.rs`.\n- `docs/codebase-map.md` — add rows.\n\n### Implementation steps\nRead `docs/c-ref-refraction-azalt.md` in full (§1–§9) before coding. Watch the flagged FP quirks: the `sin(14.7*refr+13)` term has NO `DEGTORAD` (intentional, §3); the `>` vs `>=` asymmetry in `swe_refrac_extended` (§5); the `SE_ECL2HOR==SE_HOR2ECL==0` / `SE_EQU2HOR==SE_HOR2EQU==1` integer collision (§Function Map).\n\n1. **Direction constants** (§Function Map): `SE_ECL2HOR=0, SE_EQU2HOR=1` (azalt) and `SE_HOR2ECL=0, SE_HOR2EQU=1` (azalt_rev) and `SE_TRUE_TO_APP=0, SE_APP_TO_TRUE=1` (refrac). Model as small `#[repr(i32)]` enums or `pub const`s.\n2. **`swe_refrac(inalt, atpress, attemp, dir) -> f64`** (§3): pressure/temp scaling factor computed once (`atpress/1013.25 * 283.0/(273.0+attemp)` — exact form in §3.1); TRUE→APP Saemundsson branch (§3.2, coeffs 58.276/0.0824/3600, 1.02/60) vs APP→TRUE Bennett branch (§3.3, coeffs 7.31/4.4, and the un-converted `0.06/14.7/13` term). Degenerate-domain handling per §3.4.\n3. **`calc_astronomical_refr` + `calc_dip`** (§6, §7): Sinclair formula with continuity threshold `17.904104638432`; dip formula with `EARTH_RADIUS=6378136.6`. Note (§7) `calc_dip`/`swe_refrac_extended` do NOT auto-estimate pressure when `atpress==0` — only `swe_azalt`'s call site does.\n4. **`swe_refrac_extended(inalt, geoalt, atpress, attemp, lapse_rate, dir, dret: &mut [f64;4]) -> f64`** (§5): setup (§5.1) always runs; TRUE→APP (§5.2) 5-step Newton reusing the derivative (\"sic!!! code by Moshier\"); APP→TRUE (§5.3); dret = [true_alt, app_alt, refraction, dip]. Below-dip early exits per §5.\n5. **`swe_azalt(ephe: &Ephemeris, tjd_ut, dir, geopos:[f64;3], atpress, attemp, xin:&[f64], xaz:&mut [f64;3])`** (§1): sidtime→armc via `sidereal_time::sidereal_time` + `geopos[0]/15`; ecl→equ via `math::cotrans(-eps_true)`; equ→horizontal via `cotrans(90-geolat)`; azimuth reoriented south-based clockwise; standard-atmosphere pressure default `1013.25*(1-0.0065*h/288.0).powf(5.255)` when `atpress==0`; fill `xaz[2]` (apparent alt) via `swe_refrac_extended`. Needs `&self`/eps/nutation — take an `&Ephemeris` (or eps + sidtime passed in). Follow §1 exactly for the frame/sign chain; xaz layout in §1 \"Summary\".\n6. **`swe_azalt_rev(ephe, tjd_ut, dir, geopos, xin:&[f64;2], xout:&mut [f64;3])`** (§2): inverse chain; note it does NOT de-refract (input is true altitude).\n\n`eps`/sidereal time: reuse `sidereal_time::sidereal_time`, `obliquity`, `math::cotrans`. Since azalt needs obliquity+sidtime, give `swe_azalt`/`swe_azalt_rev` an `&Ephemeris` receiver (add them as `impl Ephemeris` methods in `context.rs` that delegate to `azalt.rs` free functions, matching how `houses_ex2` delegates). Keep the pure math in `azalt.rs`.\n\n### C reference\n`docs/c-ref-refraction-azalt.md` §1–§9.\n\n### Golden tests\n- **C harness** `tests/c-gen/gen_azalt.c`: \n  - `refrac`: for `inalt ∈ {-1,0,5,17.9,18,45,89}`, `atpress ∈ {1013.25, 0}`, `attemp ∈ {15}`, both `dir` → `swe_refrac(...)`. Emit `{inalt,atpress,attemp,dir,out}`.\n  - `refrac_ext`: same inputs × `geoalt ∈ {0, 3000}`, `lapse_rate=0.0065`, both dir → `swe_refrac_extended(..., dret)`. Emit `{...,out,dret:[0..4]}`.\n  - `azalt`: for `tjd_ut ∈ {2451545.0, 2459000.5}`, `geopos ∈ {(8.55,47.37,500), (-74,40.7,10)}`, `dir ∈ {SE_ECL2HOR, SE_EQU2HOR}`, `xin ∈ {(120.0,5.0,1.0)}` → `swe_azalt(...)`. Emit `{tjd_ut,geopos,dir,xin,xaz:[0..3]}`. Use `SEFLG_MOSEPH` context (call `swe_set_ephe_path(NULL)`).\n  - `azalt_rev`: round-trip inputs → `swe_azalt_rev`. Emit `{tjd_ut,geopos,dir,xin:[0..2],xout:[0..3]}`.\n  - Build: `cc -O2 -I../swisseph -o tests/c-gen/gen_azalt tests/c-gen/gen_azalt.c -L../swisseph -lswe -lm && ./tests/c-gen/gen_azalt > tests/golden-data/azalt.json`.\n- **Rust test** `tests/golden/azalt.rs`: one `#[test]` per key. `refrac`/`refrac_ext` are pure → try `assert_f64_exact`, fall back to `1e-9`. `azalt`/`azalt_rev` (compound with sidtime/obliquity) → `assert_f64_eps(.., 1e-7)`.\n- `cargo test --test golden azalt -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden azalt -- --nocapture` passes (refrac exact-or-1e-9, azalt 1e-7).\n\n### Escape hatch\nIf refrac tests fail > 1e-8 after two attempts it is an expression-order issue — read `swecl.c:2887–3172` directly. Do not exceed two attempts; escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo build + cargo clippy --all-targets clean"
+    },
+    {
+      "done": true,
+      "text": "cargo test --test golden azalt -- --nocapture passes (refrac exact-or-1e-9, azalt 1e-7)"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Followed the task's plan as written (it doubled as an implementation plan). Architecture: azalt.rs holds pure functions (refrac, refrac_extended, calc_astronomical_refr, calc_dip, azalt, azalt_rev) taking precomputed armc/eps_true; Ephemeris::azalt/azalt_rev in context.rs resolve ARMC + true obliquity (forcing TIDAL_DEFAULT for the swe_deltat_ex(tjd_ut,-1,NULL) sentinel, same pattern as houses_ex2) and delegate — mirrors houses_armc/houses_ex2 split. Chose to return owned arrays ([f64;3]/[f64;2]) instead of C's &mut out-params, matching the codebase's existing math.rs idiom (cotrans etc. return values). Both azalt()/azalt_rev() exceeded clippy's 7-arg default; added #[allow(clippy::too_many_arguments)], an existing pattern in houses.rs/calc.rs/segment.rs. One refrac golden case (inalt=0, atpress=1013.25, TrueToApp) needed the 1e-9 eps fallback rather than bitwise-exact; all others (99/100 cases) matched exactly or within the stated tolerances on first pass — no debugging iteration needed.\n\nPOST-CLOSE FIX (commit 784b7a9, via vidhi-review with codex): codex caught a real bug missed at close — azalt_armc_eps forced TIDAL_DEFAULT for the eps_true deltaT call but not for the ARMC/sidereal_time call, so ARMC used whatever tidal_acceleration the Ephemeris was actually configured with (default: Moshier/TIDAL_DE404) instead of matching C's swe_sidtime, which always forces TIDAL_DEFAULT/TIDAL_DE431 via its own swe_deltat_ex(tjd,-1,NULL) sentinel. The original golden battery only covered J2000/2020-era epochs, where DE404 vs DE431 tid_acc produces a sub-tolerance divergence (~0 near J2000) — invisible until a far-past epoch is tested. Fixed by passing the already-forced deltat_config to sidereal_time() instead of self.config, and added a -1000000.0 (far-past) epoch to gen_azalt.c's azalt/azalt_rev battery, which fails against the pre-fix code (~4e-7 deg divergence, over the 1e-7 tolerance) and passes post-fix.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "200a452"
+    },
+    {
+      "type": "git:commit",
+      "value": "784b7a9"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916231882,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 69
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782931250708,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782931831487,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Codex adversarial review (vidhi-review): verdict \"needs-attention\", 1 high-severity finding.\n\nFinding (confirmed): azalt_armc_eps computed a TIDAL_DEFAULT-forced deltat_config for the eps_true/SE_ECL_NUT lookup, but computed ARMC via sidereal_time(tjd_ut, &self.config) — the unforced config. C's swe_sidtime always resolves its deltaT via swe_deltat_ex(tjd,-1,NULL) (forces SE_TIDAL_DEFAULT), matching the established houses_ex2 pattern this task's own code already used for eps_true. Verified the divergence numerically (default Moshier/TIDAL_DE404 vs TIDAL_DEFAULT/TIDAL_DE431 ARMC differs by ~4.5e-7 deg at far-past epochs, ~0 near J2000 — invisible in the original golden battery which only covered 2000/2020 dates).\n\nFix: src/context.rs:411, sidereal_time(tjd_ut, &self.config) -> sidereal_time(tjd_ut, &deltat_config). Added a far-past epoch (-1000000.0) to gen_azalt.c's azalt/azalt_rev battery and confirmed it fails against the pre-fix code and passes post-fix. Committed as 784b7a9.\n\nFull build/clippy/test suite re-verified clean after the fix.",
+      "ts": 1782932283674
+    }
+  ],
+  "created_at": 1782916231882,
+  "updated_at": 1782932299524,
+  "completed_at": 1782931831487,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-8bba-72a3-a667-0c94ff1ecaf2",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/70",
+      "target": "swisseph-rs/69",
+      "note": null,
+      "created_at": 1782916484026
+    },
+    {
+      "id": "019f1e1a-9b94-7581-b458-d7d54bbd0146",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/73",
+      "target": "swisseph-rs/69",
+      "note": null,
+      "created_at": 1782916488084
+    },
+    {
+      "id": "019f1e1a-b395-7e62-b2e8-b6aebc4a5af2",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/76",
+      "target": "swisseph-rs/69",
+      "note": null,
+      "created_at": 1782916494229
+    },
+    {
+      "id": "019f1e1a-eb22-7953-b8f4-ff2653eabef2",
+      "edge_type": "refines",
+      "source": "swisseph-rs/69",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916508450
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "id": "019f291c-fe72-72c2-ae5a-403de5da0845",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/128",
+  "sequence_number": 128,
+  "title": "Remove Body::Comet / CometId — unbacked API surface, pre-1.0 cleanup",
+  "description": "# Remove Body::Comet / CometId — unbacked API surface, pre-1.0 cleanup\n\n## Summary\nC 2.10.03 has NO real comet backend behind SE_COMET_OFFSET for swe_calc — comet-like bodies come through fictitious elements in seorbel.txt instead (`Body::Fictitious`). Our `Body::Comet(CometId)` is speculative surface with nothing behind it (falls through to the error path today). Decision on swisseph-rs/121: remove it rather than ship dead enum variants in a 1.0 API; adding variants back later is non-breaking under the crate's enum evolution strategy.\n\nAll references are confirmed confined to three files (verified by grep 2026-07-03: zero hits in calc/context/tests/README).\n\n## Steps\n1. `src/types.rs`: remove `CometId` struct + impl (lines ~60–75), `Body::Comet` variant, `Body::comet()` constructor, the `to_raw_id` arm, the `TryFrom<i32>` arm `1000..=8999` — that range must now yield `Err(InvalidBody)`; make sure it doesn't accidentally fall into the `n >= AST_OFFSET` asteroid arm (it can't, 8999 < 10000, but add the explicit test). Remove the `CometId` unit tests; add `Body::try_from(5000).is_err()` and `Body::try_from(1000).is_err()`.\n2. `src/constants.rs`: remove `COMET_OFFSET` (line ~114).\n3. `src/lib.rs`: remove `CometId` from the re-export list (line ~51).\n4. Grep `docs/` + README for comet mentions; if a not-ported list mentions comets, reword to: comets are not a real swe_calc backend in C 2.10 — use `Body::Fictitious` with seorbel.txt elements for comet-like bodies. (The README not-ported line itself is otherwise Polish 5/7's territory — only touch wording that would become false after this removal.)\n5. `cargo test` + `cargo clippy --all-targets` — no golden data changes expected.\n\n## Acceptance criteria\n- `CometId`/`Comet` absent from the crate; `Body::try_from` of 1000..=8999 errors.\n- Full test suite + clippy pass unchanged otherwise.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/121",
+      "label": "scope decision"
+    },
+    {
+      "type": "git:commit",
+      "value": "9041738"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "plmoon",
+    "api-cleanup"
+  ],
+  "history": [
+    {
+      "ts": 1783101193842,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 128
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783192219512,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783192371808,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783101193842,
+  "updated_at": 1783192371808,
+  "completed_at": 1783192371808,
+  "edges": []
+}

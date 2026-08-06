@@ -1,0 +1,137 @@
+{
+  "id": "019efef0-d271-7823-b9a8-399091127ccb",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/18",
+  "sequence_number": 18,
+  "title": "Obliquity + Frame bias",
+  "description": "Port obliquity (swi_epsiln) and frame bias (swi_bias) from swephlib.c. Both are small, closely related, and have no dependencies beyond the existing math/types modules.\n\n## Obliquity — swi_epsiln (swephlib.c:887)\nPure function: `(tjd, model) → Epsilon { eps, sin_eps, cos_eps }`.\n4 models: IAU 1976, IAU 2006, Laskar 1986, Vondrák 2011.\n- IAU 1976/2006: polynomial in T (centuries from J2000)\n- Laskar 1986: 10th-degree polynomial\n- Vondrák 2011: polynomial + periodic terms (same structure as Vondrák precession)\nModel selection via AstroModels.\n\n**No caching.** The C code caches oec/oec2000 on the context struct — we don't. Pure function, caller caches if needed.\n\n## Frame bias — swi_bias (swephlib.c:2205)\nPure function: `(x, tjd, model, direction) → x'` — applies GCRS↔J2000 rotation.\n3 models: none, IAU 2000, IAU 2006 (default).\nFixed 3×3 matrix multiply. Direction flag controls forward vs inverse.\n\n## Output types\n- `Epsilon { tjd: f64, eps: f64, sin_eps: f64, cos_eps: f64 }` in types.rs\n- Obliquity function in a new `obliquity.rs` or in `precession.rs` (the placeholder exists)\n- Frame bias can go alongside obliquity — it's tiny\n\n## Testing\nGolden tests: compute obliquity + frame bias at known epochs (J2000, B1950, far past/future) for each model, compare to C swetest output. Add to the existing golden test harness.\n\n## C source reference\n- swephlib.c:887–1370 (swi_epsiln, obliquity coefficients)\n- swephlib.c:2205–2260 (swi_bias)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "Epsilon struct in types.rs"
+    },
+    {
+      "done": true,
+      "text": "obliquity function with all 4 models"
+    },
+    {
+      "done": true,
+      "text": "frame bias function with all 3 models"
+    },
+    {
+      "done": true,
+      "text": "golden tests against C for all models at multiple epochs"
+    },
+    {
+      "done": true,
+      "text": "no mutable state or caching"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "All ~11 C obliquity models ported (not just 4)",
+      "rationale": "They share the dispatch structure and are mostly just different polynomial coefficients. Porting all now avoids revisiting the module later.",
+      "rejected_alternative": "Port only 4 (IAU 1976, Laskar 1986, IAU 2006, Vondrák 2011) — would leave gaps when other precession models are used"
+    },
+    {
+      "decision": "FrameTransform enum shared in types.rs",
+      "rationale": "Precession and nutation also have forward/inverse transforms. One enum, reuse everywhere.",
+      "rejected_alternative": "Local to bias module — would require duplication or refactoring when precession/nutation land"
+    },
+    {
+      "decision": "JPL Horizons correction branches included",
+      "rationale": "They are part of the C function's contract. Excluding them would mean golden tests can't cover those code paths, and downstream JPLHOR flag handling would silently differ.",
+      "rejected_alternative": "Defer to a separate task — cleaner scope but breaks golden-test completeness"
+    },
+    {
+      "decision": "New poly_eval helper in math.rs",
+      "rationale": "5-line utility used by ~10 obliquity models. Centralizes Horner evaluation, prevents inline duplication.",
+      "rejected_alternative": "Inline Horner in each formula — duplicates pattern, risks inconsistent evaluation order"
+    },
+    {
+      "decision": "Epsilon struct has 3 fields (no teps/JD field)",
+      "rationale": "No caching means no cache-invalidation field needed. Callers know the JD they passed in.",
+      "rejected_alternative": "Include JD field like C struct — adds a field that serves no purpose without caching"
+    }
+  ],
+  "implementation_plan": "## Approach\n\nPort all obliquity models and frame bias from the C Swiss Ephemeris into stateless Rust. The obliquity function dispatches on `PrecessionModel` (matching the C's coupling of obliquity to precession model selection), with short-term/long-term fallback logic preserved. Frame bias uses the existing `BiasModel` enum with a new shared `FrameTransform` direction enum in `types.rs`. JPL Horizons correction branches are included for full fidelity against the C library. All polynomial evaluations use Horner's method via a new `poly_eval` utility in `math.rs`.\n\n**Design decisions:**\n- All ~11 C obliquity models ported (not just 4) — they share the dispatch and are mostly polynomial coefficients.\n- `FrameTransform` goes in `types.rs` as a shared enum — precession/nutation also need forward/inverse.\n- JPL Horizons branches included (JPLHOR flag paths, `dcor_eps_jpl` correction table, `swi_approx_jplhor`).\n- New `poly_eval` in `math.rs` — small utility, needed immediately, avoids inline Horner duplication.\n- `Epsilon` struct has 3 fields (eps, sin_eps, cos_eps) — no `teps` since there's no caching to invalidate.\n- Downstream modules must compute `Epsilon` once per timestep and pass `&Epsilon` down, never recompute blindly (per considerations doc §1).\n\n## Files\n\n- **Create**: `src/obliquity.rs` — obliquity dispatch + all model implementations + Vondrák coefficient tables + JPL corrections\n- **Create**: `src/bias.rs` — ICRS frame bias rotation + `swi_approx_jplhor` port\n- **Create**: `tests/golden/obliquity.rs` — golden differential tests\n- **Create**: `tests/golden/bias.rs` — golden differential tests\n- **Create**: `tests/golden-data/obliquity.json` — C-generated reference data\n- **Create**: `tests/golden-data/bias.json` — C-generated reference data\n- **Modify**: `src/math.rs` (~line 1) — add `poly_eval` function\n- **Modify**: `src/types.rs` (~line 597) — add `FrameTransform` enum and `Epsilon` struct\n- **Modify**: `src/constants.rs` (end) — add precession validity-range constants and JPL epoch constants\n- **Modify**: `src/lib.rs` (~line 10) — add `mod obliquity; mod bias;` and re-exports\n- **Modify**: `tests/golden/main.rs` — add `mod obliquity; mod bias;`\n\n## Steps\n\n### Step 1: Add `poly_eval` to `src/math.rs`\n\nHorner's method polynomial evaluator. Coefficients ordered `[c0, c1, ..., cn]` for polynomial `c0 + c1·x + c2·x² + ... + cn·xⁿ`.\n\n```rust\npub fn poly_eval(coeffs: &[f64], x: f64) -> f64 {\n    coeffs.iter().rev().fold(0.0, |acc, &c| acc * x + c)\n}\n```\n\nEvery obliquity model uses this. Centralizes Horner evaluation, ensures numerical stability for high-degree polynomials like Laskar's 10th-degree (considerations doc §2).\n\n### Step 2: Add `FrameTransform` and `Epsilon` to `src/types.rs`\n\nAfter the `AstroModels` block (~line 597):\n\n```rust\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\npub enum FrameTransform {\n    GcrsToJ2000,\n    J2000ToGcrs,\n}\n\n#[derive(Debug, Clone, Copy, PartialEq)]\npub struct Epsilon {\n    pub eps: f64,\n    pub sin_eps: f64,\n    pub cos_eps: f64,\n}\n\nimpl Epsilon {\n    pub fn new(eps_rad: f64) -> Self {\n        Self {\n            eps: eps_rad,\n            sin_eps: eps_rad.sin(),\n            cos_eps: eps_rad.cos(),\n        }\n    }\n}\n```\n\n`FrameTransform` replaces C's boolean `backward` flag (considerations doc §3). Shared in `types.rs` for reuse by precession and nutation modules. `Epsilon` bundles obliquity with precomputed sin/cos that downstream code (nutation, ecliptic↔equatorial, houses) needs at every call site.\n\n### Step 3: Add constants to `src/constants.rs`\n\nTranscribe from C `swephlib.h` / `sweph.h`:\n\n```rust\n// Short-term model validity (Julian centuries from J2000)\npub const PREC_IAU_1976_CTIES: f64 = 2.0;   // verify from C\npub const PREC_IAU_2000_CTIES: f64 = 2.0;   // verify from C\npub const PREC_IAU_2006_CTIES: f64 = 2.0;   // verify from C\n\n// JPL Horizons correction epochs (verify exact values from C)\npub const HORIZONS_TJD0_DPSI_DEPS_IAU1980: f64 = ...; // sweph.h\npub const DPSI_DEPS_IAU1980_TJD0_HORIZONS: f64 = ...; // sweph.h\npub const DCOR_EPS_JPL_TJD0: f64 = ...;               // swephlib.c\npub const OFFSET_EPS_JPLHORIZONS: f64 = ...;           // swephlib.c\n```\n\nAll values transcribed directly from C headers — no guessing. `AS2R` alias not needed since `STR` already exists in constants.rs as arcseconds-to-radians.\n\n### Step 4: Create `src/obliquity.rs` — main dispatch\n\nThe entry point mirrors C `swi_epsiln` logic: check JPL Horizons flags → short-term model within validity range → long-term model fallback.\n\n```rust\nuse crate::constants::*;\nuse crate::flags::CalcFlags;\nuse crate::math::poly_eval;\nuse crate::types::*;\n\npub fn obliquity(jd: JdTt, models: &AstroModels, flags: CalcFlags) -> Epsilon {\n    let t = (jd.0 - J2000) / 36525.0;\n    let is_jplhor = flags.contains(CalcFlags::DPSIDEPS_1980);\n    let is_jplhor_approx = flags.contains(CalcFlags::JPLHOR_APPROX);\n\n    let eps = if is_jplhor {\n        obliquity_jplhor(jd.0, t, models)\n    } else if is_jplhor_approx && models.jplhora_mode == JplHoraMode::V2 {\n        obliquity_iau1976(t)\n    } else if let Some(eps) = try_shortterm(t, models.prec_shortterm) {\n        eps\n    } else {\n        obliquity_longterm(jd.0, t, models.prec_longterm)\n    };\n\n    let eps = maybe_apply_jpl_correction(eps, jd.0, flags, models);\n    Epsilon::new(eps)\n}\n\nfn try_shortterm(t: f64, model: PrecessionModel) -> Option<f64> {\n    match model {\n        PrecessionModel::IAU1976 if t.abs() <= PREC_IAU_1976_CTIES =>\n            Some(obliquity_iau1976(t)),\n        PrecessionModel::IAU2000 if t.abs() <= PREC_IAU_2000_CTIES =>\n            Some(obliquity_iau2000(t)),\n        PrecessionModel::IAU2006 if t.abs() <= PREC_IAU_2006_CTIES =>\n            Some(obliquity_iau2006(t)),\n        _ => None,\n    }\n}\n\nfn obliquity_longterm(jd: f64, t: f64, model: PrecessionModel) -> f64 {\n    match model {\n        PrecessionModel::IAU1976 => obliquity_iau1976(t),\n        PrecessionModel::IAU2000 => obliquity_iau2000(t),\n        PrecessionModel::IAU2006 => obliquity_iau2006(t),\n        PrecessionModel::Bretagnon2003 => obliquity_bretagnon2003(t),\n        PrecessionModel::Simon1994 => obliquity_simon1994(t),\n        PrecessionModel::Williams1994 => obliquity_williams1994(t),\n        PrecessionModel::Laskar1986 | PrecessionModel::WillEpsLask =>\n            obliquity_laskar1986(t),\n        PrecessionModel::Newcomb => obliquity_newcomb(jd),\n        PrecessionModel::Owen1990 => obliquity_owen1990(jd),\n        _ => obliquity_vondrak2011(jd),  // Vondrak2011 is the default/else\n    }\n}\n```\n\n### Step 5: Implement individual obliquity models\n\nEach is a small pure function → `f64` (radians). All polynomial models delegate to `poly_eval`.\n\n**IAU 1976** (cubic):\n```rust\nfn obliquity_iau1976(t: f64) -> f64 {\n    poly_eval(&[84381.448, -46.8150, -5.9e-4, 1.813e-3], t) * STR\n}\n```\n\n**IAU 2000** (cubic, different constants):\n```rust\nfn obliquity_iau2000(t: f64) -> f64 {\n    poly_eval(&[84381.406, -46.84024, -5.9e-4, 1.813e-3], t) * STR\n}\n```\n\n**IAU 2006** (5th degree):\n```rust\nfn obliquity_iau2006(t: f64) -> f64 {\n    poly_eval(&[84381.406, -46.836769, -1.831e-4, 2.0034e-3, -5.76e-7, -4.34e-8], t) * STR\n}\n```\n\n**Bretagnon 2003** (6th degree), **Simon 1994** (5th degree), **Williams 1994** (4th degree) — same pattern, respective coefficients from C.\n\n**Newcomb** — cubic, epoch 2396758.0:\n```rust\nfn obliquity_newcomb(jd: f64) -> f64 {\n    let tn = (jd - 2396758.0) / 36525.0;\n    poly_eval(&[84451.68, -46.837, -0.0085, 0.0017], tn) * STR\n}\n```\n\n**Laskar 1986** — 10th degree in T/10 (Horner via `poly_eval` ensures stability per considerations §2):\n```rust\nfn obliquity_laskar1986(t: f64) -> f64 {\n    let u = t / 10.0;\n    poly_eval(&[\n        84381.448, -468.093, -0.0155, 1.99925, -5.138e-3,\n        -2.4967e-3, -3.905e-5, 7.12e-7, 2.787e-7, 5.79e-9, 2.45e-10,\n    ], u) * STR\n}\n```\n\n**Owen 1990** — tabular model. Port `epsiln_owen_1986` from C `swephlib.c`. Likely a table of obliquity values with polynomial interpolation. Read C source during implementation, transcribe table and interpolation logic.\n\n**Vondrák 2011** — polynomial + 10 periodic sinusoidal terms:\n```rust\nconst PEPOL_EPS: [f64; 4] = [/* 4 polynomial coeffs from C */];\nconst PEPER_PERIODS: [f64; 10] = [409.90, 396.15, 537.22, ...];\nconst PEPER_COS_EPS: [f64; 10] = [/* amplitudes from C */];\nconst PEPER_SIN_EPS: [f64; 10] = [/* amplitudes from C */];\n\nfn obliquity_vondrak2011(jd: f64) -> f64 {\n    let t = (jd - J2000) / 36525.0;\n    let w = std::f64::consts::TAU * t;\n    let mut eps = 0.0;\n    for i in 0..10 {\n        let a = w / PEPER_PERIODS[i];\n        eps += PEPER_COS_EPS[i] * a.cos() + PEPER_SIN_EPS[i] * a.sin();\n    }\n    eps += poly_eval(&PEPOL_EPS, t);\n    eps * STR\n}\n```\n\nCoefficient tables isolated as module-level `const` arrays per considerations §4. Note Vondrák errata correction from A&A 541, C1 (2012): period coefficient `198.296071` → `198.296701`.\n\n### Step 6: Implement JPL Horizons obliquity paths\n\nJPLHOR flag dispatch:\n```rust\nfn obliquity_jplhor(jd: f64, t: f64, models: &AstroModels) -> f64 {\n    let is_approx_v3_early = models.jplhora_mode == JplHoraMode::V3\n        && jd <= HORIZONS_TJD0_DPSI_DEPS_IAU1980;\n    if is_approx_v3_early || (jd > 2378131.5 && jd < 2525323.5) {\n        obliquity_iau1976(t)\n    } else {\n        obliquity_owen1990(jd)\n    }\n}\n```\n\nJPL epsilon correction (applied on Vondrák path when JPLHOR_APPROX set):\n```rust\nconst DCOR_EPS_JPL: [f64; N] = [/* correction table from C */];\n\nfn maybe_apply_jpl_correction(eps: f64, jd: f64, flags: CalcFlags, models: &AstroModels) -> f64 {\n    if !flags.contains(CalcFlags::JPLHOR_APPROX)\n        || models.jplhora_mode == JplHoraMode::V2 { return eps; }\n    // Linear interpolation over DCOR_EPS_JPL table\n    // Transcribe logic from C swi_epsiln lines 956-968\n    let tofs = (jd - DCOR_EPS_JPL_TJD0) / 365.25;\n    let dofs = /* interpolation logic */;\n    eps + dofs / (1000.0 * 3600.0) * DEGTORAD\n}\n```\n\n### Step 7: Create `src/bias.rs` — frame bias rotation\n\nTwo constant rotation matrices, direction dispatch via `FrameTransform`. Matrix layout is `[[f64; 3]; 3]` row-major; the compiler unrolls the 3-iteration loop and elides bounds checks (considerations §5).\n\n```rust\nconst BIAS_IAU2000: [[f64; 3]; 3] = [\n    [+0.9999999999999942,  +0.0000000707827948, -0.0000000805621738],\n    [-0.0000000707827974,  +0.9999999999999969, -0.0000000330604088],\n    [+0.0000000805621715,  +0.0000000330604145, +0.9999999999999962],\n];\n\nconst BIAS_IAU2006: [[f64; 3]; 3] = [\n    [+0.99999999999999412, +0.00000007078368695, -0.00000008056214212],\n    [-0.00000007078368961, +0.99999999999999700, -0.00000003306427981],\n    [+0.00000008056213978, +0.00000003306428553, +0.99999999999999634],\n];\n\npub fn frame_bias(\n    pos: &[f64; 6],\n    jd: JdTt,\n    models: &AstroModels,\n    flags: CalcFlags,\n    direction: FrameTransform,\n) -> [f64; 6] {\n    if models.bias == BiasModel::None { return *pos; }\n\n    if flags.contains(CalcFlags::JPLHOR_APPROX) {\n        match models.jplhora_mode {\n            JplHoraMode::V2 => return *pos,\n            JplHoraMode::V3 if jd.0 < DPSI_DEPS_IAU1980_TJD0_HORIZONS => return *pos,\n            _ => {}\n        }\n    }\n\n    let rb = match models.bias {\n        BiasModel::IAU2006 => &BIAS_IAU2006,\n        _ => &BIAS_IAU2000,\n    };\n\n    let mut out = [0.0; 6];\n    match direction {\n        FrameTransform::J2000ToGcrs => {\n            for i in 0..3 {\n                out[i]   = pos[0]*rb[i][0] + pos[1]*rb[i][1] + pos[2]*rb[i][2];\n                out[i+3] = pos[3]*rb[i][0] + pos[4]*rb[i][1] + pos[5]*rb[i][2];\n            }\n        }\n        FrameTransform::GcrsToJ2000 => {\n            for i in 0..3 {\n                out[i]   = pos[0]*rb[0][i] + pos[1]*rb[1][i] + pos[2]*rb[2][i];\n                out[i+3] = pos[3]*rb[0][i] + pos[4]*rb[1][i] + pos[5]*rb[2][i];\n            }\n        }\n    }\n\n    approx_jplhor(&mut out, jd, flags, models, direction);\n    out\n}\n```\n\nDirection semantics: `GcrsToJ2000` applies rb transposed (column-indexed = inverse rotation); `J2000ToGcrs` applies rb directly (row-indexed = forward rotation). Inverse of an orthogonal matrix is its transpose — no explicit matrix inversion needed (considerations §3).\n\n### Step 8: Port `swi_approx_jplhor` in `src/bias.rs`\n\nRead `swi_approx_jplhor` from C `swephlib.c` and port as a private function. Key concerns to investigate during implementation:\n\n1. **C mutation-order artifact**: In the backward path, C calls `swi_approx_jplhor(x, ...)` on the original input (which is then overwritten by the matrix result). Determine whether this is intentional (correction is a no-op for backward) or a bug to be preserved for golden-test fidelity.\n2. The function likely uses dpsi/deps nutation correction tables — identify what data it needs.\n3. Port as pure function: `fn approx_jplhor(pos: &mut [f64; 6], jd: JdTt, flags: CalcFlags, models: &AstroModels, direction: FrameTransform)`.\n\n### Step 9: Wire modules in `src/lib.rs`\n\nAdd module declarations and re-exports:\n\n```rust\npub mod bias;\npub mod obliquity;\n\n// In the re-export block:\npub use types::{Epsilon, FrameTransform};\n```\n\n### Step 10: Generate golden test data from C library\n\nWrite a C harness at `tests/c-harness/gen_obliquity_bias.c` that:\n\n1. Sets each `SE_MODEL_PREC_*` via `swe_set_astro_models()`, calls internal `swi_epsiln()` at test epochs:\n   - J2000.0 (2451545.0), J2000 ± 1 century, ± 5 centuries, ± 50 centuries\n   - Near JPLHOR date boundaries (2378131.5, 2525323.5)\n   - Extreme dates for Laskar/Vondrák range testing\n2. Calls `swi_bias()` with a unit test vector `[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]` at J2000 in both directions, both IAU models, and with/without JPLHOR_APPROX.\n3. Outputs JSON matching existing `tests/golden-data/*.json` format.\n\nCompile against `../swisseph/`, run, save to `tests/golden-data/obliquity.json` and `tests/golden-data/bias.json`.\n\n### Step 11: Write golden differential tests\n\nCreate `tests/golden/obliquity.rs` and `tests/golden/bias.rs` following the established pattern from `tests/golden/math.rs`:\n\n- Deserialize JSON via serde\n- Call Rust functions with matching inputs\n- Pure polynomial models: `assert_f64_exact` (bitwise match)\n- Vondrák periodic terms: `assert_f64_eps` with tight epsilon (sin/cos accumulation may differ by ULP)\n- Owen 1990 tabular: `assert_f64_eps`\n- Frame bias: `assert_f64_exact` (constant matrix multiply)\n- Labels: `\"obliquity[{model}]({jd})\"`, `\"bias[{model},{direction}]({jd})\"`\n\nAdd `mod obliquity; mod bias;` to `tests/golden/main.rs`.\n\n## Acceptance criteria coverage\n\n- [x] \"Epsilon struct in types.rs\" → Step 2\n- [x] \"obliquity function with all 4 models\" → Steps 4–6 (all ~11 C models ported)\n- [x] \"frame bias function with all 3 models\" → Steps 7–8\n- [x] \"golden tests against C for all models at multiple epochs\" → Steps 10–11\n- [x] \"no mutable state or caching\" → all functions are `fn(...) -> T`, no `&mut self`, no global state\n\n## Neighbor notes\n\n- **swisseph-rs/23** (sidereal time) depends on this. Its API needs are met: `obliquity(JdTt, &AstroModels, CalcFlags) -> Epsilon` provides eps/sin_eps/cos_eps.\n- **swisseph-rs/4** (parent planning task) is done. No conflict.",
+  "execution_record": "Ported all 11 C obliquity models (exceeding the 4 originally specified) and all 3 bias models. Key implementation detail: polynomial models must use `* DEGTORAD / 3600.0` (two ops) to match C's runtime evaluation order, while Laskar and Vondrák use `* (DEGTORAD / 3600.0)` (single multiply by precomputed constant) matching C's `eps *= DEGTORAD/3600.0` and `q *= AS2R` patterns. Owen 1990 uses Chebyshev polynomial evaluation with 5 coefficient sets. Golden tests: 205 obliquity cases (bitwise-exact for polynomial models, 1e-15 epsilon for trig-based models) + 17 bias cases (all bitwise-exact).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "35a3c17"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782393655921,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 18
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782395094935,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782396435984,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review (273d1a1..00f04ee):\n\nVerdict: needs-attention — one high-severity finding.\n\n[high] approx_jplhor() rotates velocities but C only adjusts position. The Rust path uses cartesian_to_polar_with_speed() on the full 6-vector, while C uses position-only swi_cartpol()/swi_polcart(). This means the RA correction affects x[3..6] in Rust but not in C. Golden tests don't exercise JPLHOR_APPROX, so the divergence is untested.\n\nFix: make JPL Horizons correction position-only (convert/update x[0..3], leave x[3..6] untouched). Add golden fixtures for JPLHOR_APPROX in both FrameTransform directions, with and without SPEED.",
+      "ts": 1782396980514
+    },
+    {
+      "author": "agent",
+      "text": "Fixed approx_jplhor velocity issue (d405b2d). Changed to position-only cartesian_to_polar/polar_to_cartesian (3-vector), matching C's swi_cartpol/swi_polcart. Added 20 JPLHOR_APPROX golden test cases: both directions × with/without SPEED × 5 dates across correction table. All 80 tests pass.",
+      "ts": 1782397259235
+    }
+  ],
+  "created_at": 1782393655921,
+  "updated_at": 1782396435984,
+  "completed_at": 1782396435984,
+  "arc_id": "019efa3b-bfcb-70f3-a6ea-f3430a85c05a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019efef2-2cc9-7452-8125-c82f1e31de7e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/23",
+      "target": "swisseph-rs/18",
+      "note": null,
+      "created_at": 1782393744585
+    },
+    {
+      "id": "019efef2-3467-7b23-96f9-15c50e05e7c6",
+      "edge_type": "refines",
+      "source": "swisseph-rs/18",
+      "target": "swisseph-rs/4",
+      "note": null,
+      "created_at": 1782393746535
+    }
+  ]
+}

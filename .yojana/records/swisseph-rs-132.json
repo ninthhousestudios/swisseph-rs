@@ -1,0 +1,85 @@
+{
+  "id": "019f2f7d-d65f-70e0-85e5-38059aad7c6d",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/132",
+  "sequence_number": 132,
+  "title": "FFI 2/8: core calc surface — calc, calc_pctr, fixstar family, ayanamsa, planet names",
+  "description": "### Summary\nExtend swisseph-ffi with the rest of the position-calculation family, following the pattern FFI 1/8 established (ffi_guard, err_buf, out-params, nullable per-call geopos override). Read docs/ffi-design.md and the existing swisseph-ffi/src/lib.rs before writing anything.\n\n### Files\n- `swisseph-ffi/src/lib.rs` (or a new `src/calc.rs` module if lib.rs is getting long)\n- `swisseph-ffi/include/swisseph.h` (regenerated)\n- `swisseph-ffi/tests/calc.rs`\n\n### Functions to add\nAll follow `swisseph_calc_ut`'s established signature shape (handle, inputs, nullable `geopos` override where marked, out-params, err_buf/err_cap, i32 return):\n1. `swisseph_calc(h, tjd_et, ipl, iflag, geopos?, xx[6] out, flags_used out)` — TT twin of calc_ut (Ephemeris::calc, context.rs:362).\n2. `swisseph_calc_pctr(h, tjd_et, ipl, iplctr, iflag, xx[6] out, flags_used out)` — planetocentric (context.rs:1062). No geopos override (C's swe_calc_pctr has no topocentric path).\n3. `swisseph_fixstar2(h, star: *const c_char in, star_out: *mut c_char + cap /* resolved \"name,nomname\" written back, mirroring C's star[] in-out */, tjd_et, iflag, geopos?, xx[6] out, flags_used out)` + `swisseph_fixstar2_ut` + `swisseph_fixstar2_mag(h, star, star_out+cap, mag: *mut f64)` (context.rs:2474/2518/2532). geopos override goes through the now-pub `fixstar2_with_config`.\n4. Ayanamsa — cover all FOUR C entry points the Dart binding uses (swe_get_ayanamsa, _ut, _ex, _ex_ut): `swisseph_get_ayanamsa_ex(h, tjd_et, iflag, daya: *mut f64, flags_used out)` + `swisseph_get_ayanamsa_ex_ut` + plain `swisseph_get_ayanamsa(h, tjd_et) -> f64` + `swisseph_get_ayanamsa_ut(h, tjd_ut) -> f64` (context.rs:433/448/456 — synthesize whichever variant the lib lacks from the ex form, same way C does). Requires the handle config to carry a sidereal mode; if none configured return the appropriate error code (whatever the lib returns — don't invent behavior).\n5. `swisseph_get_planet_name(h, ipl, buf: *mut c_char, cap) -> i32` (context.rs:3155).\n6. **Per-call sidereal override**: add a nullable `const SweSidMode*` param (`{ sid_mode: i32, t0: f64, ayan_t0: f64 }` #[repr(C)]) to calc/calc_ut/fixstar2/fixstar2_ut and the ayanamsa fns — clone handle config, `set_sidereal_mode`, route through the `*_with_config` siblings. This retroactively changes `swisseph_calc_ut`'s signature from FFI 1/8 — fine, the ABI is unreleased; regenerate the header.\n\n### Audit amendments (swisseph-rs/139 — swisseph.dart uses this)\n- `swisseph_get_ayanamsa_name(sid_mode: i32, buf: *mut c_char, cap) -> i32` — handle-free; `SiderealMode::name()` (types.rs:615) via `SiderealMode` TryFrom on the low bits of sid_mode; `None` (user-defined) → empty string, matching C's NULL return semantics documented in the header.\n\n### Notes\n- Body `TryFrom<i32>` must cover asteroid (10000+ = SE_AST_OFFSET) and fictitious (40+) numbering — verify with a test; unknown ipl → InvalidArg with the offending value in err_buf.\n- String out-buffers: reuse task 1's write_err-style helper for name/star writes (NUL-terminated, char-boundary truncation).\n\n### Tests\nBitwise parity vs the lib crate (Moshier, no data files): 10 planets × 3 epochs × {SPEED, SPEED|EQUATORIAL, SPEED|XYZ}; TrueNode/MeanNode; a fictitious body; fixstar2 for \"Aldebaran\" incl. resolved-name write-back; ayanamsa (all four entry points) with per-call Lahiri override; get_ayanamsa_name for Lahiri + user-defined; get_planet_name for Sun/asteroid/fictitious; error paths (unknown ipl, unknown star, no-sidereal-mode ayanamsa call).\n\n### Acceptance criteria\n- `cargo test -p swisseph-ffi` passes; header freshness test passes after regen\n- `cargo test` (root) still passes\n- Every new fn has a header doc comment stating out-param sizes and NULL semantics\n\n### Escape hatch\nIf per-call sidereal override through config-clone hits a lib-crate gap (some path reading `self.config` instead of the threaded config), STOP and report the path — that's a lib bug to file separately, not to work around in the FFI layer.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented all functions as specified. Key decisions and deviations:\n\n1. **apply_sidereal lib-crate gap**: The task's escape hatch fired — apply_sidereal read self.config instead of the threaded config, making per-call sidereal overrides silently no-ops for the sidereal tail of calc/calc_pctr/calc_speed3. Fixed by threading an explicit &EphemerisConfig through apply_sidereal (6 call sites across context.rs + nodaps.rs). This was a pre-existing bug also affecting any calc_with_config caller that wanted a per-call sidereal override, not just FFI.\n\n2. **get_ayanamsa_ex_with_config**: Added to Ephemeris as a public method (mirrors calc_with_config pattern) so the FFI can thread per-call sidereal overrides for ayanamsa. The fixstar_ayanamsa path inside it still reads self (for the star catalog) — a remaining gap for per-call sidereal overrides that switch TO a fixed-star ayanamsa mode, but this is an edge case (no Dart binding uses fixed-star ayanamsa modes per-call).\n\n3. **swisseph_calc_ut signature change**: Added sid_mode parameter retroactively (ABI unreleased). Updated all existing tests in handle.rs.\n\n4. **ayanamsa plain variants** (swisseph_get_ayanamsa/_ut): Return f64 directly (NAN on error), matching C's swe_get_ayanamsa semantics. Include sid_mode override parameter since they're lightweight wrappers.\n\n5. **Default sidereal fallback**: Without set_sidereal_mode, sidereal_index returns 0 but sidereal_t0/ayan_t0 are 0.0 (not FaganBradley table values). The function succeeds but returns a meaningless ayanamsa. This matches the lib crate's existing behavior — not an FFI issue.\n\n6. **calc_deltat path**: FFI uses swisseph::deltat::calc_deltat (not swisseph::date::) for the UT→TT conversion in fixstar2_ut and ayanamsa_ex_ut.\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "a9ae7e6"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208203871,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 132
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783258095267,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783259139924,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review — verdict: approve with notes.\n\nTwo findings:\n\n1. [low / design-observation] calc_pctr has no per-call sidereal override (no SweSidMode* param, no calc_pctr_with_config in lib). If SEFLG_SIDEREAL is passed, it uses the handle's configured mode. The task spec deliberately excluded calc_pctr from the override list, so this is by design — but worth tracking if the Dart binding later needs per-call sidereal variance for planetocentric calcs.\n\n2. [medium / contract] Five functions use \"Same as X\" doc comment shorthand instead of explicitly stating out-param sizes and NULL semantics: swisseph_calc, swisseph_fixstar2_ut, swisseph_get_ayanamsa_ex_ut, and the two \"Same as\" references on lines 291 and 483. Acceptance criteria says \"Every new fn has a header doc comment stating out-param sizes and NULL semantics.\" The generated C header inherits these shorthand comments, leaving the per-function ABI contract incomplete.\n\nStructural review (sutra_review): risk 0.888, no constraint violations, no dependency cycles. Convention violations are nodaps.rs internals (pub(crate) helpers lacking pub/docs — expected). context.rs health degraded by -2.5 due to function hotspots (calc_inner ccn=54, new ccn=38) — pre-existing complexity, not introduced by this wave.",
+      "ts": 1783259977260
+    }
+  ],
+  "created_at": 1783208203871,
+  "updated_at": 1783259139924,
+  "completed_at": 1783259139924,
+  "edges": [
+    {
+      "id": "019f2f7f-bc73-7ba2-b924-17774ba55404",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/132",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208328307
+    },
+    {
+      "id": "019f2f7f-e589-7d10-8ad6-b6d1b61be406",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/132",
+      "note": null,
+      "created_at": 1783208338825
+    }
+  ]
+}

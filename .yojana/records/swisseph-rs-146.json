@@ -1,0 +1,126 @@
+{
+  "id": "019f3792-9833-7782-89bc-b3f78bb3e859",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/146",
+  "sequence_number": 146,
+  "title": "swetest: main computation loop + body dispatch + header",
+  "description": "Wire up the main computation loop: date parsing, step iteration, body dispatch, header output, and basic position output using the default format.\n\n**Date parsing** (C swetest lines 1369-1442):\n- Calendar input: `1.1.2000` (day.month.year, European style)\n- JD input: `j2451545.5`\n- Julian/Gregorian auto-detection (pre-15 Oct 1582 = Julian)\n- Time input from `-t` flag, combined with date\n- UTC path via `swe_utc_to_jd` when `-utc` is set\n- UT path: `tjd = julday(y,m,d,0) + thour/24`\n\n**Step iteration** (C swetest lines 1449-1478):\n- `-n` count, `-s` step with suffixes: plain (days), `y` (years), `mo` (months), `m` (minutes), `s` (seconds)\n- Year/month stepping via `julday(year_start + (istep-1)*tstep, ...)` \n- Gregorian/Julian auto-switch per step\n\n**Body dispatch**:\n- Map `-p` selection string to body list using `letter_to_ipl` equivalent\n- Expansion of list letters: `d` → `0123456789mtABCcg`, `p` → d + `DEFGHI`, `h` → `JKLMNOPQRSTUVWXYZw`, `a` → p + h\n- Special body handling: `s` → asteroid from `-xs`, `f` → fixstar from `-xf`, `v` → planet moon from `-xv`, `z` → fictitious from `-xz`\n- Pseudo-bodies: `e` (label line), `q` (delta-T), `y` (time equation), `x` (sidereal time), `b` (ayanamsha), `n`/`o` (ecl/nut)\n\n**Header output** (C swetest lines 1487-1579):\n- Date line: `date (dmy) 1.1.2000 greg.  0:00:00 TT    version X.Y.Z`\n- UT/TT/delta-T lines\n- Epsilon (true/mean) and nutation\n- Ayanamsha (when sidereal)\n- Geographic position (when set)\n- House system name (when `-house`)\n\n**Basic output**: For each body, call `eph.calc()` or `eph.calc_ut()` and print the body name + `data[0..6]` in a simple columnar format. The format-sequence engine (task 147) replaces this placeholder.\n\n**Key Rust API calls**:\n- `Ephemeris::calc(jd_tt, body, flags)` / `calc_ut(jd_ut, body, flags)`\n- `Ephemeris::fixstar2(jd_tt, star, flags)` / `fixstar2_ut`\n- `date::julday`, `date::revjul`, `date::utc_to_jd`\n- `deltat::calc_deltat`\n- `Ephemeris::get_ayanamsa_ex`\n- `sidereal_time::sidereal_time`\n- `Ephemeris::get_planet_name`",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -emos -p0123456789 prints Sun through Pluto positions"
+    },
+    {
+      "done": false,
+      "text": "swetest -bj2451545.5 -p01 parses JD input correctly"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -n10 -s30 iterates 10 steps of 30 days"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -n3 -s1y steps by years"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -ut12 prints UT/TT/delta-T header lines"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -pd prints the default body set (Sun-Pluto + nodes + Lilith + Chiron)"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -ps -xs433 prints asteroid 433 Eros"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -pf -xfSirius prints Sirius position"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": "compute.rs: resolve_start_jd → step_jd loop → print_header (step 1) → compute_body per BodySpec. main.rs thin wrapper: parse_args → to_ephemeris_config → Ephemeris::new → compute::run. Placeholder columnar output (name + data[0..5]).",
+  "execution_record": "Implemented as planned. New compute.rs module (~500 lines) with: resolve_start_jd (calendar/JD date parsing, UT/ET/LMT path dispatch), step_jd (5 step-unit types), print_header (date/UT/TT/deltaT/epsilon/nutation/ayanamsa/geopos/houses), compute_body (all 11 BodySpec variants dispatching to eph.calc/fixstar2/time_equ/sidereal_time/get_ayanamsa_ex/calc_deltat). Fixed a date-display bug where ET-mode header showed the UT-derived date (Dec 31 instead of Jan 1) by using the TT JD for revjul in ET mode. Fixed format_time to handle negative hours via wrapping to [0,24). All 8 acceptance criteria verified in-session. Output uses a simple fixed-column format as placeholder for task 147 (format-sequence engine).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d1e8571"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783343781939,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 146
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783350331025,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783351032228,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783343781939,
+  "updated_at": 1783351032228,
+  "completed_at": 1783351032228,
+  "edges": [
+    {
+      "id": "019f3793-be3f-75e0-a157-9835ad94894b",
+      "edge_type": "refines",
+      "source": "swisseph-rs/146",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343857215
+    },
+    {
+      "id": "019f3793-cb0e-7510-8d00-c7e53038887a",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/146",
+      "target": "swisseph-rs/145",
+      "note": null,
+      "created_at": 1783343860494
+    },
+    {
+      "id": "019f3793-cea4-7713-820e-ced87f8a872d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/147",
+      "target": "swisseph-rs/146",
+      "note": null,
+      "created_at": 1783343861412
+    },
+    {
+      "id": "019f3793-d3d8-7a10-a857-747892d6188e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/148",
+      "target": "swisseph-rs/146",
+      "note": null,
+      "created_at": 1783343862744
+    }
+  ]
+}

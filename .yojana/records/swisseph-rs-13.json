@@ -1,0 +1,132 @@
+{
+  "id": "019efa44-eb26-7dd3-81a5-d04629841efc",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/13",
+  "sequence_number": 13,
+  "title": "Plan: Phenomena, Nodes, Orbits, Crossings, Gauquelin",
+  "description": "Port remaining swecl.c (~1500 lines) + crossing functions from sweph.c (~1000 lines). Mixed bag of planet-derived computations.\n\n## Phenomena (swecl.c:3791, catalogue-internal §12)\n- `swe_pheno(tjd, ipl, iflag, attr, serr)` — phase angle, phase (illuminated fraction), elongation, apparent diameter, magnitude\n- Phase angle = arccos(geocentric_unit · heliocentric_unit)\n- Phase = (1 + cos(phase_angle)) / 2\n- **Magnitude formulas** per body (catalogue-internal §12.2): Sun (-26.86 base), Moon (multi-regime), Mercury/Venus (Mallama 2018 high-order polynomials), Mars (two-regime), Jupiter/Saturn (incl. ring inclination), Uranus/Neptune (quadratic), asteroids (Bowell HG system)\n\n## Nodes & Apsides (swecl.c:5154, catalogue-internal §13)\n- `swe_nod_aps(tjd, ipl, iflag, method, xnasc, xndsc, xperi, xaphe, serr)`\n- **Mean elements**: polynomial coefficients el_node[], el_peri[], el_incl[], el_ecce[], el_sema[] for each planet\n- **Osculating elements** (catalogue-internal §13.2): angular momentum h = r×v, inclination from h, node from orbital/ecliptic plane intersection, eccentricity from vis-viva, true anomaly from eccentric anomaly\n- **Lunar osculating elements** (sweph.c:5168): special handling — uses GEOGCONST×(1+1/EARTH_MOON_MRAT), larger dt for Moshier\n\n## Orbital elements (catalogue-internal §17)\n- `swe_get_orbital_elements(tjd, ipl, iflag, dret, serr)` — Keplerian elements from state vectors\n- `swe_orbit_max_min_true_distance()` — sample both orbits in 2° steps, refine extrema\n\n## Crossings (catalogue-internal §16)\n- `swe_solcross(x2cross, jd, flag, serr)` — Newton iteration: dt = (target−current)/speed, initial estimate from mean solar speed 360°/365.24\n- `swe_mooncross()` — same with mean lunar speed 360°/27.32\n- `swe_mooncross_node()` — detect latitude sign changes, Newton refine: dt = −lat/lat_speed\n- `swe_helio_cross()` — heliocentric crossing for any planet\n\n## Gauquelin sectors (catalogue-internal §19)\n- `swe_gauquelin_sector(t_ut, ipl, starname, iflag, imeth, geopos, atpress, attemp, dgsect, serr)`\n- Geometric method (imeth 0-1): uses swe_house_pos with 'G' system\n- Rise/set method (imeth 2-3): interpolate (t-t_rise)/(t_set-t_rise) × 18\n\n## Testing\n- setest/suite_07_apsides.c, setest/suite_10_solcross.c\n- Phenomena: compute for all planets at known dates, compare magnitudes\n- Crossings: equinox dates (Sun crossing 0°/180°), solstice dates\n\n## C source reference\n- swecl.c:3791 — swe_pheno\n- swecl.c:5154 — swe_nod_aps, mean element arrays, osculating computation\n- sweph.c — swe_solcross, swe_mooncross, swe_mooncross_node, swe_helio_cross\n- sweph.c:5168 — lunar_osc_elem\n- sweph.c:8042 — swe_calc_pctr (planetocentric)\n\n## Dependencies\n- Phase 5 (calc pipeline), Phase 10 (houses — for Gauquelin), Phase 11 (rise/set — for Gauquelin imeth 2-3)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Decomposed into 9 implement sub-tasks (swisseph-rs/82–90, \"PNOC n/9\") with 6 new C ref docs (c-ref-{phenomena,nodaps,orbital-elements,crossings,pctr,gauquelin-riseset}.md, commit a4706a9), each produced by a dedicated sonnet agent per the c_source_budget protocol.\n\nCorrections to the original task description discovered during study:\n1. Gauquelin imeth 0/1 (geometric) already landed in swisseph-rs/66 (Ephemeris::gauquelin_sector_geometric) — the Gauquelin sub-task (PNOC 8) covers only imeth 2–5 + the dispatcher. Also: C supports imeth up to 5 (disc-edge variants 4/5), not the 0–3 the task description and the C doc-comment claim.\n2. Body::TrueNode/OscuApogee (lunar_osc_elem, sweph.c:5168) are NOT ported — every backend dispatch rejects them. This is a full sub-task (PNOC 3), bigger than the description's one-bullet framing suggested, and also supplies swi_plan_for_osc_elem which the nod_aps osculating branch shares.\n3. swe_calc_pctr was listed only under \"C source reference\" but is covered by no other task — filed as PNOC 9.\n4. All dependencies (calc pipeline, houses, rise/set) are done; no sub-task is blocked on other phases.\n5. Stale-architecture assumptions handled: all C global-state reads (swed.pldat xsun/xear, oec/nut caches, nddat save slots, save-area restore dances) are mapped to explicit stateless recomputation in the ref docs' Porting Notes tables; caching branches (lunar_osc_elem D.0) are dropped as pure perf optimizations.\n\nPer Josh's directive, PNOC 1 (swisseph-rs/82) is the .sutra/rules.toml constraint activation for the phase's modules; the overdue azalt/riseset constraint blocks (triggers met at RSE 2/3) were uncommented directly during planning (commit 57a25b4) rather than deferred to the sub-task.\n\nDependency graph kept maximally parallel: only 86→{84,85} (shared helpers) and 87→85 (constants tables) are ordered; 82,83,84,88,89,90 are all immediately ready.\n\nRef-doc quirk highlights baked into sub-task descriptions: Pluto's stale ipl_to_elem→Mercury-mass mapping and SEFLG_ORBEL_AA≡TOPOCTR aliasing (orbit); lunar node's dead quadratic-speed code superseded by central difference (nodaps D.3); calc_pctr's deflection always Earth-observed while aberration uses the real center; mooncross_node's fixed day-zero latitude reference; two distinct Euler literals in pheno's magnitude formulas.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315281190,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 13
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782951033459,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782951050843,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315281190,
+  "updated_at": 1782951050843,
+  "completed_at": 1782951050843,
+  "arc_id": "019efa3c-46ed-7b32-818d-be319d217d53",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f201c-bd98-7d91-83e3-a68ed66b1466",
+      "edge_type": "refines",
+      "source": "swisseph-rs/82",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950182296
+    },
+    {
+      "id": "019f2029-09f0-7032-a955-ed02f92baef7",
+      "edge_type": "refines",
+      "source": "swisseph-rs/83",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950988272
+    },
+    {
+      "id": "019f2029-0d8d-7860-9c93-6e2d29de82bd",
+      "edge_type": "refines",
+      "source": "swisseph-rs/84",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950989197
+    },
+    {
+      "id": "019f2029-118b-79e0-bb8c-300ad7c5e8d7",
+      "edge_type": "refines",
+      "source": "swisseph-rs/85",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950990219
+    },
+    {
+      "id": "019f2029-1593-71b1-ac10-3c16b731367c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/86",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950991251
+    },
+    {
+      "id": "019f2029-1c26-7ee2-8b1e-504012be77dc",
+      "edge_type": "refines",
+      "source": "swisseph-rs/87",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950992934
+    },
+    {
+      "id": "019f2029-1e50-7942-8cad-d46230b4f3aa",
+      "edge_type": "refines",
+      "source": "swisseph-rs/88",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950993488
+    },
+    {
+      "id": "019f2029-21ef-7883-b411-5659e50ede78",
+      "edge_type": "refines",
+      "source": "swisseph-rs/89",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950994415
+    },
+    {
+      "id": "019f2029-2589-7932-be1d-1af7d945262d",
+      "edge_type": "refines",
+      "source": "swisseph-rs/90",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950995337
+    }
+  ]
+}

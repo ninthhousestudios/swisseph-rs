@@ -1,0 +1,142 @@
+{
+  "id": "019f1e18-068a-7252-b4b0-974184e224f1",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/72",
+  "sequence_number": 72,
+  "title": "RSE 5/12: Eclipse module scaffold + shared helpers + solar shadow geometry (eclipse_where)",
+  "description": "### Summary\nFoundation of the eclipse port in `src/eclipse.rs`: shared eclipse constants + result types, the `calc_planet_star` dispatch helper, and the shadow-geometry core `eclipse_where` (+ public `swe_sol_eclipse_where`). Every later eclipse/occultation task builds on this. Exposes `Ephemeris::sol_eclipse_where` (`&self`).\n\nDepends on **RSE 1** (topocentric `calc` — geometry uses geocentric `calc`, but the module and its callers assume TOPOCTR exists; `eclipse_where` itself uses geocentric positions).\n\n### Files\n- `src/eclipse.rs` (currently empty stub) — constants, `EclipseWhere` result struct, `calc_planet_star`, `eclipse_where`, `swe_sol_eclipse_where`.\n- `src/context.rs` — `pub fn sol_eclipse_where(&self, tjd_ut, ifl: CalcFlags) -> Result<EclipseWhere, Error>`.\n- `src/lib.rs` — re-export `EclipseWhere` (and the `EclipseFlags` already in flags.rs).\n- `tests/c-gen/gen_eclipse.c`, `tests/golden-data/eclipse.json`, `tests/golden/eclipse.rs` (NEW, key `sol_where`); `mod eclipse;` in main.rs. (RSE 6–12 add keys to the same files.)\n- `docs/codebase-map.md` — add rows.\n\n### Implementation steps\nRead `docs/c-ref-eclipse-solar.md` §0 (shared constants), §1 (`calc_planet_star`), §2 (iflag conventions), §3.1–§3.8 (`eclipse_where`). `EclipseFlags` already exists (CENTRAL=1, NONCENTRAL=2, TOTAL=4, ANNULAR=8, PARTIAL=16, HYBRID=32, PENUMBRAL=64, VISIBLE=128, ...).\n\n1. **Constants** (§0): `DSUN/DMOON/DEARTH`, `RSUN/RMOON/REARTH`, `EARTH_OBLATENESS`, `AUNIT`, `SEI_ECL_GEOALT_MIN/MAX`, the Saros table. Put physical constants that belong in `crate::constants` there; keep the eclipse-specific tables local to `eclipse.rs`. Give every value exactly as in §0.\n2. **Result types**: `EclipseWhere` mirrors C's `geopos[10]` + `dcore[10]` outputs — name the fields per §3.6 (central lon/lat, umbra/penumbra widths, cone angles, etc.). Use a struct with documented fields, NOT bare arrays.\n3. **`calc_planet_star`** (§1): `fn calc_planet_star(&self, tjd_et, body, starname: Option<&str>, flags) -> Result<[f64;6], Error>` — dispatch to `self.calc` (planet) vs `self.fixstar2` (star). This is the shared body/star accessor reused by all eclipse+occultation code.\n4. **`eclipse_where`** (§3): the shadow-cone geometry. Steps: inputs/setup (§3.1); Earth-oblateness z-stretch substitution with two-pass `iter_where` refinement (§3.2 — replicate the two passes exactly); central/noncentral/partial classification (§3.3); geographic position of eclipse centre (§3.4); core-shadow diameter at max eclipse (§3.5); fill `dcore[]`/`geopos[]` (§3.6); return the eclipse-type bitmask (§3.7). HAZARDS flagged in the doc: the `rm`/`rs` cartesian↔polar round-trip; the double-normalization before `swi_dot_prod_unit` — preserve both.\n5. **`swe_sol_eclipse_where`** (§3.8): public wrapper (`ipl=SE_SUN`, `starname=NULL`).\n6. **`impl Ephemeris::sol_eclipse_where`** in `context.rs`.\n\n### C reference\n`docs/c-ref-eclipse-solar.md` §0, §1, §2, §3 (all subsections).\n\n### Golden tests\n- **C harness** `tests/c-gen/gen_eclipse.c` key `sol_where`: for known central eclipses `tjd_ut ∈ {2451566.108 /*1999-08-11*/, 2459361.25 /*2021-06-10 annular*/, 2460587.7 /*2024-10-02*/}` call `swe_sol_eclipse_where(tjd_ut, SEFLG_MOSEPH, geopos, attr, serr)`. Emit `{tjd_ut, retval, geopos:[0..10], attr:[0..10]}`. Build: `cc -O2 -I../swisseph -o tests/c-gen/gen_eclipse tests/c-gen/gen_eclipse.c -L../swisseph -lswe -lm && ./tests/c-gen/gen_eclipse > tests/golden-data/eclipse.json`.\n- **Rust test** `tests/golden/eclipse.rs` `#[test] sol_where`: assert each `geopos[0..10]`/`attr` field via `assert_f64_eps(.., 1e-7)`; assert `retval` bitmask equals `EclipseWhere`'s returned flags.\n- `cargo test --test golden eclipse::sol_where -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::sol_where -- --nocapture` passes (1e-7).\n\n### Escape hatch\nIf geometry fails > 1e-6 after two attempts, STOP and report failing epochs + which `geopos`/`dcore` field diverges. Read `swecl.c:565–886` directly. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo build + cargo clippy --all-targets clean"
+    },
+    {
+      "done": true,
+      "text": "cargo test --test golden eclipse::sol_where -- --nocapture passes (1e-7)"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Task-provided golden test epochs (2451566.108/2459361.25/2460587.7) did not actually correspond to the claimed eclipse dates (off by hours-to-days) -- verified with a JD/calendar conversion and replaced with the real maximum-eclipse UT instants (1999-08-11 11:03 UT, 2021-06-10 10:42 UT, 2024-10-02 18:45 UT) computed from the standard JD formula. Added a 4th no-eclipse case (J2000 noon).\n\nFound and fixed a real bug via instrumented C-vs-Rust intermediate diffing (per docs/golden-testing.md protocol): a NONUT test case initially failed by ~1e-3 degrees in central_longitude. Root cause: C's swe_sol_eclipse_where does `ifl &= SEFLG_EPHMASK` before calling the internal eclipse_where, stripping NONUT/TOPOCTR/etc. before eclipse_where's own iflag construction ever sees them -- so eclipse_where's NONUT branch (mean sidereal time via swe_sidtime0) is unreachable through this public entry point; it always uses apparent sidereal time. My initial port passed `ifl` straight through unmasked. Fixed by widening calc::EPHMASK to pub(crate) and masking in sol_eclipse_where before calling eclipse_where, matching C's swecl.c:568 exactly. This was invisible from the ref doc's §2/§3.8 prose alone; only direct value-by-value comparison against a temporarily-instrumented copy of swecl.c (git-reverted after) surfaced it.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916318858,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 72
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782938543721,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782938550581,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Implemented eclipse.rs: EclipseWhere struct, body_radius_au, calc_planet_star, eclipse_where (2-pass earthobl refinement), sol_eclipse_where public wrapper + Ephemeris::sol_eclipse_where. Added DSUN/DMOON/DEARTH/RSUN/RMOON/REARTH to constants.rs; widened calc::EPHMASK to pub(crate) for reuse. Golden test tests/golden/eclipse.rs::sol_where passes (4 cases: 1999-08-11 total, 2021-06-10 + 2024-10-02 annular at their real maximum-eclipse UT instants, plus a no-eclipse epoch); asserts central_longitude/central_latitude/core_diameter_km (eps 1e-7) + exact retval bitmask. attr[] beyond dcore[0] deferred to RSE 6 (73, eclipse_how). cargo build + clippy --all-targets clean; full test suite (95 golden + 83 unit) passes.",
+      "ts": 1782938530920
+    },
+    {
+      "author": "codex",
+      "text": "Codex review: needs-attention (request changes). One finding — [medium] public EclipseWhere.dcore[1..6]-derived fields (penumbra_diameter_km, shadow_axis_distance_km, umbra/penumbra fundamental-plane diameters, cos_umbra/penumbra_half_angle) ship without any C oracle coverage; golden test only asserts geopos[0..1] + dcore[0] (via attr[3]) + retval flags. C's public swe_sol_eclipse_where never exposes dcore[1..6], so there's no reference path today. Risk: these fields are already pub and later contact-time/zero-finding algorithms are expected to consume dcore[2..6] directly per docs — a silent bug here passes this task's tests and corrupts downstream eclipse-contact math. Recommendation: add an instrumented C harness (same pattern used to catch the EPHMASK bug in this commit) to get real dcore[0..6] reference values and assert all EclipseWhere fields, or keep the unvalidated fields pub(crate) until that lands.\n\nEverything else checked out clean: two-pass earthobl/oblateness iteration control flow, EPHMASK masking order/placement, EclipseFlags bitmask branches, asteroid body_radius_au=0.0 fallback.",
+      "ts": 1782939281916
+    },
+    {
+      "author": "agent",
+      "text": "Resolved the codex review finding: added golden coverage for EclipseWhere's remaining 6 dcore-derived fields (penumbra_diameter_km, shadow_axis_distance_km, umbra_diameter_fundamental_km, penumbra_diameter_fundamental_km, cos_umbra_half_angle, cos_penumbra_half_angle).\n\nSince C's public swe_sol_eclipse_where only ever exposes dcore[0] (via attr[3]), there was no oracle for the rest. Added swi_test_eclipse_where_dcore -- a non-static test-only hook in ../swisseph/swecl.c, right after calc_planet_star -- that forwards eclipse_where's full dcore[0..9] array. Rebuilt swecl.o/libswe.a, extended tests/c-gen/gen_eclipse.c to call the hook (masking ifl with SEFLG_EPHMASK the same way swe_sol_eclipse_where does internally) and emit a \"dcore\" array per case, regenerated tests/golden-data/eclipse.json, and added assertions for all 7 dcore entries (including a cross-check that dcore[0] matches the pre-existing attr[3] path) in tests/golden/eclipse.rs.\n\nVerified: cargo test --test golden eclipse::sol_where passes (all fields, 1e-7) -- confirmed real C reference values, e.g. dcore[0] matches attr[3] bit-for-bit as expected. Full golden suite (95 tests) still passes. cargo build + cargo clippy --all-targets clean. Commit 2cf16b3.\n\nNote: this depends on a local, uncommitted one-line-plus-hook patch to the sibling ../swisseph/swecl.c (adds swi_test_eclipse_where_dcore; the real eclipse_where stays static and unchanged). Anyone regenerating eclipse.json from a fresh checkout of ../swisseph needs to reapply that hook first -- documented in gen_eclipse.c's header comment.",
+      "ts": 1782939564451
+    }
+  ],
+  "created_at": 1782916318858,
+  "updated_at": 1782938550581,
+  "completed_at": 1782938550581,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-92b1-7693-9799-2a611ff39c90",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/72",
+      "target": "swisseph-rs/68",
+      "note": null,
+      "created_at": 1782916485809
+    },
+    {
+      "id": "019f1e1a-9623-7bb3-8296-a2ce64cadbd2",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/73",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916486691
+    },
+    {
+      "id": "019f1e1a-9f8e-7152-b729-58cedcfa5d8d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/74",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916489102
+    },
+    {
+      "id": "019f1e1a-afc8-70f1-9293-94ade5c08939",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/76",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916493256
+    },
+    {
+      "id": "019f1e1a-c3fc-75f2-8557-7fb8200be911",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/78",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916498428
+    },
+    {
+      "id": "019f1e1a-f72f-76d2-b0f8-3c4ef87c086f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/72",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916511535
+    },
+    {
+      "id": "019f1e89-055b-7613-a35f-e23d0b9bb3c6",
+      "edge_type": "relates_to",
+      "source": "swisseph-rs/72",
+      "target": "swisseph-rs/81",
+      "note": "Eclipse _where/_how/_loc functions use SEFLG_TOPOCTR; JPL-backend results at historical epochs are unverified until 81 is fixed",
+      "created_at": 1782923724123
+    }
+  ]
+}

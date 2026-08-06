@@ -1,0 +1,88 @@
+{
+  "id": "019f18aa-b3f4-7662-9b4b-2d0c4f3d03d3",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/57",
+  "sequence_number": 57,
+  "title": "Fixed stars: SWIEPH + JPL backend support for fixstar2",
+  "description": "## Summary\nExtend the star position pipeline (`calc_fixstar`, landed in swisseph-rs/55 for Moshier) to the **SWIEPH** and **JPL** backends, so `fixstar2`/`_ut`/`_mag` work for all three ephemeris sources. The star math is backend-independent except for obtaining the observer (Earth heliocentric/barycentric) position at Step 5/6; this sub-task generalizes that one seam and adds golden coverage. Mirrors the `calc_planet` / `calc_planet_sweph` / `calc_planet_jpl` structure already in `calc.rs`.\n\n## Files\n- `src/calc.rs` — generalize `calc_fixstar`'s observer retrieval (Step 5/6) to dispatch per backend, or add thin `calc_fixstar_sweph` / `calc_fixstar_jpl` wrappers that supply the Earth/Sun positions and delegate to the shared star math. Factor the shared 18-step math so all three backends reuse it.\n- `src/context.rs` — in `fixstar2`, dispatch on `self.config.ephemeris_source` and pass the right backend handles (`self.planet_files` / `self.moon_files` / `self.jpl_file`) into the appropriate `calc_fixstar*`, matching how `calc_inner` dispatches `calc_body_{sweph,jpl,moshier}`.\n- `tests/c-gen/gen_fixstar.c` (extend) + `tests/golden-data/fixstar.json` + `tests/golden/fixstar.rs` (extend with SWIEPH/JPL cases).\n\n## Implementation steps\n1. Study how `calc_planet_sweph` / `calc_planet_jpl` obtain Earth positions: `calc::sweph_positions` returns `SwephPositions { planet_bary, earth_bary, earth_helio, sun_bary }`; the JPL path uses `JplProvider`. Identify the exact Earth pos+vel (and Sun, for deflection) each backend yields, matching C `main_planet_bary(SEI_EARTH, …)` for that source.\n2. Refactor `calc_fixstar` so the 18-step math (swisseph-rs/55) takes the observer Earth position (and Sun, implicitly at origin for the deflection geometry) as an input, and add per-backend front-ends that compute that observer position. Keep the Moshier path identical to swisseph-rs/55.\n3. Wire `Ephemeris::fixstar2` to call the source-appropriate front-end.\n\n## C reference\n`docs/c-ref-fixstar.md` §\"Position Computation\" (Step 5/6 observer), §\"Public Entry Points\". Cross-reference `calc_planet_sweph`/`calc_planet_jpl` in `src/calc.rs`.\n\n## Golden tests\n- Extend `tests/c-gen/gen_fixstar.c` to emit cases with `SEFLG_SWIEPH` and `SEFLG_JPLEPH` (de441.eph) for the same star/epoch matrix as swisseph-rs/55 (a representative subset is fine: Sirius, Spica, `,SgrA*` × J2000, 1900, 2050 × {base, |SPEED, |EQUATORIAL}).\n- Extend `tests/golden/fixstar.rs` with test fns building `Ephemeris` for `EphemerisSource::Swiss` (`ephe_path = ../swisseph/ephe`) and `EphemerisSource::Jpl` (`jpl_filename = de441.eph`). Tolerances as swisseph-rs/55: positions 1e-8, speeds 1e-6.\n\n## Acceptance criteria\n- `cargo test --test golden fixstar -- --nocapture` passes including the new SWIEPH/JPL cases.\n- `cargo build` and `cargo clippy --all-targets` clean.\n\n## Escape hatch\nIf SWIEPH/JPL positions exceed 1e-8 after two attempts, STOP and report failing cases (actual vs expected) and what you tried; the observer-position seam (barycentric vs heliocentric per backend) is the likely cause. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:range",
+      "value": "b80ffd699242739b1e205bc119b03613eaa5af9b..87991185809149ce5a2905572b75f08b7bd79cb8",
+      "label": "SWIEPH/JPL fixstar backend support + earth_bary/helio fix"
+    }
+  ],
+  "files": [
+    "src/calc.rs",
+    "src/context.rs",
+    "tests/c-gen/gen_fixstar.c",
+    "tests/golden/fixstar.rs"
+  ],
+  "tags": [
+    "fixstar",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782825268212,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 57
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782830373047,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782842894775,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782825268212,
+  "updated_at": 1782842894775,
+  "completed_at": 1782842894775,
+  "arc_id": "019efa3c-1423-7163-82fa-986d55233c70",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f18aa-d58f-7af2-b636-73b06d97f51c",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/57",
+      "target": "swisseph-rs/55",
+      "note": null,
+      "created_at": 1782825276815
+    },
+    {
+      "id": "019f18aa-e3e2-7fc1-8ce5-39e6007762e6",
+      "edge_type": "refines",
+      "source": "swisseph-rs/57",
+      "target": "swisseph-rs/10",
+      "note": null,
+      "created_at": 1782825280482
+    }
+  ]
+}

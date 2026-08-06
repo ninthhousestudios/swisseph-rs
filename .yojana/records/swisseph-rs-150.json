@@ -1,0 +1,64 @@
+{
+  "id": "019f3f61-236c-7f23-b9e4-7a1538648018",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/150",
+  "sequence_number": 150,
+  "title": "swisseph-ffi: swisseph_azalt missing lapse_rate parameter",
+  "description": "The Rust `Ephemeris::azalt` signature includes `lapse_rate: f64` but the C FFI `swisseph_azalt` omits it, hardcoding the default (standard atmosphere 0.0065 K/m). Callers of the FFI cannot control atmospheric lapse rate for refraction in horizon coordinate transforms.\\n\\nEither add `lapse_rate` to the `swisseph_azalt` C ABI signature, or document this as an intentional simplification.\\n\\nRef: swisseph-rs-dart/34 codex review, `docs/api-surface.md` lines 1265-1268 (Rust) vs 2091-2096 (FFI).",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "HITL",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Added lapse_rate: f64 to swisseph_azalt FFI signature (between attemp and xin), passed through instead of hardcoded 0.0. Threaded through all four Dart layers: bindings_native, bindings_web, marshal, ephemeris body (default 0.0). All azalt differential tests pass. api-surface.md updated.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs-dart/34"
+    },
+    {
+      "type": "git:commit",
+      "value": "50bae5b"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783474758508,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 150
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783475117947,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783475121948,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783474758508,
+  "updated_at": 1783475121948,
+  "completed_at": 1783475121948,
+  "edges": []
+}

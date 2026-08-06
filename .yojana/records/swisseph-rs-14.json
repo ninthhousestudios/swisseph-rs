@@ -1,0 +1,124 @@
+{
+  "id": "019efa45-4a4a-77a1-9ab2-221b547ecd1a",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/14",
+  "sequence_number": 14,
+  "title": "Plan: Heliacal events & visibility",
+  "description": "Port swehel.c (~3511 lines). The most self-contained complex module — atmospheric optics and human vision modeling.\n\n## Schaefer sky brightness model (catalogue-internal §15.1)\nFive light sources contributing to twilight sky brightness (nanoLamberts):\n1. **Daylight (Bday)** — Sun altitude >4°: F_S scattering function + extinction\n2. **Twilight (Btwi)** — Sun altitude <-3°: exponential in Sun depression\n3. **Moonlight (Bm)** — same scattering formula as daylight with Moon's magnitude\n4. **Zodiacal + starlight (Bn)** — small, modulated by 11.1-year solar cycle\n5. **Light pollution (Bcity)** — configurable\nTransition zone (Sun -3° to 4°): min(Bday, Btwi)\n\n## Atmospheric extinction (catalogue-internal §15.2)\nFour exponential atmosphere layers:\n| Layer | Scale height | Coefficient |\n|-------|-------------|-------------|\n| Rayleigh scattering | 8515 m | k_R |\n| Aerosol scattering | 3745 m | k_t (humidity-dependent) |\n| Ozone absorption | 20000 m | k_OZ |\n| Water vapor | 3000 m | k_W (humidity-dependent) |\nTotal: kX = k_R×X_R(z) + k_t×X_t(z) + k_OZ×X_OZ(z) + k_W×X_W(z)\n\n## Limiting magnitude: VisLimMagn() (swehel.c:1382, catalogue-internal §15.3)\nScotopic (<1645 nL) vs photopic vision, threshold = C₁×(1+√(C₂×B_sky))²×CorrFactor, limiting_mag = -16.57 - 2.5×log10(threshold)\n\n## Arcus visionis: TopoArcVisionis() (swehel.c:1562, catalogue-internal §15.4)\nBisection search for Sun depression angle where object becomes visible: bracket [45°, 0°], converge on mag − VisLimMagn = 0\n\n## Yallop lunar crescent (swehel.c:1741, catalogue-internal §15.5)\nq = (ARCV − polynomial(W')) / 10 where W' = crescent width in arcminutes. Grades A–E from impossible to unmissable.\n\n## Public functions\n- `swe_heliacal_ut()` — search for next heliacal event (rising/setting/evening first/morning last)\n- `swe_heliacal_pheno_ut()` — detailed visibility at specific moment (28+ output values)\n- `swe_vis_limit_mag()` — limiting magnitude at a moment\n- `swe_heliacal_angle()` — optimal altitude and arcus visionis\n- `swe_topo_arcus_visionis()` — minimum Sun depression for visibility\n\n## Testing\n- No dedicated setest suite, but golden data can be generated with swetest -hev flag\n- Key test: heliacal rising of Sirius at Cairo (historically significant)\n- Crescent visibility: first visibility after new Moon at various locations\n\n## C source reference\n- swehel.c:1-3511 — entire file\n\n## Dependencies\n- Phase 5 (calc), Phase 11 (rise/set, azalt, refraction), Phase 12 (pheno for magnitude)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Planning executed as specified with these divergences/corrections from the original description:\n\n1. Three ref docs, not one: swehel.c (3511 lines) split into docs/c-ref-heliacal-vision.md (lines 1–1714: constants, extinction, brightness, VisLimMagn, TopoArcVisionis, HeliacalAngle), c-ref-heliacal-pheno.md (1715–2076: Yallop crescent + swe_heliacal_pheno_ut), c-ref-heliacal-search.md (2077–3511: event search) — same precedent as swecl.c's solar/lunar/occultation split. Each written by a dedicated sonnet agent.\n\n2. Stale assumptions in the original description corrected during decomposition:\n   - Yallop grades: this checkout has SIX grades A–F (thresholds 0.216/-0.014/-0.16/-0.232/-0.293), not the catalogue's 5-grade A–E table. catalogue-internal.md §15.5 is a wrong paraphrase.\n   - SIMULATE_VICTORVB is unconditionally #define'd in swephexp.h — SunRA is a crude calendar approximation in ALL shipped builds (the swe_calc path is dead; SE_HELFLAG_HIGH_PRECISION never affects it); ka's RH clamp live, default_heliacal_parameters' dead.\n   - Testing: golden data via the established tests/c-gen/gen_*.c harness pattern (new gen_heliacal.c for the 5 public functions + gen_heliacal_internals.c using an #include-swehel.c trick to reach static functions), not \"swetest -hev\".\n   - Statelessness: C's static caches (SunRA tjdlast/ralast etc.) are pure memoization — dropped. swe_set_topo/TOPOCTR handled via the riseset.rs per-call topo_config pattern. C retval −2 (below horizon, output valid) modeled as a flag on VisLimitResult, NOT Err — the search layer depends on it.\n   - Latent C bug not reproduced: tcon[] has no Pluto row; find_conjunct_sun would read OOB for SE_PLUTO — Rust returns Err instead.\n   - Dead code excluded from the port: call_swe_calc, fast_magnitude, get_asc_obl*_old variants, HeliacalAngle PLSV==1 branch, the #if 0 pheno-overwrite in heliacal_ut_arc_vis. Quirks preserved literally for golden parity: ObjectLoc Angle==4 argument swap, heliacal_ut_arc_vis stale-JDNDaysUT sanity bound, arc_vis populating only dret[0], darr[26]=elongation (stale C header comment).\n\n3. Decomposition: 8 sub-tasks swisseph-rs/104–111 on this arc (implement phase), dependency chain 104 → {105,106} → 107 → 108 → {109 (pheno, also needs 106), 111} and 107 → 110 → 111. 104 starts by uncommenting the 3 deferred heliacal constraints in .sutra/rules.toml (with stale single-file glob fix jpl.rs/sweph_file.rs → directory globs). All sub-tasks carry golden batteries; internals layers get direct static-function golden coverage rather than end-to-end-only.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315305546,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 14
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783034787607,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783034806075,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315305546,
+  "updated_at": 1783034806075,
+  "completed_at": 1783034806075,
+  "arc_id": "019efa3c-5420-7750-9de1-93c44d1a9bdf",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f2527-1185-7ea2-a4f0-56b9478ce194",
+      "edge_type": "refines",
+      "source": "swisseph-rs/104",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034745221
+    },
+    {
+      "id": "019f2527-150a-7a43-943d-777ca87afb9c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/105",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034746122
+    },
+    {
+      "id": "019f2527-18a7-7131-be66-80b67aa7ef93",
+      "edge_type": "refines",
+      "source": "swisseph-rs/106",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034747047
+    },
+    {
+      "id": "019f2527-1c4c-7180-9d4f-4c76dff8cc64",
+      "edge_type": "refines",
+      "source": "swisseph-rs/107",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034747980
+    },
+    {
+      "id": "019f2527-243d-7433-96ba-4b3ac2fe8760",
+      "edge_type": "refines",
+      "source": "swisseph-rs/108",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034750013
+    },
+    {
+      "id": "019f2527-2651-7330-9025-85aab1c9f37a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/109",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034750545
+    },
+    {
+      "id": "019f2527-2920-7570-ac57-09ac6a8ee6e0",
+      "edge_type": "refines",
+      "source": "swisseph-rs/110",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034751264
+    },
+    {
+      "id": "019f2527-2be6-73e3-ac23-b3cd36b03c1e",
+      "edge_type": "refines",
+      "source": "swisseph-rs/111",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034751974
+    }
+  ]
+}

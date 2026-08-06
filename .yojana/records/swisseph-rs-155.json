@@ -1,0 +1,78 @@
+{
+  "id": "019f705d-2814-7a51-8f70-d845efce9b41",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/155",
+  "sequence_number": 155,
+  "title": "Export cotrans / cotrans_with_speed through swisseph-ffi",
+  "description": "swe_dashboard's Ephemeris seam needs cotrans (coordinate transformation, swe_cotrans counterpart) via the Dart package, but swisseph-ffi has no export for it. The engine functions exist: `pub fn cotrans(xpo: [f64; 3], eps: f64) -> [f64; 3]` at src/math.rs:329 and `cotrans_with_speed(xpo: [f64; 6], eps: f64) -> [f64; 6]` at src/math.rs:341. Pure math, no handle/config needed.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "swisseph_cotrans and swisseph_cotrans_with_speed exported from swisseph-ffi with tests"
+    },
+    {
+      "done": false,
+      "text": "wasm artifact rebuilt with the new symbols"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": "1. Add `swisseph_cotrans` and `swisseph_cotrans_with_speed` extern \"C\" exports to swisseph-ffi (natural home: a math section — date.rs holds the other free-fn exports like swisseph_split_deg; follow its out-pointer conventions).\n2. Follow existing conventions for array in/out marshalling (see swisseph_split_deg / azalt exports).\n3. These are free functions (no SweEphemeris handle) — mirror how swisseph_julday/swisseph_day_of_week are declared.\n4. Rebuild the wasm artifact so the new symbols are available to swisseph.rs.dart's web bindings (the Dart binding task in swisseph-rs-dart depends on this).\n5. Tests: round-trip against known ecliptic↔equatorial values (eps = mean obliquity at J2000); compare with C swe_cotrans output from the swetest oracle if convenient.",
+  "execution_record": "FFI exports (swisseph_cotrans, swisseph_cotrans_sp) and tests already existed in swisseph-ffi/src/util.rs and swisseph-ffi/tests/date.rs. Only missing piece was the wasm EXPORTED_FUNCTIONS list in swisseph.rs.dart/wasm/build.sh. Added both symbols and rebuilt the wasm artifact. Committed to swisseph.rs.dart main as d505650.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "d505650"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1784296581140,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 155
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1784385264437,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1784385269220,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1784296581140,
+  "updated_at": 1784385269220,
+  "completed_at": 1784385269220,
+  "edges": [
+    {
+      "id": "019f705f-321c-78b0-8071-3795d04f8dc2",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs-dart/47",
+      "target": "swisseph-rs/155",
+      "note": null,
+      "created_at": 1784296714780
+    }
+  ]
+}

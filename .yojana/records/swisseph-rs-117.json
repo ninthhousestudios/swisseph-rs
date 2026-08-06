@@ -1,0 +1,81 @@
+{
+  "id": "019f28f0-1109-7683-b238-8423ef050750",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/117",
+  "sequence_number": 117,
+  "title": "Polish 4/7: Doc-comment sweep B — application & backend modules, missing_docs lint",
+  "description": "### Summary\nDocumentation-only sweep over everything Polish-3 didn't cover: module-level `//!` docs for all remaining modules, doc comments on public types/functions in the application modules, brief \"internal\" banners on backend/support modules, then turn on `#![warn(missing_docs)]` in lib.rs and drive the warning count to zero. NO code changes — docs and attributes only.\n\n### Files\n- Application modules: `src/houses.rs`, `src/eclipse.rs`, `src/riseset.rs`, `src/heliacal.rs`, `src/phenomena.rs`, `src/nodaps.rs`, `src/orbit.rs`, `src/crossings.rs`, `src/azalt.rs`, `src/date.rs`, `src/stars.rs`, `src/math.rs`, `src/ayanamsa.rs`, `src/topocentric.rs`, `src/sidereal_time.rs`\n- Support/backend modules: `src/calc.rs`, `src/corrections.rs`, `src/obliquity.rs`, `src/bias.rs`, `src/precession.rs`, `src/constants.rs`, `src/deltat/`, `src/nutation/`, `src/moshier/`, `src/jpl/`, `src/sweph_file/`\n- `src/lib.rs` — add `#![warn(missing_docs)]`\n\n### Implementation steps\n1. **Module docs** (`//!`) for every module lacking one: 3–8 lines — what domain it covers, which C source file it ports, whether users should call it directly or go through `Ephemeris` (application modules: \"the `Ephemeris::xxx` methods in `context` are the primary entry points; the free functions here are the pure cores\"). Backend modules (moshier/jpl/sweph_file) and math/support modules get an explicit \"Low-level internals, exposed for golden tests and advanced use\" banner line.\n2. **Public output types** in application modules that Polish-3 didn't touch: eclipse structs' per-field docs are the priority — each field states which C tret[i]/attr[i]/dcore[i] slot it came from (this info is already in the struct definitions' comments and docs/codebase-map.md; convert to real doc comments where it's currently `//`). Same for HeliacalPheno's 28 fields (C dret index each), VisLimitResult, OrbitalElements (17 dret slots), NodesApsides, HouseResult/AscMc, RiseSetResult, Phenomena (attr indices), MoonCrossing.\n3. **Public free functions**: one-liner + units for each pub fn in math.rs/date.rs (many exist; keep terse — signature + unit note). For pure-core functions that mirror an Ephemeris method (azalt::azalt vs Ephemeris::azalt), say \"pure core of [`Ephemeris::azalt`]; caller supplies precomputed ARMC/eps\".\n4. **`#![warn(missing_docs)]`** in lib.rs, then iterate `cargo doc` until zero missing_docs warnings. For genuinely internal pub items that are only pub for golden tests, a one-line doc (\"Internal: exposed for golden differential tests.\") is acceptable — do NOT weaken visibility or add #[doc(hidden)] (golden tests and downstream debugging want them findable).\n5. Do not restate algorithm narratives that already live in docs/codebase-map.md or code comments — link/point instead (\"see `docs/c-ref-houses.md` §7\" style pointers are fine in doc comments).\n\n### C reference\nNone to read. All content from existing Rust code, comments, and docs/.\n\n### Golden tests\nNone. `cargo test` must stay green.\n\n### Acceptance criteria\n- `RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps` passes with `#![warn(missing_docs)]` active\n- `cargo test` passes\n- Every module in src/ has a `//!` header (verify: `for f in $(find src -name '*.rs'); do head -1 $f | grep -q '^//!' || echo $f; done` prints only mod.rs files whose docs live on the `pub mod` declaration, data-table files like moshier/tables.rs may carry a one-line banner)\n\n### Escape hatch\nheliacal.rs (3977 lines) and eclipse.rs (3257 lines) have many pub items. If zero-warning coverage would exceed ~600 lines of doc additions in a single file, split: fully document the public structs + Ephemeris-adjacent entry points, give the internal pub helpers the one-line \"Internal:\" form, and note the shortcut in the completion report. Do not stop the lint activation for it.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Fanned out to 6 parallel Sonnet subagents (types.rs, constants.rs, heliacal.rs, sweph_file+jpl, math+error+misc, moshier+calc+houses+misc) for the bulk doc-writing work. One agent (math+error+misc) committed independently (7b93410); the rest left changes unstaged. I fixed 13 pre-existing rustdoc link errors inline (eclipse.rs, nodaps.rs, orbit.rs, phenomena.rs), added /// docs on all pub mod declarations in lib.rs, added #![warn(missing_docs)], and added //! module headers to ~16 files that lacked them. Final commit 3b55f35 covers all remaining changes. Total: 966 insertions across 41 files. No escape hatch needed — heliacal.rs's 200-line addition stayed well under the 600-line threshold.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "3b55f35"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "polish"
+  ],
+  "history": [
+    {
+      "ts": 1783098249481,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 117
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783205964645,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783207114644,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783098249481,
+  "updated_at": 1783207114644,
+  "completed_at": 1783207114644,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f2-1d47-7012-80f5-d7fb9f56593c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/117",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098383687
+    },
+    {
+      "id": "019f28f2-5a25-7bb1-afc8-59f444815058",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/117",
+      "target": "swisseph-rs/116",
+      "note": "missing_docs lint activates only after sweep A covered the core layer",
+      "created_at": 1783098399269
+    }
+  ]
+}

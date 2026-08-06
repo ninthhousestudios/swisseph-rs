@@ -1,0 +1,98 @@
+{
+  "id": "019efa43-c07e-7170-8dd2-3287e25bce82",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/10",
+  "sequence_number": 10,
+  "title": "Plan: Fixed Stars",
+  "description": "Port fixed star computation from sweph.c (~1000 lines).\n\n## Functions\n- `swe_fixstar2(star, tjd, iflag, xx, serr)` — main entry. Loads all stars on first call via load_all_fixed_stars(). Searches by name, Bayer designation, or catalog number.\n- `swe_fixstar2_ut()` — UT wrapper\n- `swe_fixstar2_mag()` — magnitude lookup\n- `swe_fixstar()` / `swe_fixstar_ut()` / `swe_fixstar_mag()` — older versions (can skip or alias)\n\n## Position computation (catalogue-internal §20.2)\n1. Epoch transform if catalog epoch ≠ J2000: RA/Dec + proper motion × (J2000 − epoch)\n2. Precession J2000 → observation date\n3. Proper motion velocity vector also precessed\n4. Annual aberration + gravitational deflection (same pipeline as planets)\n5. Sidereal transform if SEFLG_SIDEREAL\n\n## Star catalog\n- `sefstars.txt` (~9000 stars) in ephe/ directory\n- `struct fixed_star`: skey, starname, starbayer, starno, epoch, ra, de, ramot, demot, radvel, parall, mag\n- Built-in array of major stars as fallback when file unavailable\n\n## Rust design\n- `StarCatalog` struct owned by Ephemeris, lazily loaded\n- Search: HashMap by name + HashMap by Bayer designation for O(1) lookup\n- `Star` struct with all catalog fields\n\n## Testing\n- setest/suite_02_fixstar.c\n- Golden data: Sirius, Spica, Aldebaran, Regulus at various epochs\n\n## C source reference\n- sweph.c swe_fixstar2, load_all_fixed_stars, star search logic\n- Catalog file: ephe/sefstars.txt\n\n## Dependencies\n- Phase 3 (precession), Phase 5 (apparent position pipeline)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Planning task. Produced docs/c-ref-fixstar.md (1179 lines: catalog format, struct, loading, search, builtin fallback, the 18-step fixstar_calc_from_struct position pipeline, swi_icrs2fk5/swi_FK4_FK5 frame transforms, and the 12-mode fixed-star ayanamsa integration) and decomposed into 4 implementation sub-tasks on this arc (arc_phase=implement): swisseph-rs/54 (catalog parser+types+search+builtin), /55 (Moshier position pipeline + Ephemeris fixstar2/_ut/_mag), /56 (12 fixed-star ayanamsa modes + armc_to_mc), /57 (SWIEPH+JPL star backends). Chain: 55→54, 56→55, 57→55; all refine /10.\n\nCorrections to the original (pre-architecture) task description:\n1. StarCatalog is NOT \"lazily loaded\" — it is eager-loaded at Ephemeris::new() and stored as a read-only field (like planet_files/jpl_file). The stateless invariant forbids a mutable/lazy cache.\n2. Position math placed in calc.rs (calc_fixstar), not stars.rs — stars.rs holds only catalog data/parsing/search so it imports no backend (satisfies the forbidden_dep constraints, now uncommented). Ephemeris dispatches to calc::calc_fixstar exactly as it does for calc_planet.\n3. Fixed-star ayanamsa modes are routed at the Ephemeris layer (where the catalog lives), not inside ayanamsa.rs's pure config-math functions; ayanamsa.rs keeps its Err(SiderealModeRequiresFixedStars) as a safety net.\n4. Blank-line handling (note 2): the Rust parser skips blank AND whitespace-only lines silently — fixing the C 'data corrupted' bug; more lenient than C.\n5. New scope not in the original task: swi_icrs2fk5 + swi_FK4_FK5 frame transforms are required because swe_fixstar2 prefers built-in stars BEFORE the file, and the built-in ayanamsa reference stars carry epoch 2000 (\",SgrA*\") / 1950 (\",GP1958\"). Documented and folded into /55.\n6. Backend sequencing: Moshier-first (/55) per project process; SWIEPH/JPL star backends split into /57 to keep each sub-task single-session.\n7. Note 1 (uncomment ayanamsa+stars constraints in .sutra/rules.toml) folded in: stars constraints in /54, ayanamsa constraints in /56.\n8. The legacy swe_fixstar/_ut/_mag (file-scan) API is aliased to fixstar2 (same math) rather than ported separately.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315204734,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 10
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782825311092,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782825314038,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "DEFERRED FROM swisseph-rs/9 (Ayanamsa): the 12 \"true star\" / galactic ayanamsa modes depend on swe_fixstar and are NOT implemented by the ayanamsa sub-tasks (49-52). This task (Fixed Stars) is responsible for implementing them once the fixed-star subsystem exists.\n\nThe 12 deferred SiderealMode indices and their reference stars / offsets (full detail in docs/c-ref-ayanamsa.md §\"Fixed-Star Ayanamsas\"):\n- 17 GALCENT_0SAG (\",SgrA*\", x-240°), 27 TRUE_CITRA (\"Spica\", x-180°), 28 TRUE_REVATI (\",zePsc\", x-359.8333°), 29 TRUE_PUSHYA (\",deCnc\", x-106°), 30 GALCENT_RGILBRAND (\",SgrA*\"), 31 GALEQU_IAU1958 (\",GP1958\", x-150°), 32 GALEQU_TRUE (\",GPol\", x-150°), 33 GALEQU_MULA (\",GPol\"), 35 TRUE_MULA (\",laSco\", x-240°), 36 GALCENT_MULA_WILHELM (\",SgrA*\", equatorial+swi_armc_to_mc), 39 TRUE_SHEORAN (\",deCnc\"), 40 GALCENT_COCHRANE (\",SgrA*\", x-270°).\n\nImplementation hooks already in place after sub-tasks 49-52:\n- `ayanamsa::get_ayanamsa_ex` returns `Err(Error::SiderealModeRequiresFixedStars(mode))` for these indices — replace that early-return with the swe_fixstar-based computation (C: sweph.c:3049-3142, documented in the ref doc).\n- `EphemerisConfig::set_sidereal_mode` already strips projection bits for these modes (matches C); no config change needed.\n- The galactic-pole modes (31,32,33) use iflag | SEFLG_TRUEPOS; the others pass TRUEPOS/NOABERR/NOGDEFL through from the caller. Index 36 needs swi_armc_to_mc (swehouse.c:872-888) which arrives with the houses module.\n\nAdd golden coverage for these 12 modes (via swe_get_ayanamsa_ex and swe_calc+SEFLG_SIDEREAL) when implementing.",
+      "ts": 1782760278923
+    }
+  ],
+  "created_at": 1782315204734,
+  "updated_at": 1782825326015,
+  "completed_at": 1782825314038,
+  "arc_id": "019efa3c-1423-7163-82fa-986d55233c70",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f18aa-d980-7831-954a-fb183577f6ba",
+      "edge_type": "refines",
+      "source": "swisseph-rs/54",
+      "target": "swisseph-rs/10",
+      "note": null,
+      "created_at": 1782825277824
+    },
+    {
+      "id": "019f18aa-dcc3-7cd1-a99c-1b4433426324",
+      "edge_type": "refines",
+      "source": "swisseph-rs/55",
+      "target": "swisseph-rs/10",
+      "note": null,
+      "created_at": 1782825278659
+    },
+    {
+      "id": "019f18aa-e0bd-7211-987d-c83c76f74bb3",
+      "edge_type": "refines",
+      "source": "swisseph-rs/56",
+      "target": "swisseph-rs/10",
+      "note": null,
+      "created_at": 1782825279677
+    },
+    {
+      "id": "019f18aa-e3e2-7fc1-8ce5-39e6007762e6",
+      "edge_type": "refines",
+      "source": "swisseph-rs/57",
+      "target": "swisseph-rs/10",
+      "note": null,
+      "created_at": 1782825280482
+    }
+  ]
+}

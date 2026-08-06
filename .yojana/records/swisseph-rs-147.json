@@ -1,0 +1,126 @@
+{
+  "id": "019f3793-0310-7a83-b1bc-1e47b417cf77",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/147",
+  "sequence_number": 147,
+  "title": "swetest: format-sequence output engine (-f)",
+  "description": "Port C's `print_line` format-sequence interpreter (swetest.c:2067-2774, ~700 lines). Each character in the `-f` format string produces one output column.\n\n**Format characters** (all 50+):\n\n*Date/time (7)*: `y` year, `Y` year.fraction, `p` planet index, `P` planet name, `J` absolute JD, `T` date `dd.mm.yyyy`, `t` date `yymmdd`\n\n*Ecliptic position (7)*: `L` longitude ddd°mm'ss\", `l` longitude decimal, `Z` longitude sign-format (ddsignmm'ss\"), `S` speed ddd:mm:ss/day, `s` speed decimal, `B` latitude ddd°mm'ss\", `b` latitude decimal\n\n*Distance (5)*: `R` distance AU, `r` distance AU (Moon in parallax seconds), `W` distance light-years, `w` distance km, `q` relative distance (1000=nearest)\n\n*Equatorial (4)*: `A` RA hh:mm:ss, `a` RA decimal, `D` declination ddd°mm'ss\", `d` declination decimal\n\n*Horizontal (6)*: `I` azimuth ddd°mm'ss\", `i` azimuth decimal, `H` true altitude ddd°mm'ss\", `h` true altitude decimal, `K` apparent altitude ddd°mm'ss\", `k` apparent altitude decimal\n\n*Cartesian (4)*: `U`/`X` ecliptic x,y,z, `u`/`x` equatorial x,y,z\n\n*Speed modifier (2)*: `SS`/`ss` — print speed for ALL preceding format columns (not just longitude)\n\n*House position (5)*: `Q` house position (Gauquelin), `N`/`n` nodes (asc long/lat), `F`/`f` apsides (peri long/lat)\n\n*Arithmetic (5)*: `+` longitude sum with prior, `-` longitude diff, `*` latitude sum, `/` latitude diff, `=` distance diff\n\n*Special (4)*: `V`/`v` Human Design gates, `m` meridian distance, `z` zenith distance\n\n**Formatting helpers** — reuse existing `swisseph::format` module (`cs2timestr`, `cs2lonlatstr`, `cs2degstr`) plus `swisseph::math::split_deg`. The C `dms()` function is a wrapper around these.\n\n**Output options that modify formatting**:\n- `-g` separator (default space, tab if `-g` alone)\n- `-dms` use degree-minute-second instead of decimal where applicable\n- `-roundsec` / `-roundmin` rounding\n- `-ep` extra precision\n- `-hor` horizontal listing (all planets on one line, time columns not repeated)\n\n**Key pattern**: The format engine iterates the format string char by char. For each char, it reads from the computed position array (`data[0..6]`) and the supplementary computations (azalt, house position, equatorial coords from `EQUATORIAL` flag or manual conversion). Horizontal/azalt columns require a prior `Ephemeris::azalt()` call. House position requires a prior `Ephemeris::house_pos()` call.\n\n**Output fidelity**: Aim for readable, correct output. Don't spend excessive time matching C's exact field widths and printf padding — that's a polish pass.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -p0 -fPLBRS (default) prints planet name, longitude, latitude, distance, speed"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -p0 -fl prints decimal longitude"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -p0 -fPlBRS prints decimal latitude variant"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -p0 -fPLBRSAD prints RA + declination columns"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -p0 -fPUU prints cartesian x,y,z"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -p0 -fPZ prints zodiac-sign format longitude"
+    },
+    {
+      "done": false,
+      "text": "All 50+ format characters produce output without panic"
+    },
+    {
+      "done": false,
+      "text": "-g flag changes column separator"
+    },
+    {
+      "done": false,
+      "text": "-dms flag switches decimal columns to DMS format"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented in two commits: (1) 2cd06e4 — core format engine with all 50+ format characters, FormatContext/dms()/format_line() architecture, supplementary computation dispatch (equatorial/azalt/cartesian/house_pos/phenomena only when format needs them); (2) b0ccaa5 — N/n/F/f node+apside format chars via nod_aps calls. Output matches C swetest character-for-character on PLBRS, PLBRSAD, PUU, PZ across all default planets. Mean nodes/apsides match bitwise; osculating show the documented fac=z/ż sensitivity (~1e-4°). The -hor horizontal listing mode was deferred to swisseph-rs/149 (it changes the outer loop, not the format engine).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "2cd06e4"
+    },
+    {
+      "type": "git:commit",
+      "value": "b0ccaa5"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783343809296,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 147
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783351971224,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783352237338,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783343809296,
+  "updated_at": 1783352237338,
+  "completed_at": 1783352237338,
+  "edges": [
+    {
+      "id": "019f3793-c1da-7233-ba97-a404cae09a91",
+      "edge_type": "refines",
+      "source": "swisseph-rs/147",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343858138
+    },
+    {
+      "id": "019f3793-cea4-7713-820e-ced87f8a872d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/147",
+      "target": "swisseph-rs/146",
+      "note": null,
+      "created_at": 1783343861412
+    },
+    {
+      "id": "019f3793-d65a-7250-af47-cfa0cdf8463f",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/149",
+      "target": "swisseph-rs/147",
+      "note": null,
+      "created_at": 1783343863386
+    }
+  ]
+}

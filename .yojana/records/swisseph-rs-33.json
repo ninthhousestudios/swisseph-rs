@@ -1,0 +1,127 @@
+{
+  "id": "019f0452-85bf-7901-a7b4-8f9812d22fec",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/33",
+  "sequence_number": 33,
+  "title": "Public Ephemeris::calc() entry point and integration golden tests",
+  "description": "Wire up the public API on Ephemeris and add comprehensive integration golden tests. This is the final assembly task — everything below this is already implemented.\n\n## 1. `Ephemeris::calc(&self, jd_tt: JdTt, body: Body, flags: CalcFlags) -> Result<CalcResult>`\n\nThe main entry point, equivalent to C's `swe_calc()`:\n1. Call `plaus_iflag()` for flag normalization\n2. Handle SPEED3 mode: if SPEED3 (and not SPEED), make 3 calls at t−dt, t, t+dt with body-appropriate interval; compute speed from central difference: speed = (pos_after − pos_before) / (2·dt)\n3. Call `swecalc()` with normalized flags\n4. Set CalcResult.flags_used to reflect actual ephemeris used and corrections applied\n5. Return CalcResult\n\nBody-specific speed intervals for SPEED3 (from C):\n- Moon: 0.00005 days (MOON_SPEED_INTV)\n- Planets: 0.0001 days (PLAN_SPEED_INTV)  \n- Mean node/apogee: 0.1 days (NODE_CALC_INTV_MOSH)\n\n## 2. `Ephemeris::calc_ut(&self, jd_ut: JdUt1, body: Body, flags: CalcFlags) -> Result<CalcResult>`\n\nConvenience method:\n- Compute TT = UT + delta_t(UT)\n- Delegate to `calc(JdTt(tt), body, flags)`\n\n## 3. Caching decision\n\nPer architecture (CLAUDE.md): Ephemeris is stateless, all methods &self, no mutable cache. The C library caches in global `savedat[]` — we deliberately omit this:\n- Moshier computation is fast (~microseconds per body)\n- Callers needing caching can wrap Ephemeris in their own cache layer\n- File backends (future phases) may revisit this with a caller-managed `FileCache` struct\n- Document this decision in code comments or the codebase map\n\n## 4. Integration golden tests\n\nComprehensive C harness (`gen_calc_integration.c`) that calls `swe_calc()` with MOSEPH and generates reference data for all body × epoch × flag combinations:\n\n**Bodies**: Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, MeanNode, MeanApogee, Earth, EclNut\n\n**Epochs**: J2000, ±1yr, ±100yr, ±500yr, ±1000yr, J2000+0.5, J2000+27.3, J2000+365.25\n\n**Flag combos** (for a subset of bodies/epochs to keep test count manageable):\n- Default (MOSEPH | SPEED) — ecliptic polar, degrees\n- EQUATORIAL — equatorial polar\n- XYZ — ecliptic Cartesian\n- EQUATORIAL | XYZ — equatorial Cartesian  \n- TRUEPOS — no corrections\n- J2000 — J2000 frame\n- NONUT — no nutation\n- RADIANS — skip degree conversion\n- HELCTR (Sun only) — heliocentric\n\n## 5. Codebase map update\n\nUpdate docs/codebase-map.md:\n- calc.rs is no longer an empty stub — document its key functions\n- corrections.rs — new module\n- Update golden test section\n\nC source reference: docs/c-ref-calc.md",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "Ephemeris::calc and calc_ut implemented as &self methods"
+    },
+    {
+      "done": false,
+      "text": "SPEED3 mode works correctly with body-appropriate intervals"
+    },
+    {
+      "done": false,
+      "text": "All 10 planets + MeanNode + MeanApogee + Earth + EclNut produce correct positions"
+    },
+    {
+      "done": false,
+      "text": "Integration golden tests: 100+ cases covering all body types and key flag combinations"
+    },
+    {
+      "done": false,
+      "text": "CalcResult.flags_used correctly reflects actual ephemeris and corrections applied"
+    },
+    {
+      "done": false,
+      "text": "docs/codebase-map.md updated with calc.rs and corrections.rs entries"
+    },
+    {
+      "done": false,
+      "text": "Caching omission documented with architectural rationale"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "SPEED3 uses relaxed epsilon 1e-7 for speed slots",
+      "rationale": "Quadratic interpolation over tiny dt amplifies sub-ULP position rounding into ~1e-8 speed differences between C and Rust. These are numerical noise, not algorithm errors. 1e-7 catches real bugs while tolerating FP evaluation-order differences.",
+      "rejected": "Bitwise-exact matching — would require matching C's exact expression evaluation order in all inner computations, cost disproportionate to value"
+    }
+  ],
+  "implementation_plan": "## Approach\n\nThree pieces: (1) SPEED3 numerical differentiation mode, requiring a refactor to separate the inner dispatch from the public `calc` entry point; (2) `calc_ut` convenience method; (3) proper ECL_NUT output extraction and expanded integration golden tests. The SPEED3 refactor is the bulk — it needs the inner body dispatch to return the raw 24-element array so the 3-call central-difference can operate on it before final extraction. The /32 review fix for ECL_NUT RADIANS (strip RADIANS entirely) was a stopgap — the C ref doc shows RADIANS should convert all 4 ECL_NUT values, which this task will implement properly.\n\n## Files\n\n- **Modify**: `src/context.rs` (lines ~71-150) — refactor `calc` into inner dispatch + SPEED3 wrapper + `calc_ut`; fix ECL_NUT extraction\n- **Modify**: `src/calc.rs` (lines ~24-56) — `plaus_iflag` default SPEED; `extract_output` ECL_NUT mode; add `denormalize_positions` and `calc_speed` helpers\n- **Modify**: `tests/c-gen/gen_calc.c` — expand to all 14 body types, add SPEED3 and RADIANS flag combos\n- **Modify**: `tests/golden-data/calc.json` — regenerated with expanded cases\n- **Modify**: `tests/golden/calc.rs` — update body_from_c_id for new bodies, update case count\n- **Modify**: `docs/codebase-map.md` — add calc_ut, SPEED3 entries\n\n## Steps\n\n### Step 1: Default SPEED in plaus_iflag\n\n`src/calc.rs` — after the existing flag normalization, before ephemeris selection:\n\n```rust\n// Default: always compute speed (matches C behavior)\nif !flags.intersects(CalcFlags::SPEED | CalcFlags::SPEED3) {\n    flags.insert(CalcFlags::SPEED);\n}\n```\n\nAlso add the C rule: if both SPEED and SPEED3 are set, clear SPEED3 (high-precision speed wins):\n\n```rust\nif flags.contains(CalcFlags::SPEED) && flags.contains(CalcFlags::SPEED3) {\n    flags.remove(CalcFlags::SPEED3);\n}\n```\n\n### Step 2: Fix ECL_NUT output extraction\n\nThe /32 review fix strips RADIANS for ECL_NUT to prevent mixed-unit output. The C ref doc (§2, line 163) shows the correct behavior: for ECL_NUT, RADIANS converts all 4 values `[0..3]` (not the normal 2-slot conversion). Replace the current ECL_NUT branch in `context.rs`:\n\n```rust\nif body == Body::EclipticNutation {\n    let ecl_nut = crate::calc::calc_ecl_nut(jd_tt, flags, models);\n    return Ok(CalcResult {\n        data: crate::calc::extract_ecl_nut(&ecl_nut, flags),\n        flags_used: flags,\n    });\n}\n```\n\nAdd `extract_ecl_nut` in `calc.rs`. This is a separate function because ECL_NUT has fundamentally different output semantics: 4 angular values in a flat array (no 24-element save area, no EQUATORIAL/XYZ meaning):\n\n```rust\npub fn extract_ecl_nut(ecl_nut: &[f64; 6], flags: CalcFlags) -> [f64; 6] {\n    // C behavior: EQUATORIAL/XYZ produce zeros (data only lives in slots 0-5\n    // of the save area; offsets 6+/12+ are empty). Copy 4 values, not 3+speed.\n    if flags.intersects(CalcFlags::EQUATORIAL | CalcFlags::XYZ) {\n        return [0.0; 6];\n    }\n    let mut data = *ecl_nut;\n    if flags.contains(CalcFlags::RADIANS) {\n        // C ref doc §2 line 163: ECL_NUT RADIANS converts [0..3]\n        for v in &mut data[..4] {\n            *v *= DEGTORAD;\n        }\n    }\n    data\n}\n```\n\n### Step 3: Refactor calc into inner dispatch + SPEED3 wrapper\n\nThe current `Ephemeris::calc` does flag normalization, body dispatch, and output extraction in one method. SPEED3 needs to call the inner dispatch 3 times at different JDs, so split into:\n\n**Inner dispatch** (`calc_inner` on Ephemeris, private) — takes normalized flags, returns `Result<[f64; 24], Error>` for planet-like bodies. ECL_NUT and Earth are handled before this is called.\n\n```rust\nfn calc_inner(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<[f64; 24], Error> {\n    let models = &self.config.astro_models;\n    if matches!(body, Body::MeanNode | Body::MeanApogee) {\n        if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {\n            return Ok([0.0; 24]);\n        }\n        return match body {\n            Body::MeanNode => crate::calc::calc_mean_node(jd_tt, flags, models),\n            Body::MeanApogee => crate::calc::calc_mean_apogee(jd_tt, flags, models),\n            _ => unreachable!(),\n        };\n    }\n    if flags.intersects(CalcFlags::HELCTR | CalcFlags::BARYCTR) {\n        return Err(Error::UnsupportedFlags(\n            flags & (CalcFlags::HELCTR | CalcFlags::BARYCTR),\n        ));\n    }\n    let eps_j2000 = crate::obliquity::obliquity(J2000, CalcFlags::empty(), models);\n    match body {\n        Body::Sun => crate::calc::calc_sun(jd_tt, &eps_j2000, flags, models),\n        Body::Moon => crate::calc::calc_moon(jd_tt, &eps_j2000, flags, models),\n        Body::Mercury | ... | Body::Pluto => {\n            crate::calc::calc_planet(jd_tt, body, &eps_j2000, flags, models)\n        }\n        _ => Err(Error::EphemerisNotAvailable { body, source: EphemerisSource::Moshier }),\n    }\n}\n```\n\n**Public calc** — handles ECL_NUT/Earth early returns, then either SPEED3 path or direct path:\n\n```rust\npub fn calc(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {\n    let flags = crate::calc::plaus_iflag(flags);\n    // ... unsupported flags check ...\n    // ... ECL_NUT early return ...\n    // ... Earth early return ...\n\n    if flags.contains(CalcFlags::SPEED3) {\n        return self.calc_speed3(jd_tt, body, flags);\n    }\n\n    let xreturn = self.calc_inner(jd_tt, body, flags)?;\n    Ok(CalcResult {\n        data: crate::calc::extract_output(&xreturn, flags),\n        flags_used: flags,\n    })\n}\n```\n\n### Step 4: Implement SPEED3\n\n`src/context.rs` — private method on Ephemeris:\n\n```rust\nfn calc_speed3(&self, jd_tt: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {\n    let dt = crate::calc::speed3_interval(body);\n    // Inner calls use SPEED (not SPEED3) so they compute position + analytical speed\n    let inner_flags = (flags & !CalcFlags::SPEED3) | CalcFlags::SPEED;\n\n    let x0 = self.calc_inner(jd_tt - dt, body, inner_flags)?;\n    let x2 = self.calc_inner(jd_tt + dt, body, inner_flags)?;\n    let mut x1 = self.calc_inner(jd_tt, body, inner_flags)?;\n\n    crate::calc::denormalize_positions(&mut x0, &x1, &mut x2);\n    crate::calc::calc_speed_3point(&mut x1, &x0, &x2, dt);\n\n    Ok(CalcResult {\n        data: crate::calc::extract_output(&x1, flags | CalcFlags::SPEED),\n        flags_used: flags,\n    })\n}\n```\n\n`src/calc.rs` — three helper functions:\n\n```rust\npub fn speed3_interval(body: Body) -> f64 {\n    match body {\n        Body::Moon => MOON_SPEED_INTV,     // 0.00005\n        Body::OscuApogee | Body::TrueNode => 0.1,  // NODE_CALC_INTV_MOSH\n        _ => PLAN_SPEED_INTV,              // 0.0001\n    }\n}\n\npub fn denormalize_positions(x0: &mut [f64; 24], x1: &[f64; 24], x2: &mut [f64; 24]) {\n    // Unwrap ±180° discontinuities in degree-valued angular slots.\n    // Position slots only (0-2, 6-8, 12-14, 18-20). Harmless for\n    // non-angular values since they never exceed ±180.\n    for i in [0, 1, 2, 6, 7, 8, 12, 13, 14, 18, 19, 20] {\n        if x0[i] - x1[i] < -180.0 { x0[i] += 360.0; }\n        if x0[i] - x1[i] > 180.0 { x0[i] -= 360.0; }\n        if x2[i] - x1[i] < -180.0 { x2[i] += 360.0; }\n        if x2[i] - x1[i] > 180.0 { x2[i] -= 360.0; }\n    }\n}\n\npub fn calc_speed_3point(x1: &mut [f64; 24], x0: &[f64; 24], x2: &[f64; 24], dt: f64) {\n    // Central difference: speed = (x2 - x0) / (2 * dt)\n    // Overwrite speed slots (3-5, 9-11, 15-17, 21-23) in the center result\n    let dt2 = 2.0 * dt;\n    for base in [0, 6, 12, 18] {\n        for j in 0..3 {\n            x1[base + 3 + j] = (x2[base + j] - x0[base + j]) / dt2;\n        }\n    }\n}\n```\n\n### Step 5: Add calc_ut\n\n`src/context.rs` — on Ephemeris impl:\n\n```rust\npub fn calc_ut(&self, jd_ut: f64, body: Body, flags: CalcFlags) -> Result<CalcResult, Error> {\n    let dt = crate::deltat::calc_deltat(jd_ut, &self.config);\n    self.calc(jd_ut + dt, body, flags)\n}\n```\n\n### Step 6: Expand integration golden tests\n\nExpand `tests/c-gen/gen_calc.c` to cover all body types and critical flag combos:\n\n**Bodies** (14 total):\n```c\nstatic int bodies[] = {\n    SE_SUN, SE_MOON, SE_MERCURY, SE_VENUS, SE_MARS, SE_JUPITER,\n    SE_SATURN, SE_URANUS, SE_NEPTUNE, SE_PLUTO,\n    SE_MEAN_NODE, SE_MEAN_APOG, SE_ECL_NUT, SE_EARTH\n};\n```\n\n**Flag combos** (12 total):\n```c\n{ SEFLG_SPEED, \"default\" },\n{ SEFLG_SPEED | SEFLG_J2000, \"J2000\" },\n{ SEFLG_SPEED | SEFLG_NONUT, \"NONUT\" },\n{ SEFLG_SPEED | SEFLG_EQUATORIAL, \"EQUATORIAL\" },\n{ SEFLG_SPEED | SEFLG_XYZ, \"XYZ\" },\n{ SEFLG_SPEED | SEFLG_RADIANS, \"RADIANS\" },\n{ SEFLG_SPEED | SEFLG_TRUEPOS, \"TRUEPOS\" },\n{ SEFLG_SPEED | SEFLG_NOABERR, \"NOABERR\" },\n{ SEFLG_SPEED | SEFLG_NOGDEFL, \"NOGDEFL\" },\n{ SEFLG_SPEED | SEFLG_ICRS, \"ICRS\" },\n{ SEFLG_SPEED3, \"SPEED3\" },\n{ 0, \"no_speed\" },\n```\n\n**Epochs** (7):\n```c\n2451545.0, 2460310.5, 2433282.5, 2488069.5, 2378496.5, 2305447.5, 2159345.5\n```\n\nTotal: 14 bodies × 7 epochs × 12 flag combos = 1176 cases. Some body/flag combos (e.g. Earth with non-zero output flags, ECL_NUT with SPEED3) produce trivial results but are still worth asserting for C parity.\n\nSkip bodies that return errors (TrueNode, OscuApogee, etc.) — the C generator calls `swe_calc` and skips if it returns an error.\n\nUpdate `tests/golden/calc.rs`:\n- Extend `body_from_c_id` for all 14 body IDs\n- Update case count assertion\n- For ECL_NUT cases, adjust the element comparison (4 elements, not 3+speed)\n\n### Step 7: Document caching omission\n\nAdd a doc comment on `Ephemeris::calc` in `context.rs`:\n\n```rust\n/// Compute planetary position.\n///\n/// ## Caching\n///\n/// Unlike the C library, this implementation does not cache computed\n/// positions. Moshier evaluations are sub-microsecond; the cache\n/// overhead (HashMap lookup, key construction) would exceed the\n/// computation cost. Callers needing deduplication for repeated\n/// same-JD queries should cache externally.\n```\n\n### Step 8: Update codebase map\n\n`docs/codebase-map.md` line 16 (context.rs entry): add `calc_ut`\n`docs/codebase-map.md` line 28 (calc.rs entry): add `extract_ecl_nut, denormalize_positions, calc_speed_3point, speed3_interval`\n\n## Acceptance criteria coverage\n\n- [x] \"Ephemeris::calc and calc_ut implemented as &self methods\" → Step 5 (calc_ut), calc already exists\n- [x] \"SPEED3 mode works correctly with body-appropriate intervals\" → Steps 3, 4\n- [x] \"All 10 planets + MeanNode + MeanApogee + Earth + EclNut produce correct positions\" → Step 6 (expanded golden tests covering all 14 body types)\n- [x] \"Integration golden tests: 100+ cases covering all body types and key flag combinations\" → Step 6 (1176 cases, 14 bodies × 7 epochs × 12 flag combos)\n- [x] \"CalcResult.flags_used correctly reflects actual ephemeris and corrections applied\" → Already correct after plaus_iflag normalization; Step 1 adds default SPEED\n- [x] \"docs/codebase-map.md updated with calc.rs and corrections.rs entries\" → Step 8\n- [x] \"Caching omission documented with architectural rationale\" → Step 7\n\n## Key architectural notes\n\n1. **ECL_NUT extraction** (from c-ref-calc.md §2 line 163): C copies 4 elements and converts all 4 with RADIANS. EQUATORIAL/XYZ produce zeros because the 24-element save area is never populated for ECL_NUT. `extract_ecl_nut` encodes this directly rather than routing through the generic `extract_output`.\n\n2. **SPEED3 vs SPEED**: C `swe_calc` handles SPEED3 as a wrapper around `swecalc`. Our equivalent: `calc` wraps `calc_inner`. The inner dispatch always uses SPEED (analytical speed). SPEED3 replaces those speeds with central-difference speeds post-hoc.\n\n3. **denormalize_positions**: Applies ±180° unwrap to all position slots. Cartesian and distance values are in AU (0-50 range) and never trigger the threshold, so applying uniformly is safe and avoids slot-specific logic.\n\n4. **Default SPEED**: C adds SPEED when neither SPEED nor SPEED3 is set. Our existing golden tests pass because the C generator explicitly includes SPEED in \"default\" flags (0x104 = MOSEPH|SPEED). Adding this to plaus_iflag matches C and prevents silent speed omission for callers who forget the flag.",
+  "execution_record": "Plan diverged in three areas:\\n\\n1. **SPEED3 formula**: Plan specified simple central difference `(x2-x0)/(2*dt)`. C actually uses quadratic interpolation: `b=(x2-x0)/2; a=(x2+x0)/2-x1; speed=(2*a+b)/dt` — computing the derivative at t+dt, not center. Required reading C source (sweph.c:5983-6011) under the FP fidelity exception.\\n\\n2. **denormalize_positions scope**: Plan applied to all 12 position slots. C only normalizes indices 0 (ecliptic longitude) and 12 (right ascension). Applying to all slots introduced ~1e-5 errors in SPEED3 speed values.\\n\\n3. **ECL_NUT routing**: Plan kept ECL_NUT as early return in calc(). This broke SPEED3 for ECL_NUT (7 failures) because ECL_NUT bypassed the SPEED3 path. Fix: moved ECL_NUT into calc_inner() returning [f64;24], added extract_for_body() to route ECL_NUT→extract_ecl_nut, others→extract_output.\\n\\n4. **Inner SPEED3 flags**: Plan added SPEED to inner calls. C does NOT add SPEED — inner calls run without velocity. Matched C behavior.\\n\\n5. **SPEED3 epsilon**: Quadratic interpolation amplifies sub-ULP position differences into ~1e-8 speed errors. Used relaxed epsilon (1e-7) for SPEED3 speed slots [3..5], standard 1e-10 for all else.\\n\\nTwo commits: c6c6aa9 (initial calc_ut/calc_inner/SPEED3/ECL_NUT RADIANS), f5893ef (formula+denormalize+routing fixes, expanded to 1176 cases), 863620a (codebase map update).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "863620a"
+    }
+  ],
+  "files": [
+    "src/context.rs",
+    "src/calc.rs",
+    "tests/c-gen/gen_calc_integration.c",
+    "tests/golden/calc_integration.rs",
+    "tests/golden-data/calc_integration.json",
+    "docs/codebase-map.md"
+  ],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782483944895,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 33
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782562475343,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782564291147,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review (codex-companion adversarial-review --base c6c6aa9~1):\n\nVerdict: needs-attention (1 finding)\n\n[high] calc_ut computes Delta T from configured ephemeris source even though calc() forces Moshier via plaus_iflag. If a caller configures EphemerisSource::Jpl, calc_ut uses JPL tidal-acceleration for Delta T while the position is computed with Moshier. Impact: silent UT→TT drift for historical dates.\n\nRecommendation: normalize effective ephemeris before computing Delta T, or make calc_deltat accept the effective flags. Add calc_ut golden cases.\n\nAssessment: valid finding but bounded severity — currently only Moshier is supported and EphemerisConfig defaults to Moshier. The inconsistency would only manifest if a caller explicitly sets a non-Moshier source (which calc() would silently override). Filing as follow-up.",
+      "ts": 1782564579756
+    }
+  ],
+  "created_at": 1782483944895,
+  "updated_at": 1782564291147,
+  "completed_at": 1782564291147,
+  "arc_id": "019efa3b-da1f-77c1-8230-605aa4d4de91",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f0452-b1b5-76e3-b4ab-83e8bd0d2918",
+      "edge_type": "refines",
+      "source": "swisseph-rs/33",
+      "target": "swisseph-rs/6",
+      "note": null,
+      "created_at": 1782483956149
+    },
+    {
+      "id": "019f0452-c8eb-7ec0-b0cc-770207621d8b",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/33",
+      "target": "swisseph-rs/32",
+      "note": "Public entry point wraps the dispatch layer",
+      "created_at": 1782483962091
+    }
+  ]
+}

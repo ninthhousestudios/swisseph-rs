@@ -1,0 +1,95 @@
+{
+  "id": "019f251b-fabd-7ef3-be77-950d1e88b0d8",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/100",
+  "sequence_number": 100,
+  "title": "Asteroid SE1 metadata: MPC-line parsing, config numbers, file loading",
+  "description": "# Asteroid SE1 metadata parsing + config + file loading\n\n## Summary\nParse the MPC-elements line and asteroid name of individual-asteroid `.se1` files into per-file metadata (the stateless replacement for C's `swed.ast_H`/`ast_G`/`ast_diam`/`astnam` globals), add `EphemerisConfig::asteroid_numbers`, and load main-asteroid (`seas*`) + configured numbered-asteroid files in `Ephemeris::new`. Foundation for the whole asteroid arc — no calc dispatch yet.\n\n## Files\n- `src/sweph_file/types.rs` — new `AsteroidMeta` struct; new `asteroid: Option<AsteroidMeta>` field on `FileHeader`.\n- `src/sweph_file/parse.rs` — MPC-line parsing (§3.2) + name extraction (§3.3); fix `detect_file_type` for 6-digit asteroid filenames.\n- `src/sweph_file/mod.rs` — `asteroid_file_candidates` + `open_asteroid_file` helpers; re-export `AsteroidMeta`.\n- `src/config.rs` — `pub asteroid_numbers: Vec<i32>` on `EphemerisConfig` (+ `Default`).\n- `src/context.rs` — `main_asteroid_files: Vec<SwissEphFile>` + `asteroid_files: Vec<SwissEphFile>` fields on `Ephemeris`; loading in `new()`.\n\n## Implementation steps\n1. **`AsteroidMeta`** in `sweph_file/types.rs`: `pub struct AsteroidMeta { pub h: f64, pub g: f64, pub diameter_km: f64, pub name: String }`. Add `pub asteroid: Option<AsteroidMeta>` to `FileHeader` (always `None` for Planet/Moon/MainAsteroid/PlanetaryMoon files — C only populates these for `SEI_FILE_ANY_AST`, see c-ref-asteroid.md §4.3).\n2. **MPC-line parse** in `parse.rs::parse_file`, `FileType::Asteroid` only (PlanetaryMoon keeps its 4-line skip, meta stays `None`). The 4th text line is currently just skipped by the line-counting loop — capture its bytes. Algorithm per c-ref-asteroid.md §3.2 (verified worked example there — Eros line included):\n   - Compute `i`: skip leading spaces, skip ASCII digits, skip exactly one more byte. `i` = byte offset where the name begins.\n   - `h = atof(line[35+i..])`, `g = atof(line[42+i..])`; if `g == 0.0` → `g = 0.15`.\n   - Diameter: exactly the 7 bytes `line[51+i .. 51+i+7]` → atof; if `0.0` → `diameter_km = 1329.0 / 0.15_f64.sqrt() * 10f64.powf(-0.2 * h)`.\n   - Write a small `fn atof_prefix(bytes: &[u8]) -> f64` helper matching C `atof`: skip leading whitespace, parse optional sign + digits + optional fraction (+ optional exponent), stop at first invalid byte, return 0.0 if nothing parses. Guard all slices — if the line is shorter than an offset, treat the field as 0.0.\n3. **Name extraction** per §3.3: build `sastnam` = first `19 + i` bytes of the line. Re-parse the MPC number from it (`j = 4; while sastnam[j] != b' ' && j < 10 { j += 1 }`, number = the first `j` bytes as integer). If number `== ipl[0] - 10000` or `== ipl[0]`: name = up to 19 bytes of `sastnam[j+1..]`, and still skip the 30-byte field (cursor alignment). Else: name = the 30-byte field itself. Right-trim trailing spaces, then truncate at the first `\"  \"` (double space). NOTE the ordering constraint: the name decision needs `ipl[]`, which is read AFTER the text header — keep the raw MPC line bytes until then (the existing `r.skip(30)?` at parse.rs:158-160 is where the 30-byte consumption already happens; replace it with the conditional read).\n4. **`detect_file_type` fix** (mod.rs:58-76): 6-digit asteroid files are named `s136108s.se1` (no `se` prefix — c-ref-asteroid.md §2.3), which currently falls to the error arm. Add: stem starts with `'s'` followed by an ASCII digit → `FileType::Asteroid`. Keep the existing `se` + digit branch.\n5. **Path candidates** in mod.rs, per c-ref-asteroid.md §2.3 + §2.4 (exact 4-attempt retry order): `fn asteroid_file_candidates(dir: &Path, mpc: i32) -> [PathBuf; 4]`. Base name: `format!(\"se{mpc:05}\")` for mpc ≤ 99999, `format!(\"s{mpc:06}\")` for mpc > 99999. Subdir `ast{mpc/1000}`. Order: `astN/{base}.se1`, `astN/{base}s.se1`, `{base}.se1`, `{base}s.se1`. Then `pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error>`: try each candidate with `SwissEphFile::open`, return first success; if all fail return `Error::FileNotFound(<first candidate path>)`.\n6. **Config**: `pub asteroid_numbers: Vec<i32>` on `EphemerisConfig`, default empty. Doc comment: numbered asteroids to preload at construction; `Body::Asteroid(n)` calc requires `n` listed here (stateless design — no lazy file opening; caching/lazy-open is a dispatcher concern, swisseph-rs/6).\n7. **Loading in `Ephemeris::new`** (context.rs:51-106): add the two `Vec<SwissEphFile>` fields. Asteroid files load whenever `config.ephe_path` is `Some(..)` — for ALL THREE ephemeris sources, not just Swiss (C reads asteroids from `.se1` regardless of epheflag, c-ref-asteroid.md §1.4; tasks B depends on this). `main_asteroid_files = open_ephemeris_files(dir, \"seas\")` but TOLERANT of absence: `open_ephemeris_files` errors only if the dir is unreadable; wrap so a missing/empty result yields an empty Vec (users without seas files must still construct fine — the error surfaces at calc time). For each deduplicated `n` in `config.asteroid_numbers`: `open_asteroid_file(dir, n)?` — hard error at construction (explicit config request → fail fast). No `ephe_path` + non-empty `asteroid_numbers` → `Error::FileFormat(\"ephe_path required for asteroid files\")`.\n8. **Tests** (unit, `#[cfg(test)]` in parse.rs/mod.rs):\n   - Synthetic MPC-line fixture: build a minimal fake header? No — too much format scaffolding. Instead test the extracted parsing fn directly: factor the MPC-line → `AsteroidMeta`(minus name) logic into `fn parse_mpc_elements(line: &[u8]) -> (f64, f64, f64)` and unit-test it with the exact Eros line from c-ref-asteroid.md §3.2's worked example: expect `h == 10.38`, `g == 0.15`, `diameter_km == 1329.0 / 0.15_f64.sqrt() * 10f64.powf(-0.2 * 10.38)` (bitwise, same expression).\n   - Integration test (skip-if-absent guard on the path): open `<repo>/ephe/ast0/se00433s.se1` (use `env!(\"CARGO_MANIFEST_DIR\")`): assert `header().file_type == FileType::Asteroid`, `planets()[0].body_id == 10433`, `header().time_range == (2268922.5, 2488522.5)`, meta `h == 10.38`, `g == 0.15`, `name == \"Eros\"`. Same for the 6-digit file `<repo>/ephe/ast136/s136199s.se1` (Eris): opens, `body_id == 146199`... CAREFUL: 10000 + 136199 = 146199. Assert `body_id == 146199` and `name` contains \"Eris\".\n   - `Ephemeris::new` with `ephe_path = <repo>/ephe`, `asteroid_numbers: vec![433]` → Ok; with `vec![99999]` (no such file) → `Err(Error::FileNotFound(..))`.\n\n## C reference\n`docs/c-ref-asteroid.md` §2 (filename generation + retry order), §3 (exact MPC column arithmetic — includes a hex-verified worked example), §4.3 (why metadata must be per-file, not global). `docs/c-ref-se1-file.md` § read_const Steps 4/11 for surrounding context. Do NOT read the C source.\n\n## Golden tests\nNo new golden JSON in this task — the numeric H/G/diam values get golden-verified end-to-end in the pheno task (attr[4]/attr[3] depend on them). Verification here = the unit/integration tests above + the existing suite staying green:\n- `cargo test --test golden se1_header -- --nocapture` passes (existing)\n- `cargo test -p swisseph` (unit tests incl. the new ones) passes\n\n## Acceptance criteria\n- `cargo test` passes (all existing + new unit tests)\n- `cargo test --test golden` passes unchanged\n- `cargo clippy --all-targets` introduces no new warnings\n- `Ephemeris::new` behavior per step 7/8 verified by tests\n\n## Escape hatch\nIf the Eros/Eris integration assertions fail after two debugging attempts (wrong h/g/diam/name/body_id), STOP and report: which field, expected vs actual, and the raw line bytes. Do not guess at column offsets beyond what §3.2 specifies — escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented in a single commit, all 8 steps per plan. No surprises — Eros (se00433s.se1) and Eris (s136199s.se1) integration tests passed on first attempt with correct H/G/name values. The MPC line capture required changing parse_file's text-header loop from a simple skip to index-aware capture (line_idx==3 for Asteroid type). The 30-byte name field skip was restructured from a blanket Asteroid|PlanetaryMoon guard into two branches: Asteroid parses it via extract_asteroid_name, PlanetaryMoon still skips. Clippy caught identical if-block arms in detect_file_type; merged into a single || condition.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "5fcb131"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "asteroids"
+  ],
+  "history": [
+    {
+      "ts": 1783034018493,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 100
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783077678912,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783078003647,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: needs-attention → fixed (2f911dc). Two medium findings: (1) older-format asteroid name fallback was discarded instead of reading the 30-byte field — fixed by passing name_field_30 into extract_asteroid_name; (2) open_asteroid_file retry loop swallowed all errors instead of only FileNotFound — fixed with explicit match arm.",
+      "ts": 1783078343920
+    }
+  ],
+  "created_at": 1783034018493,
+  "updated_at": 1783078003647,
+  "completed_at": 1783078003647,
+  "arc_id": "019f234e-3702-7000-8c49-3da4757e0d6d",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f251e-594d-7d60-821b-91d3c66a9b52",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/101",
+      "target": "swisseph-rs/100",
+      "note": null,
+      "created_at": 1783034173773
+    },
+    {
+      "id": "019f251e-60a6-75f2-be8a-d7585f4d1847",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/103",
+      "target": "swisseph-rs/100",
+      "note": null,
+      "created_at": 1783034175654
+    },
+    {
+      "id": "019f251e-698b-7b63-94af-6e3266decfeb",
+      "edge_type": "refines",
+      "source": "swisseph-rs/100",
+      "target": "swisseph-rs/95",
+      "note": null,
+      "created_at": 1783034177931
+    }
+  ]
+}

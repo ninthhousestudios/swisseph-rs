@@ -1,0 +1,103 @@
+{
+  "id": "019f28f0-a94a-7602-be76-3201317e9447",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/118",
+  "sequence_number": 118,
+  "title": "Polish 5/7: README, LICENSE (AGPL-3.0 + Astrodienst attribution), examples/",
+  "description": "### Summary\nWrite README.md, add the AGPL-3.0 LICENSE with upstream Swiss Ephemeris attribution (Astrodienst AG / Dieter Koch / Alois Treindl), and create 4 runnable examples in examples/. The README's C-comparison section focuses specifically on stateful-C vs stateless-Rust design — that is its centerpiece, not a feature checklist.\n\n### Files\n- `README.md` (new)\n- `LICENSE` (new)\n- `examples/natal.rs`, `examples/rise_set.rs`, `examples/eclipse_search.rs`, `examples/sidereal.rs` (new)\n- `Cargo.toml` — add `readme = \"README.md\"` if Polish-1 deferred it\n\n### Implementation steps\n1. **LICENSE**: full AGPL-3.0 text. Before adding attribution wording, READ `../swisseph/LICENSE` and copy the upstream copyright line exactly as Astrodienst states it. Then add a short preamble block (above or alongside the license text, and mirrored in README §License): this crate is a derivative work / port of the Swiss Ephemeris, Copyright (C) Astrodienst AG, Zurich — authors Dieter Koch and Alois Treindl; the original is dual-licensed (AGPL-3.0 or Astrodienst Professional License); this Rust port is distributed under AGPL-3.0-only. Retain their copyright notice as upstream's license terms require.\n2. **README.md** sections, in order:\n   - What it is: pure-Rust, stateless port of the Swiss Ephemeris (planetary/lunar positions, houses, eclipses, occultations, rise/set, heliacal events, nodes/apsides, orbital elements, crossings, fixed stars). Bit-compatible with upstream C **version 2.10.03** (state this explicitly: the golden-test oracle is the vendored 2.10.03 checkout; upstream v3 is in development and may change quirks we deliberately replicate — see docs/swisseph-c-potential-bugs.md).\n   - Installation + feature flags: `swisseph-files`, `jpl` (default-on; disable both for a zero-file-IO pure-Moshier build), `serde`, `star-tools`. Note which functionality needs ephemeris data files and where to get them.\n   - Quickstart: same shape as the lib.rs doctest (Moshier, no files needed), plus a second snippet with `ephe_path` + Swiss files.\n   - **Design: stateless vs the C original** (the core section — write it well):\n     * How C works: one process-global `swed` struct; configuration via mutating setters (swe_set_ephe_path/swe_set_topo/swe_set_sid_mode/swe_set_tid_acc); cached file handles and last-computed positions; consequences — not thread-safe, one configuration per process, bindings must serialize calls or load one copy of the shared library per thread/isolate (cite the swisseph.dart copy-per-isolate workaround as the motivating case).\n     * How this port works: `EphemerisConfig` is plain data, immutable after `Ephemeris::new`; `Ephemeris` holds only read-only config + read-only mmap'd file handles; every method takes `&self`; the pipeline is pure inputs→math→output; per-call configuration variance goes through explicit `*_with_config` parameters instead of set-then-call; `Ephemeris` is `Send + Sync` — one instance shared across any number of threads with zero synchronization.\n     * What statelessness costs: link the three documented precision boundaries (deflection speed < 0.06 mas; SPEED3 at SE1 file boundaries; Moshier osculating node/apogee speed < 4e-6°/day) — summarize each in one sentence, point to CLAUDE.md <stateless_tolerance> content (lift it into the README or a docs/precision.md reference, whichever reads better).\n   - Numerical fidelity: golden differential testing against the C oracle (thousands of cases, bitwise-exact for pure math, documented epsilons for iterative searches); pointer to docs/golden-testing.md.\n   - API mapping: table of the ~15 most-used C functions → Rust methods (swe_calc_ut → Ephemeris::calc_ut, swe_houses_ex2 → Ephemeris::houses_ex2, ...), plus a line noting every method carries a rustdoc alias for its C name so docs.rs search works with swe_* names.\n   - Not (yet) ported — keep honest, check task status at write time: EP4 compressed ephemeris (swisseph-rs/40), fictitious planets / planet moons (cite current task numbers), swe_set_interpolate_nut (inherently a stateful cache — intentionally unsupported), swe_get_current_file_data / swe_get_library_path (stateful/N-A by design), deprecated swe_fixstar v1 API (v2 ported).\n   - License section per step 1.\n3. **Examples** (each compiles + runs with `cargo run --example X`; Moshier-only so no data files needed, except eclipse_search which should use Moshier too — it works):\n   - `natal.rs`: date/place → all 10 planets' longitudes + Placidus cusps + Asc/MC, formatted with split_degrees.\n   - `rise_set.rs`: today's sunrise/sunset/moonrise/moonset for a location via rise_trans.\n   - `eclipse_search.rs`: next 3 solar + lunar eclipses from a date via sol_eclipse_when_glob/lun_eclipse_when, print type flags + max-eclipse instants as calendar dates.\n   - `sidereal.rs`: same positions tropical vs Lahiri sidereal side by side, printing the ayanamsa value.\n   Keep each under ~70 lines, no clap, hardcoded inputs with a comment saying so.\n\n### C reference\nRead `../swisseph/LICENSE` for the attribution text ONLY. No C source reading.\n\n### Golden tests\nNone. Examples are verified by running them.\n\n### Acceptance criteria\n- `cargo run --example natal`, `rise_set`, `eclipse_search`, `sidereal` all run successfully and print plausible output (sanity-check one value each against a golden-data case or known fact — e.g. J2000 Sun longitude ≈ 280.37°)\n- `cargo test` passes\n- LICENSE contains the exact upstream copyright line from ../swisseph/LICENSE\n- README states the pinned upstream version 2.10.03\n\n### Escape hatch\nNone of this is numerically risky. If an example hits an unexpected Err (e.g. rise_trans edge case), report it as a potential bug finding rather than papering over it with a different input.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward implementation. Two minor compile-time fixes needed: EclipseFlags::ANNULAR_TOTAL → HYBRID (actual bitflag name), and swisseph::date::calc_deltat doesn't exist as a public re-export — used Ephemeris::get_ayanamsa_ut instead. WebFetch rate-limited for AGPL text; fell back to curl. All 4 examples produce correct, verifiable output (Apr 8 2024 total solar eclipse, Lahiri ayanamsa ~23.85° at J2000, etc.). EP4 marked as 'not planned' per Josh's note rather than 'not yet ported'.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "dd55a68"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "polish"
+  ],
+  "history": [
+    {
+      "ts": 1783098288458,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 118
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783207277680,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783207661134,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "License decisions from swisseph-rs/114 codex review:\\n\\n1. License is AGPL-3.0-or-later (not -only). The original Swiss Ephemeris grants \\\"version 3 or any later version\\\" — we match that. Update Cargo.toml license field to \\\"AGPL-3.0-or-later\\\".\\n\\n2. Cannot dual-license without Astrodienst's permission (not seeking it). Only the AGPL path applies.\\n\\n3. LICENSE file must include Astrodienst attribution — they hold copyright on the original C source this port derives from. AGPL §4/§5 require preserving copyright notices. Include something like:\\n   \\\"Based on the Swiss Ephemeris by Astrodienst AG, Zurich.\\n   Original C source copyright © Astrodienst AG, licensed under AGPL-3.0-or-later.\\n   https://www.astro.com/swisseph/\\\"\\n\\n4. make_swe_stars.rs header already says \\\"v3 or later\\\" — consistent with the chosen license, no change needed there.\"",
+      "ts": 1783194581460
+    }
+  ],
+  "created_at": 1783098288458,
+  "updated_at": 1783207661134,
+  "completed_at": 1783207661134,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f2-22ee-7553-a4ea-0f73d86ad1a1",
+      "edge_type": "refines",
+      "source": "swisseph-rs/118",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098385134
+    },
+    {
+      "id": "019f28f2-5f89-74a1-9083-b77e39f7e07c",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/118",
+      "target": "swisseph-rs/114",
+      "note": "README documents the feature flags 114 defines",
+      "created_at": 1783098400649
+    },
+    {
+      "id": "019f28f2-6528-7d51-ac94-1d5cfb968331",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/118",
+      "target": "swisseph-rs/115",
+      "note": "README quickstart mirrors the settled crate-root surface + lib.rs doctest",
+      "created_at": 1783098402088
+    },
+    {
+      "id": "019f28f2-67ed-7592-9db9-1ab095a14884",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/120",
+      "target": "swisseph-rs/118",
+      "note": "bench task appends the Performance section to the README 118 creates",
+      "created_at": 1783098402797
+    }
+  ]
+}

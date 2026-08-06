@@ -1,0 +1,78 @@
+{
+  "id": "019f1511-77a6-7891-bbe1-9cbd15b0d142",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/53",
+  "sequence_number": 53,
+  "title": "SIDEREAL|SPEED3 with ECL_T0/SSY_PLANE returns zero longitude speed",
+  "description": "",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": "Options: (a) in calc_speed3, when SIDEREAL with ECL_T0/SSY bits is set, pass SPEED into inner_flags so x2000 carries real velocity (then projection speed is analytic, consistent with C SPEED3 producing projected-position derivatives is still a mismatch but non-zero/correct order); or (b) reject SIDEREAL|SPEED3 + projection bits with UnsupportedFlags; or (c) project positions only and keep the 3-point speed for the ecliptic longitude. Add a golden test: SIDEREAL|SPEED3 with mode 18 (J2000) for Sun/Moon, compared against C swetest, plus a Rust cross-check that SPEED3 lon_speed ≈ SPEED lon_speed. Verify default-branch SPEED3 still matches.",
+  "execution_record": null,
+  "reproduction": "eph.set_sidereal_mode(18,0,0) (J2000 → ECL_T0); eph.calc(2451545.0, Sun, MOSEPH|SIDEREAL|SPEED3).data[3] == 0.0, whereas MOSEPH|SIDEREAL|SPEED gives 1.019391809. Default-branch modes (e.g. Lahiri) are unaffected.",
+  "root_cause": "In Ephemeris::calc_speed3 (src/context.rs), the 3-point finite-difference speed is computed into x1, then apply_sidereal is called with flags_used|SPEED. For the ECL_T0/SSY_PLANE branches, apply_sidereal does NOT correct x1's speed (as the default branch does via apply_sidereal_default subtracting daya[1]); instead trop_ra2sid_lon/_sosy recompute x1[6..12]/[18..24] from x2000 and OVERWRITE the polar speed. But calc_speed3 runs inner evals with inner_flags = flags & !SPEED3 (no SPEED), and Moshier calc_planet only populates velocity when SPEED is set (src/calc.rs ~line 353 zeros it otherwise). So x2000's velocity is zero on the SPEED3 path, and the projected longitude speed collapses to ~0. The default branch escapes this because it only adjusts the already-correct 3-point speed rather than recomputing from x2000.",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "68d33d1",
+      "label": "swisseph-rs/51 added speed3 sidereal wiring"
+    },
+    {
+      "type": "git:commit",
+      "value": "2f10465",
+      "label": "swisseph-rs/52 added ECL_T0/SSY branches"
+    },
+    {
+      "type": "sutra:symbol",
+      "value": "Ephemeris::calc_speed3"
+    },
+    {
+      "type": "sutra:symbol",
+      "value": "Ephemeris::apply_sidereal"
+    },
+    {
+      "type": "git:commit",
+      "value": "e2e24eb"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782764894118,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 53
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782765433573,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782765441826,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782764894118,
+  "updated_at": 1782765441826,
+  "completed_at": 1782765441826,
+  "edges": []
+}

@@ -1,0 +1,63 @@
+{
+  "id": "019f04e2-7244-7720-a1aa-88d0ddbe8f3e",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/35",
+  "sequence_number": 35,
+  "title": "Process lesson: instrument-first debugging for porting work",
+  "description": "Lesson from swisseph-rs/30-34: three sessions were spent reasoning about C pipeline behavior from a reference doc when the right move was to instrument the C code and diff intermediate values against Rust. Add to CLAUDE.md or docs/golden-testing.md:\n\n1. When a golden test fails for a multi-step pipeline, FIRST write a C program that dumps intermediate values at each stage. Add matching Rust dumps. Diff to find the divergence point. Don't reason about code behavior — measure it.\n\n2. Consider adding intermediate-stage golden tests (e.g., 'after light-time before deflection') to narrow failures faster.\n\n3. When the C ref doc is ambiguous (loop bounds, flag guards, global state reads), instrument the C code rather than reasoning harder about pseudocode.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "HITL",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Added instrument-first debugging protocol to docs/golden-testing.md and C source exception to CLAUDE.md. Stored FP += lesson in sutra. The core insight: planning wasn't the bottleneck — the implementation structure was correct from the start. The 1.5M tokens were burned on hypothesis-driven debugging (reason about C behavior → try a fix → run tests → repeat) when the instrument-and-diff approach found all three root causes in one pass.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "9e089cc"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "process",
+    "porting"
+  ],
+  "history": [
+    {
+      "ts": 1782493377092,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 35
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782500689871,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-human",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782500695953,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782493377092,
+  "updated_at": 1782500695953,
+  "completed_at": 1782500695953,
+  "edges": []
+}

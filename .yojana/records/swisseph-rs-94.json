@@ -1,0 +1,69 @@
+{
+  "id": "019f2338-d898-7b40-b3ff-9c83e9fbaed1",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/94",
+  "sequence_number": 94,
+  "title": "Add dedicated SEFLG_HELCTR golden coverage (calc)",
+  "description": "SEFLG_HELCTR (heliocentric) support was added to the calc pipeline in swisseph-rs/83 (commit af44cdf) — finish_helctr + HELCTR branches in calc_planet/apparent_planet/calc_moon/apparent_moon, across Moshier + Swiss/JPL. It is currently verified ONLY transitively, via the phenomena golden battery (tests/golden/pheno.rs, 120 cases at eps 1e-9, which exercises HELCTR internally for planets + Moon under MOSEPH/SWIEPH incl. TRUEPOS).\n\nAdd a direct golden test that compares `swe_calc(..., SEFLG_HELCTR|SEFLG_XYZ, ...)` (and polar, and with/without J2000/EQUATORIAL/SPEED) against the C library for Sun..Pluto + Moon across the same epochs and the three backends (moshier/sweph/jpl). This gives HELCTR first-class coverage independent of phenomena, and would catch the SPEED path (untested — pheno never sets SEFLG_SPEED on its HELCTR calls) and the JPL backend for the Moon.\n\nNote the literal C quirks documented in the sutra lesson 019f2337 and in docs/codebase-map.md's calc.rs entry: barycentric-vs-heliocentric dt basis for planets, single-pass heliocentric-distance dt for the Moon, original-epoch sun_bary on re-eval. Avoid exact .se1 file-boundary epochs (stateless artifact). BARYCTR remains unimplemented (out of scope).",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Added gen_calc_helctr.c (single generator, all 3 backends via a \"backend\" field), calc_helctr.json (1200 cases), and tests/golden/calc_helctr.rs. Matrix: 3 backends {moshier,sweph,jpl} x Sun..Pluto+Moon (10) x 5 epochs x 8 flag combos ({polar,xyz} x {plain,j2000,equatorial} x {speed,no_speed}, all HELCTR). Positions eps 1e-9, speed eps 1e-7. Epochs reuse the pheno-safe set (avoid sepl_18 boundary 2378496.5). Passed on first run — no fidelity divergence in the previously-untested SPEED path or JPL Moon.\n\nDivergence from plan: the task said \"Sun..Pluto+Moon\" but heliocentric Sun was never actually implemented in /83 (calc_sun/apparent_sun have no HELCTR branch — only calc_planet/apparent_planet/calc_moon/apparent_moon do). C's swe_calc returns all-zero for heliocentric Sun (Sun relative to itself); Rust was returning the geocentric -observer vector. Fixed with a one-line short-circuit in context.rs calc_inner (returns all-zero for Body::Sun+HELCTR), placed alongside the existing MeanNode/MeanApogee HELCTR-zeros branch. Verified load-bearing by the 120 all-zero Sun rows in the passing test. BARYCTR remains out of scope (still errors). Generator binary is gitignored per tests/c-gen/.gitignore (only .c sources tracked).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "f6b99ee"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "follow-up"
+  ],
+  "history": [
+    {
+      "ts": 1783002355864,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 94
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783002534295,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783002932030,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review): approve. Verified independently — golden_calc_helctr (1200 cases: Sun..Pluto+Moon × 5 epochs × 8 flag combos × 3 backends) passes, with JPL rows genuinely executing (ephe/de441.eph present, 400 jpl cases incl 40 JPL-Moon). clippy clean. The heliocentric-Sun-zeros short-circuit in calc_inner is correct (Sun relative to itself = origin, invariant under bias/prec/nut) and gives HELCTR first-class coverage independent of phenomena, including the SPEED path pheno never exercised. Minor/non-blocking: the Sun short-circuit returns `flags` as flags_used unmasked, and calc_helctr.rs asserts only output[0..6] (not flags_used), so Sun-HELCTR flags_used is unasserted — astronomically irrelevant.",
+      "ts": 1783003380057
+    }
+  ],
+  "created_at": 1783002355864,
+  "updated_at": 1783002932030,
+  "completed_at": 1783002932030,
+  "edges": []
+}

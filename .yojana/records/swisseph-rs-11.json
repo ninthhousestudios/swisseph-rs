@@ -1,0 +1,132 @@
+{
+  "id": "019efa44-1656-7193-bef6-86e05c259750",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/11",
+  "sequence_number": 11,
+  "title": "Plan: House systems",
+  "description": "Port swehouse.c (~3143 lines). 24 house systems.\n\n## Core trig (catalogue-internal §14.1)\n- `Asc1(x, f, sine, cose)` — quadrant-aware wrapper normalizing RA to [0°,90°], delegates to Asc2()\n- `Asc2(x, f, sine, cose)` — oblique spherical trig: cot(λ) = (−tan(f)×sin(ε) + cos(ε)×cos(x))/sin(x)\n- `AscDash(x, f, sine, cose)` — derivative dλ/dt for cusp speed\n\n## Ascendant & MC\n- MC: tan(MC) = tan(ARMC)/cos(ε)\n- Ascendant: Asc1(ARMC + 90°, lat, sin(ε), cos(ε))\n\n## House systems — key algorithms (catalogue-internal §14.3)\n- **Placidus** (default): semi-arc division, iterative Newton-Raphson (max 100 iter). Fails at polar latitudes.\n- **Koch**: single pole height, interpolation between meridian and horizon\n- **Regiomontanus**: fixed pole heights, no iteration\n- **Campanus**: prime vertical pole heights\n- **Topocentric/Polich-Page**: fh = arctan(tan(lat)/3), arctan(2tan(lat)/3)\n- **Alcabitius**: semi-diurnal/nocturnal arc division\n- **Equal/Whole Sign/Porphyry**: simple arithmetic\n- **Gauquelin 36**: Placidus-like iteration for 36 division points\n- **Meridian/Axial**: equatorial intervals projected through ecliptic pole\n\n## Special points (catalogue-internal §14.4)\nVertex, Equatorial Ascendant, Co-Ascendant (Koch/Munkasey), Polar Ascendant\n\n## Speed computation\nMost: analytical via AscDash(). Complex systems (Sunshine, APC, Pullen): finite differences.\n\n## Rust design\n```rust\npub fn compute_houses(armc: f64, lat: f64, obliquity: f64, system: HouseSystem) -> HouseResult {\n    // HouseResult { cusps: [f64; 13], ascmc: AscMc, cusp_speeds: Option<[f64; 13]>, ... }\n}\n```\nStandalone function — doesn't need Ephemeris context (just obliquity + sidereal time, which can be pre-computed). The `swe_houses()` wrapper on Ephemeris computes those from tjd.\n\n## Testing\n- setest/suite_06_houses.c\n- Golden data: houses for various locations (London, Sydney, near-polar) × all 24 systems\n- Edge case: polar latitudes where Placidus/Koch fail\n\n## C source reference\n- swehouse.c:1-3143 — all house systems, Asc1/Asc2/AscDash, special points\n- swehouse.h:1-98 — declarations\n\n## Dependencies\n- Phase 3 (sidereal time, obliquity), Phase 0 (HouseSystem enum)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Decomposed into 9 implement sub-tasks (swisseph-rs/59–67) on arc ~11, phase=implement, each ready-for-agent/AFK with full Sonnet-executable specs. Produced docs/c-ref-houses.md (1391 lines) covering all of swehouse.c.\n\nCorrections to the original (pre-architecture) description:\n- **Stateless / no global state**: the original sketch `compute_houses(armc, lat, obliquity, system)` is refined into a pure stateless `houses::houses_armc(armc, geolat, eps, hsys, sundec: Option<f64>) -> Result<HouseResult>` PLUS `Ephemeris::houses/houses_ex/houses_ex2` wrapper methods (date→armc/eps/sun-dec). The C `static double saved_sundec` cache and the `ascmc[9]==99` sentinel are explicitly NOT replicated — Sun declination is threaded through as an explicit required param for Sunshine.\n- **Speed mechanism is non-uniform** (original said \"most analytical, complex=finite-diff\"). Actual: special-point speeds (ac/mc/armc/vertex/equasc/coasc1/coasc2/polasc) are ALWAYS analytical (AscDash). Cusp speeds split 3 ways: (a) analytical-inline for P/G/C/H/J/K/R/T + linear-rate for O + ac/mc-copy for A/E/V/D; (b) driver-level central finite-difference (1-sec armc step) for I/i/L/Q/S/X/M/F/Y (the `do_interpol` flag); (c) NEITHER — B/N/U/W leave most cusp_speeds at 0 or a stale ac/mc value, which must be replicated bit-exactly, not \"fixed\". This drove the slicing.\n- **Dependencies already satisfied**: HouseSystem enum (25 variants incl. SunshineAlt) already exists in types.rs; `armc_to_mc` already ported in math.rs (fixstar work); sidereal_time + obliquity + nutation + ayanamsa + calc_ut all available — so the original \"Phase 0/Phase 3\" deps are met.\n- **swe_gauquelin_sector** lives in swecl.c (not swehouse.c). imeth 0/1 (geometric, via house_pos 'G') is in scope (sub-task 66); imeth 2–5 (rise/set) deferred — depend on the not-yet-ported rise_trans module.\n- **Sidereal houses**: traditional subtract-ayanamsa mode in the wrapper task (65); the two geometric projection modes (ECL_T0, SSY_PLANE) split into sub-task 67.\n- HouseResult uses `cusps: [f64;37]` (C-faithful; Gauquelin fills [1..=36], others [1..=12]).\n\nSlicing: 59 scaffold+core-trig+driver+angles+special-points+Equal-family; 60 O/S/X/M/F (+Porphyry fallback helper, first finite-diff path); 61 R/C/T/H/J; 62 P/K/G (Newton); 63 U/Y/L/Q; 64 Sunshine I/i; 65 Ephemeris UT wrappers + trad sidereal; 66 house_pos + gauquelin_sector(0/1); 67 sidereal ECL_T0/SSY_PLANE. Each sub-task targets ~300–500 Rust lines, names every file/fn, cites c-ref-houses.md sections, and includes a golden gen_houses.c key + Rust test + 1e-8 escape hatch. Arc ~11 advanced study→implement.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315226710,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 11
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782845131200,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782845148015,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315226710,
+  "updated_at": 1782845148015,
+  "completed_at": 1782845148015,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f19d8-8274-7ab0-a4f7-21378234072c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/59",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845047412
+    },
+    {
+      "id": "019f19d8-8630-75f0-b373-449155b41279",
+      "edge_type": "refines",
+      "source": "swisseph-rs/60",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845048368
+    },
+    {
+      "id": "019f19d8-8c3c-76e0-9a08-5f64cd724cd1",
+      "edge_type": "refines",
+      "source": "swisseph-rs/61",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845049916
+    },
+    {
+      "id": "019f19d8-8fc8-7911-9e71-dca028fdc4de",
+      "edge_type": "refines",
+      "source": "swisseph-rs/62",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845050824
+    },
+    {
+      "id": "019f19d8-9377-7b23-a2c9-72919a7ca717",
+      "edge_type": "refines",
+      "source": "swisseph-rs/63",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845051767
+    },
+    {
+      "id": "019f19d8-9dcd-7d62-9e87-ef9f40f48649",
+      "edge_type": "refines",
+      "source": "swisseph-rs/64",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845054413
+    },
+    {
+      "id": "019f19d8-9e0c-7f91-b8fb-1b55727faa36",
+      "edge_type": "refines",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845054476
+    },
+    {
+      "id": "019f19d8-9e44-7070-a4d4-f38269d42a3f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845054532
+    },
+    {
+      "id": "019f19d8-a1ca-7f90-acc7-f6e7faf1ac93",
+      "edge_type": "refines",
+      "source": "swisseph-rs/67",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845055434
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "id": "019efa45-792b-7c61-975c-a5a9d82d7bd4",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/15",
+  "sequence_number": 15,
+  "title": "Plan: Public API, docs, feature flags, benchmarks",
+  "description": "Final polish pass once all functionality is ported.\n\n## Public API surface\n- Clean `pub use` re-exports in lib.rs — users should only need `use swisseph::*` or `use swisseph::{Ephemeris, Body, Flags}`\n- Builder pattern for Ephemeris:\n  ```rust\n  let eph = Ephemeris::builder()\n      .ephe_path(\"./ephe\")\n      .sidereal(SiderealMode::Lahiri)\n      .topo(lon, lat, alt)\n      .build()?;\n  ```\n- Method naming: idiomatic Rust (snake_case, no `swe_` prefix), but consider a `compat` module with C-like names for users migrating\n\n## Cargo feature flags\n- `moshier` — always on (default feature), no file I/O\n- `swisseph-files` — .se1 file backend\n- `jpl` — JPL DE backend\n- `serde` — Serialize/Deserialize for result types\n\n## Documentation\n- Doc comments on all public types, methods, enums\n- Module-level docs explaining each domain\n- README with: what it is, installation, quick example, feature flags, comparison to C version\n- README/ledger preamble: state WHICH upstream C version the port is bit-compatible with (the golden oracle is pinned to the vendored `../swisseph` checkout; upstream v3 is in development and may fix quirks we deliberately replicate — see docs/swisseph-c-potential-bugs.md)\n- Examples in `examples/` directory\n\n## Benchmarks\n- `criterion` benchmarks comparing Rust vs C for: calc() all planets, house computation, eclipse search\n- Profile for hot spots (Chebyshev evaluation, nutation series, Moshier series)\n\n## Testing\n- Full integration test suite running all setest cases\n- CI: test with each feature flag combination\n- Numerical tolerance documentation\n\n## FFI / Dart-isolates considerations (added 2026-07-01, Phase 12 planning)\nThe strategic consumer of this crate is a Dart binding (successor to swisseph.dart, which\nbinds the C lib and must copy the .so per isolate because of C's global state). The public\nAPI design must not foreclose this. Requirements:\n\n1. **`Ephemeris: Send + Sync`, pinned by a compile-time assertion test** — e.g.\n   `fn assert_send_sync<T: Send + Sync>() { }; assert_send_sync::<Ephemeris>();` in a unit\n   test. This is the entire premise of the isolates story (one Rust-owned instance, raw\n   opaque handle shared across every isolate, concurrent calc() with zero synchronization —\n   vs. the C binding's copy-per-isolate). Mmap-backed SE1/JPL files are read-only after\n   open so this should already hold; verify, don't assume. Any future feature that would\n   add interior mutability to Ephemeris is an API-breaking decision, not an implementation\n   detail.\n2. **Plan the C-ABI flattening layer** — `Result`/enums/slices/`&str` don't cross FFI.\n   Decide here (not improvise later): flutter_rust_bridge vs. hand-rolled cbindgen +\n   `#[repr(C)]` mirror types + error-code + out-param convention. Whichever is chosen, the\n   idiomatic Rust API stays primary and the FFI layer is a separate crate/module\n   (`swisseph-ffi` or `ffi` feature) so cdylib build config doesn't pollute the lib crate.\n3. **Ownership/handle model for Dart**: construction returns an opaque `*const Ephemeris`\n   (Box::into_raw), isolates share the pointer value (Dart can send ints/pointers across\n   isolates even though it can't send objects), destruction via an explicit free fn +\n   Dart `NativeFinalizer`. Config is immutable after build — per-call overrides (the\n   existing `calc_with_config` pattern) map cleanly to FFI params, which is exactly why the\n   stateless design was chosen; keep that pattern rather than adding set_* mutators for\n   FFI convenience.\n4. **Capstone benchmark**: N isolates (or N Rust threads as a proxy) hammering `calc()` on\n   one shared Ephemeris vs. the C-binding copy-per-isolate equivalent — the demo that\n   proves the stateless design earned its keep. Belongs with the criterion suite.\n\n## Dependencies\n- All prior phases complete",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [
+    "No builder pattern for Ephemeris — the original description predates the finalized architecture invariant (construction via EphemerisConfig + Default). Rejected alternative: adding a builder anyway as sugar; rejected because it duplicates a config struct that is already Default-driven and would create a second construction path the FFI layer must mirror.",
+    "No compat module with C-style names. C-name discoverability handled by #[doc(alias = \"swe_*\")] on every Ephemeris method (rustdoc search finds them) + a README mapping table. Rejected alternative: a compat module re-exporting snake_case swe_* wrappers; rejected as permanent API surface bloat for a one-time migration convenience.",
+    "FFI approach decided: hand-rolled C ABI + cbindgen header in a future separate swisseph-ffi cdylib crate; opaque Box::into_raw handle, i32 error codes + out-params, no set_* mutators (per-call config overrides map to the existing *_with_config pattern). Rejected alternative: flutter_rust_bridge — the API is flat numeric data with no async/streams, the Dart consumer already speaks dart:ffi against the C ABI, and the isolate-shared raw-pointer handle model needs a hand-auditable ABI, not generated glue. Recorded durably in Polish 6/7 (docs/ffi-design.md).",
+    "Feature-flag layout: no 'moshier' feature — Moshier is unconditional code with zero deps; features gate the file backends (swisseph-files, jpl, both default-on so default builds keep the full golden suite), serde, and star-tools (making the bin-only clap/ureq deps optional). --no-default-features yields a bitflags-only, wasm-friendly build.",
+    "'Full integration suite running all setest cases' descoped: the golden differential batteries (thousands of cases across ~30 test files) already exceed setest's coverage for the ported surface; CI-per-feature-combo becomes tools/test-features.sh (no hosted CI assumed)."
+  ],
+  "implementation_plan": null,
+  "execution_record": "Planning task executed as decomposition; no implementation. Deliverables: 7 polish sub-tasks swisseph-rs/114-120 (refines->15, arc implement phase), 1 HITL scope decision 121, 3 gap-fill implementation tasks 122-124 (motivated_by->15), 2 new C ref docs (c-ref-fictitious.md, c-ref-utilities.md) written by dedicated sonnet agents.\n\nChanges from the original description: (1) Builder pattern dropped, (2) compat module replaced by doc aliases, (3) feature list corrected (no moshier feature), (4) setest suite descoped — see decisions. (5) FFI layer: decision recorded, implementation deferred to the Dart-binding project; this arc only pins Send+Sync + writes docs/ffi-design.md (task 119). (6) Added per Josh's notes: LICENSE task carries AGPL-3.0 with Astrodienst/Koch/Treindl attribution copied verbatim from ../swisseph/LICENSE (118); README C-comparison section centers on stateful-C vs stateless-Rust design (118).\n\nGap sweep results (Josh note 1, the asteroid-class check): fictitious planets (Cupido..Waldemath) were never planned — Body::Fictitious exists but has no calc dispatch; now tasks 122/123 with a fresh ref doc. The ref-doc agent surfaced two porting hazards recorded in the task descriptions: C's pow(x, 1/3) integer-division bug in the high-eccentricity Kepler guess (Nibiru-only branch, must be reproduced not fixed) and the built-in-table-vs-seorbel.txt Kronos element discrepancy. Planet moons (sat/*.se1) + the dead Body::Comet variant → HITL decision 121 (port / descope / remove variants pre-1.0). Missing utilities (time_equ, lmt/lat, name lookups, delta_t_userdef, centisecond formatters) → task 124. Intentionally unsupported (stateless design): swe_set_interpolate_nut, swe_get_current_file_data, swe_get_library_path — README task documents them. EP4 remains swisseph-rs/40 (pre-existing, may stay descoped).\n\nSequencing: 114 (features) is blocked on in-progress 112 (same dispatch code); 115→114, 116→115, 117→116 serialize the lib.rs/doc chain; 118 (README) after 114+115; 120 (benches) last, appends README perf section; 119 (Send+Sync/FFI doc), 121-124 are independent of the chain. Upstream pin for README: C 2.10.03 (from ../swisseph/sweph.h SE_VERSION).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "doc:path",
+      "value": "docs/c-ref-fictitious.md",
+      "label": "ref doc produced for the fictitious-planets gap"
+    },
+    {
+      "type": "doc:path",
+      "value": "docs/c-ref-utilities.md",
+      "label": "ref doc produced for the utilities gap"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315317547,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 15
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783098738201,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783098759164,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315317547,
+  "updated_at": 1783098759164,
+  "completed_at": 1783098759164,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f234e-a763-7f51-a44d-b265d51fecae",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/15",
+      "target": "swisseph-rs/95",
+      "note": "Public API / docs / feature flags must not finalize before asteroid support exists (asteroid arc ~16 blocks the wrap-up).",
+      "created_at": 1783003785059
+    },
+    {
+      "id": "019f28f2-122e-7720-8dfd-e19f4aacd406",
+      "edge_type": "refines",
+      "source": "swisseph-rs/114",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098380846
+    },
+    {
+      "id": "019f28f2-160a-7770-b151-8e706eb05363",
+      "edge_type": "refines",
+      "source": "swisseph-rs/115",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098381834
+    },
+    {
+      "id": "019f28f2-19f3-7a51-b342-90d2a47e8773",
+      "edge_type": "refines",
+      "source": "swisseph-rs/116",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098382835
+    },
+    {
+      "id": "019f28f2-1d47-7012-80f5-d7fb9f56593c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/117",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098383687
+    },
+    {
+      "id": "019f28f2-22ee-7553-a4ea-0f73d86ad1a1",
+      "edge_type": "refines",
+      "source": "swisseph-rs/118",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098385134
+    },
+    {
+      "id": "019f28f2-26be-7270-ad2a-d220a3c9c9c4",
+      "edge_type": "refines",
+      "source": "swisseph-rs/119",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098386110
+    },
+    {
+      "id": "019f28f2-2a89-7b52-ad8f-862e960c0a74",
+      "edge_type": "refines",
+      "source": "swisseph-rs/120",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098387081
+    },
+    {
+      "id": "019f28f2-2c71-77a3-817f-22a31db8e558",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/121",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098387569
+    },
+    {
+      "id": "019f28f6-ec79-7241-9a7c-5fce087716fb",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/122",
+      "target": "swisseph-rs/15",
+      "note": "gap found during the 15 planning sweep (Body::Fictitious had no dispatch)",
+      "created_at": 1783098698873
+    },
+    {
+      "id": "019f28f6-f06a-71a3-97b6-127b5286eb9d",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/123",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098699882
+    },
+    {
+      "id": "019f28f6-face-7130-980e-e0232e61e058",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/124",
+      "target": "swisseph-rs/15",
+      "note": "gap found during the 15 planning sweep (unported utility functions)",
+      "created_at": 1783098702542
+    }
+  ]
+}

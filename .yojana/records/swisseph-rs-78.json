@@ -1,0 +1,104 @@
+{
+  "id": "019f1e19-ecf2-72e3-9f4d-31f20f16693d",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/78",
+  "sequence_number": 78,
+  "title": "RSE 11/12: Occultation where + global search (swe_lun_occult_where + swe_lun_occult_when_glob)",
+  "description": "### Summary\nPort the Moon-occults-a-planet/star functions `swe_lun_occult_where` (occultation shadow geometry, delegates to `eclipse_where` with the occulted body) and `swe_lun_occult_when_glob` (global search for the next/previous occultation). Exposes `Ephemeris::lun_occult_where` and `lun_occult_when_glob` (`&self`).\n\nDepends on **RSE 5** (`eclipse_where`, `calc_planet_star`, types — occultation reuses them with `ipl`/`starname` = occulted body) and **RSE 7** (the solar `when_glob` established the search/refinement scaffolding this parallels).\n\n### Files\n- `src/eclipse.rs` — add the body-radius resolution helper (point source for a star, apparent disc for a planet — flagged in the doc as duplicated 4× in C; consolidate into ONE shared `fn source_radius(&self, ipl, starname, ...)`), `lun_occult_where`, `OccultGlobal` result, `lun_occult_when_glob`.\n- `src/context.rs` — `pub fn lun_occult_where(&self, tjd_ut, body: Body, starname: Option<&str>, ifl: CalcFlags) -> Result<EclipseWhere, Error>` and `pub fn lun_occult_when_glob(&self, tjd_start, body: Body, starname: Option<&str>, ifl: CalcFlags, ifltype: EclipseFlags, backward: bool) -> Result<OccultGlobal, Error>`.\n- `src/lib.rs` — re-export `OccultGlobal`.\n- `tests/c-gen/gen_eclipse.c` — add keys `occ_where` + `occ_when_glob`; regenerate `eclipse.json`.\n- `tests/golden/eclipse.rs` — add `#[test] occ_where` + `#[test] occ_when_glob`.\n\n### Implementation steps\nRead `docs/c-ref-occultation.md` §1 (`swe_lun_occult_where`), §2 (`swe_lun_occult_when_glob`), and cross-referenced sections of `docs/c-ref-eclipse-solar.md` (§3 eclipse_where, §5 when_glob, §7 find helpers).\n\n1. **Body-radius resolution** (occultation.md §1 \"Radius handling\"): a fixed star is a POINT source (radius 0); a planet has an apparent disc from the `pla_diam[]` table (values in the doc). Consolidate the C's 4×-duplicated branch into one helper. STATELESS NOTE: C reads `swed.ast_diam` global for asteroid diameters — thread it explicitly or take the disc from a constant table; the doc flags this.\n2. **`lun_occult_where`** (§1): thin wrapper over `eclipse_where` (RSE 5) with the occulted body = `body`/`starname` instead of the Sun; asteroid-134340→Pluto aliasing; `SE_ECL_ONE_TRY` behaviour. Returns `EclipseWhere` (same struct as solar).\n3. **`OccultGlobal`** result: `tret[0..10]` per §2; type bitmask.\n4. **`lun_occult_when_glob`** (§2): the search DELTA from solar `when_glob` — rough-conjunction `dl/13` bracketing (the Moon's motion dominates; step in §2), latitude-gate rejection, `find_maximum` refinement with `dtdiv=3` (NOT solar's 4), ipl-dependent annular-type validity/rejection, `starname` vs `ipl` selecting the fixed-star vs planet path via `calc_planet_star`. `backward` flips direction.\n\n### C reference\n`docs/c-ref-occultation.md` §1, §2; `docs/c-ref-eclipse-solar.md` §3, §5, §7 (shared machinery).\n\n### Golden tests\n- **C harness** add key `occ_where`: for a known occultation, e.g. Moon occulting Venus/Mars/Aldebaran — `tjd_ut ∈ {2458800.5}`, `(ipl, starname) ∈ {(SE_VENUS,NULL), (SE_MARS,NULL), (-1,\"Aldebaran\")}` → `swe_lun_occult_where(tjd_ut, ipl, starname, SEFLG_MOSEPH, geopos, attr, serr)`. Emit `{tjd_ut, ipl, starname, retval, geopos:[0..10], attr:[0..10]}`. Add key `occ_when_glob`: `tjd_start ∈ {2451545.0}`, `(ipl,starname)` same set, `backward ∈ {0,1}`, `ifltype=0` → `swe_lun_occult_when_glob(...)`. Emit `{tjd_start, ipl, starname, backward, retval, tret:[0..10]}`. Regenerate `eclipse.json`.\n- **Rust tests** `#[test] occ_where` + `#[test] occ_when_glob`: assert `geopos`/`attr`/`tret` via `assert_f64_eps(.., 1e-5)` (`occ_where` geometry 1e-7); assert returned flags == `retval`. Star cases require the fixstar catalog loaded (same setup as `tests/golden/fixstar.rs`).\n- `cargo test --test golden eclipse::occ_where -- --nocapture` and `eclipse::occ_when_glob` pass.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::occ_where` and `eclipse::occ_when_glob` pass.\n\n### Escape hatch\nIf results fail > 1e-4 day (times) / 1e-6 (where) after two attempts, STOP and report failing `(ipl/starname, epoch, backward)` + diverging slot. Read `swecl.c:606–630` and `1572–1984` directly. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented per the task's embedded plan (no separate vidhi-plan needed) using docs/c-ref-occultation.md + docs/c-ref-eclipse-solar.md. Reused eclipse_where/calc_planet_star/body_radius_au unchanged from the solar port.\n\nDivergences found by reading swecl.c directly (the ref doc's abstraction didn't pin these):\n- occultation's `dtb` for contact-time secant refinement is NOT divided by 3, unlike solar's `dtb = tenmin/3.0` (swecl.c:1843 vs 1386) — literal C asymmetry, preserved.\n- occultation's ifltype bare-type expansion (`ifltype & (TOTAL|ANNULAR|ANNULAR_TOTAL)`) uses bitwise-AND, unlike solar's exact `==` equality test at the same point (swecl.c:1640 vs 1234) — also preserved as a literal divergence.\n- occultation lacks solar's second initial validation check (`ANNULAR_TOTAL|NONCENTRAL` exact-match error) entirely.\n- C's `eclipse_where` is called twice with identical arguments to confirm-then-classify (unlike solar, which uses eclipse_where+eclipse_how, two different functions); since eclipse_where is pure and `tjd` doesn't change between the calls, collapsed into one reused result — this also makes C's dead \"extremely small percentage\" fallback branch provably unreachable.\n- Did not replicate C's `if (ipl<0) ipl=0` raw-int sentinel clamp for star-only calls; used `starname` presence directly to gate the Sun-only annular/hybrid validity check instead, since Body/Option<&str> already carries that distinction cleanly.\n- No SE_ECL_ONE_TRY support exposed, matching the precedent already set by sol_eclipse_when_glob's bool-only backward param.\n\ngen_eclipse.c required two fixes beyond the new keys: (1) swe_fixstar (reached via calc_planet_star) strcpy()s into its starname argument in place — passing a string-literal pointer segfaulted; fixed by copying into a local char[AS_MAXCH] buffer. (2) swe_set_ephe_path(NULL) doesn't find sefstars.txt; changed to an explicit \"../swisseph/ephe\" path (existing sol/lun keys use MOSEPH only so this didn't matter before). Both golden tests (occ_where, occ_when_glob) passed on the first Rust implementation attempt once the C generator itself was fixed — no escape-hatch escalation needed.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "be39656"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916443378,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 78
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782994667822,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782994676822,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review): approve with notes. Faithful, exhaustively-annotated port; occ_where/occ_when_glob golden pass at 1e-7/1e-5, clippy clean. Fixed a dead redundant angle-wrap in the transit secant loop (commit after 2a26a41). Main note: the ifltype filter/validation + asteroid-Pluto aliasing were untested (all golden used ifltype=0) — filed + implemented as swisseph-rs/92, which added coverage and, notably, confirmed the port was CORRECT (the one failure it surfaced was a bug in the new test's golden generator, not in this code).",
+      "ts": 1782999073584
+    }
+  ],
+  "created_at": 1782916443378,
+  "updated_at": 1782994676822,
+  "completed_at": 1782994676822,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-be9e-7843-b8a4-2201d370a53d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/78",
+      "target": "swisseph-rs/74",
+      "note": null,
+      "created_at": 1782916497054
+    },
+    {
+      "id": "019f1e1a-c3fc-75f2-8557-7fb8200be911",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/78",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916498428
+    },
+    {
+      "id": "019f1e1a-cbb2-7930-8187-03e31405436f",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/78",
+      "note": null,
+      "created_at": 1782916500402
+    },
+    {
+      "id": "019f1e1b-0e08-73d2-8f30-5d3e4743ce24",
+      "edge_type": "refines",
+      "source": "swisseph-rs/78",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916517384
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "id": "019f28ef-37c5-7463-a8a2-2ad72d26fe89",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/115",
+  "sequence_number": 115,
+  "title": "Polish 2/7: Curated crate-root API surface + crate-level docs in lib.rs",
+  "description": "### Summary\nMake `use swisseph::{Ephemeris, Body, CalcFlags, ...}` sufficient for all mainline usage: audit and complete the crate-root re-exports, and write the crate-level rustdoc (overview + quickstart doctest) in lib.rs. DESIGN DECISIONS ALREADY MADE — do not revisit: NO builder pattern (architecture invariant: construction via `EphemerisConfig` + `Default`); NO `compat` module with C names (C-name discoverability is handled by `#[doc(alias)]` attributes added in the Polish-3 doc sweep, plus a mapping table in the README task).\n\n### Files\n- `src/lib.rs` — crate docs (`//!`), expanded re-exports\n- possibly `src/types.rs` / module files — visibility fixes only if the audit finds a public-signature type that isn't `pub` at its path (unlikely)\n\n### Implementation steps\n1. **Audit rule**: every type appearing in (a) a `pub fn` signature on `Ephemeris` (src/context.rs — there are ~50 methods), (b) a public field of an already re-exported struct, or (c) a `pub fn` signature in the application modules' free functions that users realistically call (houses::house_pos path goes through Ephemeris; math/date free functions count) MUST be importable from the crate root.\n2. Known missing from lib.rs today — re-export at minimum: `types::{AstroModels, PrecessionModel, NutationModel, DeltaTModel, SiderealTimeModel, BiasModel, JplHorMode, JplHoraMode}`, `azalt::{RefracDir, AzAltDir, HorDir}` (and any refraction result struct), `heliacal::HeliacalEventType`, `flags::{SiderealBits, SplitDegFlags}` (confirm exact names/locations via grep). Complete the list from the step-1 audit — do not treat this enumeration as exhaustive.\n3. **Crate-level docs** at the top of lib.rs: what the crate is (pure-Rust stateless port of the Swiss Ephemeris 2.10.03), 10-line quickstart as a compiled doctest (Moshier backend, no data files: build default `EphemerisConfig`, `Ephemeris::new`, `calc_ut` the Sun, print longitude), a short section on the stateless design (config immutable after construction, `&self` everywhere, `Send + Sync`, per-call `*_with_config` overrides), and a module guide: one line per public module distinguishing the primary API (`context`/`Ephemeris`) from domain modules (houses, eclipse, heliacal, ...) and low-level internals (moshier, sweph_file, jpl, precession, nutation — \"exposed for tests and advanced use; prefer `Ephemeris` methods\").\n4. Keep the re-export blocks grouped and alphabetized as they are now (lib.rs lines 34–54 pattern). If Polish-1 (feature flags) already landed, respect its cfg attributes on `pub mod sweph_file`/`pub mod jpl`; the quickstart doctest must compile with `--no-default-features` too (Moshier-only — it will, if it only uses default config).\n\n### C reference\nNone.\n\n### Golden tests\nNone — API surface only. Doctest is the verification.\n\n### Acceptance criteria\n- `cargo test --doc` passes (quickstart doctest runs)\n- `cargo test` passes (no regressions)\n- A scratch file importing every audited type via `use swisseph::{...}` compiles (do this as a doctest or `tests/api_surface.rs` with a single `#[test] fn imports_compile() {}` — prefer the test file so it's permanent)\n- `cargo doc --no-deps` builds without warnings\n\n### Escape hatch\nIf the audit finds a type that can't be cleanly re-exported (name collision between modules, or a type that arguably shouldn't be public), STOP and report the specific type and the collision rather than renaming public items on your own judgment.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Audited all pub fn signatures on Ephemeris (~50 methods), all public fields of re-exported structs (EphemerisConfig, AstroModels), and public free functions in application modules (azalt, math, date, format). Found 16 missing re-exports: HeliacalFlags, HeliacalEventType, AzAltDir, HorDir, RefracDir, SplitDegFlags, SiderealBits, AstroModels, PrecessionModel, NutationModel, DeltaTModel, SiderealTimeModel, BiasModel, JplHorMode, JplHoraMode, FictitiousBody. NodeBits was defined but unused in any public surface — skipped. Wrote crate-level docs with quickstart doctest, stateless design section, module guide table. Fixed one `format` module link ambiguity (mod@format). Created tests/api_surface.rs as permanent compilation test. All verification passed: cargo test (178 tests), cargo test --doc, cargo test --no-default-features, cargo doc --no-deps (0 new warnings).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "e34d7d3"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "polish"
+  ],
+  "history": [
+    {
+      "ts": 1783098193861,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 115
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783204084013,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783204420282,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes (both findings fixed in 4c98b0a).\\n\\n1. [medium] Docs overstated per-call overrides — mentioned `*_with_config` internal variants as user-facing. Fixed: clarified only ephemeris source is per-call overridable via CalcFlags.\\n2. [medium] Module guide omitted `constants`, `calc`, `jpl`, `sweph_file`. Fixed: added rows with feature-gate notes for the file backends.",
+      "ts": 1783204809093
+    }
+  ],
+  "created_at": 1783098193861,
+  "updated_at": 1783204420282,
+  "completed_at": 1783204420282,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f2-160a-7770-b151-8e706eb05363",
+      "edge_type": "refines",
+      "source": "swisseph-rs/115",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098381834
+    },
+    {
+      "id": "019f28f2-4deb-76d0-9869-09612b1cb29d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/115",
+      "target": "swisseph-rs/114",
+      "note": "both edit lib.rs; re-export/doc pass must respect the cfg-gated module decls",
+      "created_at": 1783098396139
+    },
+    {
+      "id": "019f28f2-52f6-7ba3-8c92-9ebca2d02265",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/116",
+      "target": "swisseph-rs/115",
+      "note": "document the settled API surface, not a moving one",
+      "created_at": 1783098397430
+    },
+    {
+      "id": "019f28f2-6528-7d51-ac94-1d5cfb968331",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/118",
+      "target": "swisseph-rs/115",
+      "note": "README quickstart mirrors the settled crate-root surface + lib.rs doctest",
+      "created_at": 1783098402088
+    }
+  ]
+}

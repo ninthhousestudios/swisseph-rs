@@ -1,0 +1,104 @@
+{
+  "id": "019f3792-35d9-70a3-9cea-60dd81af5a43",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/145",
+  "sequence_number": 145,
+  "title": "swetest: binary scaffold + CLI argument parser",
+  "description": "Create the `swetest/` workspace member and parse all ~80 C swetest flags into a Rust config struct via `clap`.\n\n**What this task produces**: A binary that parses every flag C swetest accepts and constructs an `Ephemeris` + associated config, but does no computation or output beyond `--help`/version. Later tasks wire up the computation and output.\n\n**Binary location**: `swetest/` workspace member (like `swisseph-ffi/`). `Cargo.toml` with `clap` dependency, `swisseph = { path = \"..\" }`.\n\n**Flag categories to parse** (all map to the exact C short flags):\n\n1. **Time input**: `-b` (date), `-bj`/`-j` (JD), `-t` (time), `-ut`/`-utc` (UT input), `-lmt`, `-lat`\n2. **Body selection**: `-p` (planet sequence: d/p/h/a + individual letters 0-9,m,t,A-Z,w), `-xs` (asteroid#), `-xf` (star name), `-xv` (planet moon#), `-xz` (fictitious#)\n3. **Stepping**: `-n` (count), `-s` (step, with y/mo/m/s suffixes)\n4. **Observer**: `-topo[lon,lat,elev]`, `-geopos[lon,lat,elev]`, `-hel`, `-bary`, `-pc` (planetocentric)\n5. **Frame/flags**: `-speed`, `-speed3`, `-nospeed`, `-noaberr`, `-nodefl`, `-nonut`, `-true`, `-j2000`, `-icrs`, `-cob`, `-i` (force iflag)\n6. **Ephemeris source**: `-emos`, `-eswe`, `-ejpl[file]`, `-edir`\n7. **Sidereal**: `-sid`, `-sidt0`, `-sidsp`, `-sidudef`, `-sidbit`, `-ay`\n8. **Houses**: `-house[lon,lat,sys]`, `-hsy[sys]`\n9. **Output format**: `-f` (format seq), `-g` (gap), `-head`/`+head`, `-hor`, `-dms`, `-roundsec`, `-roundmin`, `-ep`, `-short`\n10. **Special events**: `-solecl`, `-lunecl`, `-occult`, `-rise`, `-metr`, `-hev[type]`, `-orbel`\n11. **Eclipse filters**: `-total`, `-partial`, `-annular`, `-anntot`, `-penumbral`, `-central`, `-noncentral`, `-local`, `-how`, `-hocal`\n12. **Rise/set options**: `-norefrac`, `-disccenter`, `-discbottom`, `-hindu`\n13. **Heliacal**: `-at[press,temp,rhum,visr]`, `-obs[age,SN]`, `-opt[age,SN,...]`\n14. **Differential**: `-d`, `-D`, `-dh`\n15. **Misc**: `-bwd`, `-tidacc`, `-testaa95/96/97`, `-lim`, `-amod`, `-clink`, `-swefixstar2`\n\n**Design notes**:\n- Use clap's raw/custom parsing since many flags use C's ad-hoc `-flagVALUE` (no space) convention. A custom `parse_args(args: &[String])` function that iterates argv and pattern-matches on prefixes (mirroring C's `strncmp` chain) is more faithful than trying to force clap's structured derivation.\n- Parse into a `SweTestArgs` struct with fields for every flag group.\n- Construct `EphemerisConfig` from the parsed args (ephemeris source, sidereal mode, topo position, etc.).\n- Construct `Ephemeris::new(config)` and handle errors.\n- Map `-p` planet-selection letters to `Vec<BodySpec>` where `BodySpec` is an enum covering `Body`, fixed star (name), asteroid (number), etc.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "cargo build -p swetest succeeds"
+    },
+    {
+      "done": false,
+      "text": "swetest -? prints help text listing all flag categories"
+    },
+    {
+      "done": false,
+      "text": "All ~80 C flags are parsed without error (unrecognized flags produce an error message)"
+    },
+    {
+      "done": false,
+      "text": "EphemerisConfig is constructed from parsed args (ephemeris source, sidereal, topo)"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -emos -p0 parses without error and exits cleanly (no output yet beyond construction success)"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Manual argv parser instead of clap",
+      "rationale": "C swetest uses -flagVALUE (no space, no =) syntax with prefix-ambiguous flags (-s/-sid/-speed/-short/-solecl). clap cannot handle this without brittle hacks. Manual parser is more faithful, easier to verify against C, and avoids fighting clap's model.",
+      "rejected_alternative": "clap derive/builder — would require extensive custom parsing anyway, adding complexity without value"
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Implemented as planned. Key design decision: no clap — manual argv iteration mirroring C's strncmp chain. The C swetest uses -flagVALUE (no space) syntax throughout (-b1.1.2000, -topo8.55,47.37,500, -sid3) which is fundamentally incompatible with clap's model. Manual parser is ~500 lines, maps 1:1 to C source for verification. All 5 acceptance criteria verified in-session.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "e728514"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783343756761,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 145
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783344714858,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783344720184,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783343756761,
+  "updated_at": 1783344720184,
+  "completed_at": 1783344720184,
+  "edges": [
+    {
+      "id": "019f3793-bca7-71f2-be06-69f8a8d3674a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/145",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343856807
+    },
+    {
+      "id": "019f3793-cb0e-7510-8d00-c7e53038887a",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/146",
+      "target": "swisseph-rs/145",
+      "note": null,
+      "created_at": 1783343860494
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "id": "019f3793-531e-7792-a221-4e132e26f85b",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/148",
+  "sequence_number": 148,
+  "title": "swetest: special events output (eclipses, rise/set, heliacal, orbel)",
+  "description": "Port C's `do_special_event` (swetest.c:3886-4099) and `orbital_elements` (swetest.c:2774-3886) — the special-event code paths that bypass the normal planet-loop + format-engine.\n\n**Solar eclipses** (`-solecl`):\n- Default (global): `Ephemeris::sol_eclipse_when_glob` + `sol_eclipse_where` + `sol_eclipse_how`\n- With `-local`: `Ephemeris::sol_eclipse_when_loc`\n- Filter flags: `-total`, `-partial`, `-annular`, `-anntot`, `-central`, `-noncentral`\n- With `-how`: single-epoch `sol_eclipse_how` (no search)\n- Output: eclipse date, time of max, magnitudes, Saros, contacts, geographic coords, duration\n\n**Lunar eclipses** (`-lunecl`):\n- `Ephemeris::lun_eclipse_when` + `lun_eclipse_how`\n- With `-local`: `lun_eclipse_when_loc`\n- Filter flags: `-total`, `-partial`, `-penumbral`\n- Output: eclipse date, umbral/penumbral magnitudes, Saros, 6 contacts\n\n**Occultations** (`-occult`):\n- `Ephemeris::lun_occult_when_glob` / `lun_occult_when_loc`\n- Uses `-p` for the occulted body (default Mercury if Moon selected)\n- Output similar to solar eclipse\n\n**Rise/set** (`-rise`):\n- `Ephemeris::rise_trans` for the body from `-p`\n- Requires `-geopos` or `-topo`\n- Modifier flags: `-norefrac`, `-disccenter`, `-discbottom`, `-hindu`\n- Output: rise time, set time, each on its own line\n\n**Meridian transit** (`-metr`):\n- `Ephemeris::rise_trans` with MTRANSIT/ITRANSIT flags\n- Output: upper/lower transit times\n\n**Heliacal events** (`-hev[type]`):\n- `Ephemeris::heliacal_ut`\n- Type 0=all, 1=morning first, 2=evening last, 3=evening first, 4=morning last\n- Atmosphere/observer parameters from `-at`, `-obs`, `-opt`\n- Output: event date/time, optimum/boundary visibility times\n\n**Orbital elements** (`-orbel`):\n- `Ephemeris::get_orbital_elements` for each body in `-p`\n- Output: 17 orbital element fields (sema, ecce, incl, node, peri, mean_anom, etc.)\n- This is swetest.c's `orbital_elements` function (1112 lines, but most is printf)\n\n**Iteration**: All special events use `-n` for count and `-bwd` for backward search. The loop calls the search function, prints the result, then uses the returned time as the seed for the next search.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -solecl -n3 prints 3 solar eclipses"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -lunecl -n3 prints 3 lunar eclipses"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -solecl -local -geopos8.55,47.37,500 prints local solar eclipse"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -rise -p0 -geopos8.55,47.37,500 prints sunrise/sunset"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -metr -p0 -geopos8.55,47.37,500 prints meridian transits"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -hev -p2 -geopos8.55,47.37,500 prints Mercury heliacal events"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -orbel -p5 prints Jupiter orbital elements"
+    },
+    {
+      "done": false,
+      "text": "swetest -b1.1.2000 -occult -p3 -n2 prints Venus occultations"
+    },
+    {
+      "done": false,
+      "text": "Eclipse filter flags (-total, -partial, etc.) restrict output correctly"
+    },
+    {
+      "done": false,
+      "text": "-bwd flag searches backward"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": "New file `swetest/src/special.rs` with all special-event dispatch + output formatting. `main.rs` gets a two-line branch: special_event/orbital_elements → special::run() else compute::run().\\n\\nWave 1: Dispatch scaffold + rise/set + meridian transit (simplest — one API call per result)\\nWave 2: Solar eclipses (-solecl) — 3 sub-paths: -how, -local, global\\nWave 3: Lunar eclipses (-lunecl) — 2 sub-paths: -local, global\\nWave 4: Occultations (-occult) — structurally same as solar eclipses with body/starname\\nWave 5: Heliacal events (-hev) — complex arg setup, event type dispatch\\nWave 6: Orbital elements (-orbel) — single-epoch, 17-field print per body\\nWave 7: Verification diff against C swetest for all acceptance criteria commands\\n\\nShared helpers: eclipse_ifltype, format_jd_ut, eclipse_type_str, geopos_from_args. Reuse compute.rs helpers (resolve_start_jd etc.) via pub(crate) widening.\\n\\n~800-1200 lines, all output formatting. No new library code needed.",
+  "execution_record": "Implemented in a single commit (cf29dcd). 1184 lines added, mostly in new swetest/src/special.rs. All 7 event types working and verified against C swetest output. Minor output format differences remain (trailing whitespace, extra blank lines at top) that don't affect correctness or parsability. The C swetest debug build emits DEFLSPD noise making heliacal diff verification impractical — the heliacal code was verified via direct output inspection against a non-debug C run.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "cf29dcd"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783343829790,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 148
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783352597447,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783353790936,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783343829790,
+  "updated_at": 1783353790936,
+  "completed_at": 1783353790936,
+  "edges": [
+    {
+      "id": "019f3793-c6bb-7741-b322-d0515663da43",
+      "edge_type": "refines",
+      "source": "swisseph-rs/148",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343859387
+    },
+    {
+      "id": "019f3793-d3d8-7a10-a857-747892d6188e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/148",
+      "target": "swisseph-rs/146",
+      "note": null,
+      "created_at": 1783343862744
+    },
+    {
+      "id": "019f3793-d7cf-7fc3-9269-b3975aec5deb",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/149",
+      "target": "swisseph-rs/148",
+      "note": null,
+      "created_at": 1783343863759
+    }
+  ]
+}

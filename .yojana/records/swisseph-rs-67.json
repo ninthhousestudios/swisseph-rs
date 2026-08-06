@@ -1,0 +1,101 @@
+{
+  "id": "019f19d8-5c40-7c91-90fd-0c3f87b9c288",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/67",
+  "sequence_number": 67,
+  "title": "Houses 9/9: sidereal house modes ECL_T0 + SSY_PLANE projection",
+  "description": "### Summary\nComplete sidereal house support: the two geometric projection modes deferred from sub-task 7 — `sidereal_houses_ecl_t0` (projection onto the ecliptic of the ayanamsa epoch t0) and `sidereal_houses_ssypl` (projection onto the solar-system plane). These compute houses at an adjusted (armcx, epsx) then subtract a geometric offset.\n\n### Files\n- `src/houses.rs` — add `fn sidereal_houses_ecl_t0(...)` and `fn sidereal_houses_ssypl(...)` (pure helpers taking the needed precessed vectors / config-derived t0/ayan_t0 as args); wire them into the `Ephemeris::houses_ex2` SIDEREAL dispatch (replace the `Err(... not yet implemented)` stubs left in sub-task 7).\n- `src/constants.rs` — add `SSY_PLANE_INCL`, `SSY_PLANE_NODE_E2000`, `SSY_PLANE_NODE` (ref §13 values, in radians) if not already present.\n- `tests/c-gen/gen_houses.c` — add `\"sidereal_geom\"` key.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add `sidereal_geom` test.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §6 (`sidereal_houses_ecl_t0`, `sidereal_houses_ssypl`), §13 (SSY constants).\n1. **ecl_t0** (ref §6, 8-step): vernal point as unit vector on mean ecliptic of t0 → equator of t0 via `cotrans(x, -epst0)` where `epst0 = obliquity(t0)`; precess t0→J2000→tjde (use `crate::precession::precess` both legs); rotate onto true equator of tjde (rotate by `(eps - nutlo[1])`, add `nutlo[0]` to longitude in polar, rotate by `-eps`); compute auxiliary obliquity `epsx` from the orbital-plane normal (`cross_prod` of position×velocity — check src/math.rs for a cross-product helper, else inline); auxiliary vernal point `xvpx` via `fac=x[2]/x[5]`; `dvpx` longitude; `armcx = degnorm(armc - dvpx)`; compute houses via `houses_armc(armcx, geolat, epsx, hsys, sundec)`; `dvpxe = acosd(dot_unit(x, xvpx))` (sign-flipped if `tjde < t0`); subtract `dvpxe + ayan_t0` from every cusp + ascmc (skip armc index 2); re-fix EqualAries cusps.\n2. **ssypl** (ref §6): same shape as ecl_t0 but starting from the solar-system-plane zero point using `SSY_PLANE_*` constants; additionally compute the J2000-referenced `x00` term and subtract `dvpxe + ayan_t0 + x00`.\n3. **Dispatch wiring**: in `Ephemeris::houses_ex2`, replace sub-task 7's ECL_T0/SSY_PLANE error stubs: select by `self.config.sidereal_bits` (`SiderealBits::ECL_T0` → ecl_t0; the SSY-plane bit → ssypl; see how `src/ayanamsa.rs` reads these bits). Pass the precession/obliquity/nutation already computed in the wrapper.\n4. Velocity for precession: the vernal-point vector needs a velocity component for the orbital-plane normal — replicate the C `swi_precess` of both position and a unit velocity, or follow the exact vector construction in swehouse.c:318–532 (read it directly — this is intricate vector geometry the ref doc summarizes but does not fully spell out term-by-term).\n\n### C reference\n`docs/c-ref-houses.md` §6, §13. Read swehouse.c:292–532 directly — these two functions are the one place in the houses port where the ref doc is a summary, not a line-by-line transcription. Cross-check `swi_cross_prod`, `swi_dot_prod_unit`, `swi_cartpol` against existing helpers in `src/math.rs` (`cartesian_to_polar`, etc.); add small private helpers if missing.\n\n### Golden tests\n- C harness: key `\"sidereal_geom\"`: for sid_modes exercising both bits — e.g. `SE_SIDM_LAHIRI | SE_SIDBIT_ECL_T0` and `... | SE_SIDBIT_SSY_PLANE` — call `swe_set_sid_mode` then `swe_houses_ex2(tjd_ut, SEFLG_SIDEREAL, geolat, geolon, hsys, ...)` for systems `['P','C','W']` × a few dates/locations. Emit `{sid_mode, tjd_ut, geolat, geolon, hsys, cusps:[1..12], ascmc:[0..8]}`. Regenerate houses.json.\n- Rust test `sidereal_geom`: configure `Ephemeris` with the matching sidereal mode + bit; assert cusps/ascmc eps 1e-7.\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::sidereal_geom -- --nocapture` passes.\n- All prior houses tests still pass.\n\n### Escape hatch\nSame as sub-task 1. This is intricate vector geometry — read swehouse.c:292–532 directly from the start. If a mode resists fidelity after two attempts, STOP and report (which mode, actual vs expected cusps, the computed armcx/epsx/dvpx intermediates). Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": true,
+      "text": "cargo clippy --all-targets clean"
+    },
+    {
+      "done": true,
+      "text": "cargo test --test golden houses::sidereal_geom -- --nocapture passes"
+    },
+    {
+      "done": true,
+      "text": "All prior houses tests still pass"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented directly from the task's own detailed spec (no separate vidhi-plan needed — the description already had file map/steps). Read swehouse.c:260-532 directly per the escape-hatch note (ref doc explicitly flags this section as non-line-by-line). Key findings during implementation:\n\n- The C loop bound for ascmc in ecl_t0/ssypl is `i <= SE_NASCMC` (touches index 8), one wider than sidereal_houses_trad's `i < SE_NASCMC` — but gen_houses.c's harness only ever captures/prints ascmc[0..7], and our AscMc struct has no slot for index 8, so this discrepancy is immaterial to fidelity; matched sidereal_houses_trad's existing pattern of 7 named field assignments.\n- ecl_t0 has `if (tjde < t0) dvpxe = -dvpxe`; ssypl has no such sign flip but instead subtracts `SSY_PLANE_NODE*RADTODEG` from dvpxe — these are genuinely different tails, so the shared core helper (`sidereal_houses_geom_core`) returns the raw dvpxe and each caller applies its own transform.\n- t0/ayan_t0 must be used RAW (self.config.sidereal_t0 directly), not through ayanamsa::resolve_t0's t0_is_UT deltaT adjustment — confirmed by grepping sweph.c: swehouse.c's own ecl_t0/ssypl always read sip->t0 unconverted, unlike swi_get_ayanamsa_ex's call sites.\n- Added cross_prod/dot_prod_unit as new pub fns in math.rs (ports of swi_cross_prod/swi_dot_prod_unit) — no prior cross-product helper existed in the crate.\n- SSY_PLANE_INCL/NODE/NODE_E2000 constants already existed in constants.rs from earlier ayanamsa work; no new constants needed.\n- Golden harness: added a \"sidereal_geom\" key to gen_houses.c (18 cases: P/C/W x 3 ut_triples x 2 sid_modes {Lahiri|ECL_T0, Lahiri|SSY_PLANE}). First compile run's stdout was corrupted by libswe.a's debug EMBOFS trace prints going to stderr but merged via `2>&1` — re-ran with stderr redirected separately, JSON was clean. Golden test passed on first attempt against the freshly-generated C reference data (no debugging iterations needed for numerical fidelity).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "569d8ab"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782845037632,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 67
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782914471159,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782914482502,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, tasks 65/66/67 together): approve with notes. sidereal_houses_ecl_t0/ssypl — the intricate vector geometry (rotate_to_true_equator shared tail, cross_prod orbital-plane normal, tjde<t0 sign flip on ecl_t0 vs the always-positive ssypl + x00 term) matches swehouse.c:318-532 and the raw-t0 (no resolve_t0) caveat is correctly honored. sidereal_geom golden (P/C/W × ECL_T0 and SSY_PLANE) passes eps 1e-7. clippy clean, 85/85 golden. No blocking findings across 65/66/67.",
+      "ts": 1782914790711
+    }
+  ],
+  "created_at": 1782845037632,
+  "updated_at": 1782914482502,
+  "completed_at": 1782914482502,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-a1ca-7f90-acc7-f6e7faf1ac93",
+      "edge_type": "refines",
+      "source": "swisseph-rs/67",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845055434
+    },
+    {
+      "id": "019f19d8-e165-7db0-9b76-34af51e578fe",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/67",
+      "target": "swisseph-rs/65",
+      "note": null,
+      "created_at": 1782845071717
+    }
+  ]
+}

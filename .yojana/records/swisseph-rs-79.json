@@ -1,0 +1,104 @@
+{
+  "id": "019f1e1a-3dc4-7ec1-9aef-0e8a28a3494d",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/79",
+  "sequence_number": 79,
+  "title": "RSE 12/12: Occultation local search (swe_lun_occult_when_loc + occult_when_loc)",
+  "description": "### Summary\nPort `swe_lun_occult_when_loc` + its worker `occult_when_loc`: find the next/previous occultation of a planet/star by the Moon VISIBLE from `geopos`, with local contact times and circumstances. Final sub-task of the arc. Exposes `Ephemeris::lun_occult_when_loc` (`&self`).\n\nDepends on **RSE 6** (`eclipse_how` attr fill), **RSE 8** (solar `when_loc` scaffolding this parallels), and **RSE 11** (occultation `where`/`when_glob` + body-radius helper).\n\n### Files\n- `src/eclipse.rs` — add `OccultLocal` result struct, `occult_when_loc`, `lun_occult_when_loc`.\n- `src/context.rs` — `pub fn lun_occult_when_loc(&self, tjd_start, body: Body, starname: Option<&str>, ifl: CalcFlags, geopos:[f64;3], backward: bool) -> Result<OccultLocal, Error>`.\n- `src/lib.rs` — re-export `OccultLocal`.\n- `tests/c-gen/gen_eclipse.c` — add key `occ_when_loc`; regenerate `eclipse.json`.\n- `tests/golden/eclipse.rs` — add `#[test] occ_when_loc`.\n- `docs/codebase-map.md` — final eclipse-module update (mark the arc complete in the map).\n\n### Implementation steps\nRead `docs/c-ref-occultation.md` §3 (`swe_lun_occult_when_loc` + `occult_when_loc`), cross-referencing `docs/c-ref-eclipse-solar.md` §6 (solar when_loc) and §4 (attr via eclipse_how).\n\n1. **`OccultLocal`**: `tret[0..10]` per the §3 slot summary + `attr[]` (reuse `EclipseHow`/local-attr from RSE 6) + type bitmask.\n2. **`swe_lun_occult_when_loc`** public wrapper (§3 \"Public wrapper\").\n3. **`occult_when_loc`** worker (§3 \"Worker\"): topocentric setup (RSE 1 config-clone pattern), the search loop, contacts C1/C2/max/C3/C4 via `find_zero`. OCCULTATION-SPECIFIC forks flagged in the doc — port faithfully:\n   - The fixed-star point-source branch collapses contacts 1/4 onto 2/3 (swecl.c:2696–2699).\n   - The occultation-only `SE_ECL_OCC_BEG_DAYLIGHT`/`SE_ECL_OCC_END_DAYLIGHT` rise/set daylight logic (no solar equivalent).\n   - The likely-dead `dtdiv` reassignment — replicate as-is, do NOT \"fix\" it.\n   - `backward` flips direction.\n\n### C reference\n`docs/c-ref-occultation.md` §3; `docs/c-ref-eclipse-solar.md` §6, §4, §7.\n\n### Golden tests\n- **C harness** add key `occ_when_loc`: `geopos ∈ {(8.55,47.37,500)}`, `(ipl,starname) ∈ {(SE_VENUS,NULL), (-1,\"Aldebaran\")}`, `tjd_start ∈ {2451545.0}`, `backward ∈ {0,1}` → `swe_lun_occult_when_loc(tjd_start, ipl, starname, SEFLG_MOSEPH, geopos, tret, attr, backward, serr)`. Emit `{geopos, ipl, starname, tjd_start, backward, retval, tret:[0..10], attr:[0..11]}`. Regenerate `eclipse.json`.\n- **Rust test** `#[test] occ_when_loc`: assert `tret`/`attr` via `assert_f64_eps(.., 1e-5)`; assert returned flags == `retval`. Star case needs the fixstar catalog loaded.\n- `cargo test --test golden eclipse::occ_when_loc -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::occ_when_loc -- --nocapture` passes (1e-5 day).\n- Full golden suite green (`cargo test --test golden`).\n\n### Escape hatch\nIf contact times fail > 1e-4 day after two attempts, STOP and report failing `(ipl/starname, geopos, backward)` + diverging slot. Read `swecl.c:2071–2764` directly (mind the occultation-specific forks in §3). Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented as planned per c-ref-occultation.md §3, following the same structure as eclipse_when_loc/lun_occult_when_glob. One divergence from the plan: the ref doc's phrasing for occult_when_loc's `iflag` setup (\"iflag = SEFLG_TOPOCTR | ifl\") was ambiguous enough to misread as matching solar's EQUATORIAL-augmented convention — read swecl.c:2441-2443 directly to confirm it deliberately omits SEFLG_EQUATORIAL (harmless for the dot-product angle math, but a real literal divergence worth flagging). Also read swecl.c:2742-2772 directly for the rise/set/daylight block (§3 step 12) since the ref doc's prose didn't specify the exact anchor offsets (occulted-body rise/set uses tret[1]-0.1, not solar's -0.001) or the retc>=0 chaining/no-DISC_BOTTOM-for-Sun details.\n\nFirst golden test run failed on the Aldebaran (star) cases: attr.azimuth off by ~4e-3 degrees, tret[0..4] off by ~0.3-0.55 sec (Venus/planet cases passed exactly). Root cause: eclipse_how/occult_when_loc's star branch routes through Ephemeris::fixstar2, which only ever read self.config -- it had no way to receive the per-call topo_config override this module (and every other topocentric caller) builds, so SEFLG_TOPOCTR silently became a no-op for fixed stars (config.topographic was None on the base Ephemeris). This was a pre-existing, documented gap (riseset.rs has the same note) with zero prior golden coverage; occ_when_loc is the first test to exercise topocentric eclipse_how for a star. Fixed by adding Ephemeris::fixstar2_with_config (mirrors calc_with_config) and threading an explicit &EphemerisConfig through calc_fixstar/calc_fixstar_moshier/_sweph/_jpl, adding the topocentric observer offset (calc::topo_offset, widened to pub(crate)) to xobs/xobs_dt per docs/c-ref-fixstar.md step 6. After the fix all 4 occ_when_loc cases match C within 1e-7 (well under the 1e-5 day/1e-5 degree tolerances). Full golden suite (104 tests) and cargo clippy --all-targets both clean; no regressions.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "2a26a41"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916464068,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 79
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782996293940,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782997742467,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review): approve with notes. occ_when_loc golden passes at 1e-5, clippy clean, no fixstar regression from the new topocentric-star config threading. Note: occulted-body rise/set slots tret[5]/[6] remain uncovered (all golden values 0.0) — the tret[5]=tjdr/tret[6]=tjds assignments never fire; recorded as a minor remaining gap on swisseph-rs/92 (needs an expensive search to trigger, logic is a simple direct port). Behavioral note also captured: calc_fixstar_* now applies a TOPOCTR parallax offset it previously dropped — verified correct (the Aldebaran occ_when_loc case requires it), no regression.",
+      "ts": 1782999077270
+    }
+  ],
+  "created_at": 1782916464068,
+  "updated_at": 1782997742467,
+  "completed_at": 1782997742467,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-c807-7560-be97-70ba9137bba6",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/75",
+      "note": null,
+      "created_at": 1782916499463
+    },
+    {
+      "id": "019f1e1a-cbb2-7930-8187-03e31405436f",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/78",
+      "note": null,
+      "created_at": 1782916500402
+    },
+    {
+      "id": "019f1e1a-cde8-7181-8a58-f651616ec134",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/73",
+      "note": null,
+      "created_at": 1782916500968
+    },
+    {
+      "id": "019f1e1b-105f-7060-b3a2-2ad6ff75415d",
+      "edge_type": "refines",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916517983
+    }
+  ]
+}

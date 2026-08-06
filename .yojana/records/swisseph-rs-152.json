@@ -1,0 +1,60 @@
+{
+  "id": "019f4db3-5f71-79e1-88da-cbc276ef5bc8",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/152",
+  "sequence_number": 152,
+  "title": "swetest houses bug 2",
+  "description": "similar to the first one; this command produces different house cusp speeds: swetest -house86.0134,39.9573,c -b10.07.2026 -ut18:00 -emos",
+  "category": "bug",
+  "status": "done",
+  "slice_type": null,
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": "Same root cause as swisseph-rs/151: lowercase 'c' (Campanus) failed HouseSystem::try_from(u8) which only matched uppercase, falling back to Placidus via swetest's unwrap_or default.",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "cb7a643"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783715028849,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 152
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781038281,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781044618,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783715028849,
+  "updated_at": 1783781044618,
+  "completed_at": 1783781044618,
+  "edges": []
+}

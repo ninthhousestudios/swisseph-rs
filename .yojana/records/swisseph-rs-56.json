@@ -1,0 +1,95 @@
+{
+  "id": "019f18aa-5d99-7b10-afe3-84da08f86216",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/56",
+  "sequence_number": 56,
+  "title": "Fixed stars: the 12 fixed-star ayanamsa modes + armc_to_mc",
+  "description": "## Summary\nImplement the 12 deferred fixed-star (\"true star\" / galactic) ayanamsa modes by routing them at the **Ephemeris layer** to the star pipeline (`fixstar2`), add `armc_to_mc` (needed by mode 36), and replace the `Err(SiderealModeRequiresFixedStars)` early-returns. This keeps `ayanamsa.rs` pure config-math (no catalog dependency); the catalog lives on `Ephemeris`. Golden tests cover all 12 modes via `get_ayanamsa_ex`/`_ut` and via `calc` + `SEFLG_SIDEREAL`.\n\nThe 12 modes (SiderealMode indices): 17, 27, 28, 29, 30, 31, 32, 33, 35, 36, 39, 40. `EphemerisConfig::set_sidereal_mode` already strips projection bits for these (sets `sidereal_bits = empty`), so they take the ordinary (ayanamsa-subtraction) sidereal path.\n\n## Files\n- `src/math.rs` — add `pub fn armc_to_mc(armc_deg: f64, eps_deg: f64) -> f64` (port `swi_armc_to_mc`; canonical home until the houses module lands and reuses it).\n- `src/context.rs` — add `fn fixstar_ayanamsa(&self, jd_tt: f64, flags: CalcFlags) -> Result<(f64, f64), Error>` (returns `(daya, daya_speed)` in degrees); route the 12 modes in `get_ayanamsa_ex` and in `apply_sidereal`'s default branch.\n- `src/ayanamsa.rs` — leave `get_ayanamsa_ex`'s `Err(SiderealModeRequiresFixedStars)` as a safety net (Ephemeris intercepts before reaching it). Add NO catalog dependency.\n- `.sutra/rules.toml` — uncomment the three `app-uses-calc-not-backends:ayanamsa→{moshier,jpl,sweph}` blocks (≈ lines 210–232).\n- `tests/c-gen/gen_fixstar_ayanamsa.c`, `tests/golden-data/fixstar_ayanamsa.json`, `tests/golden/fixstar_ayanamsa.rs`, `tests/golden/main.rs`.\n\n## Implementation steps\nRead `docs/c-ref-fixstar.md` §\"Fixed-Star Ayanamsa Integration\" and `docs/c-ref-ayanamsa.md` §\"Fixed-Star Ayanamsas\".\n\n1. **`armc_to_mc(armc_deg, eps_deg)`** in `math.rs` (§\"GALCENT_MULA_WILHELM — RA-to-MC projection\"): `let mut mc = atan2(tan(armc_deg.to_radians()), eps_deg.to_radians().cos()).to_degrees();` `if armc_deg > 90.0 && armc_deg <= 270.0 { mc += 180.0; }` `normalize_degrees(mc)`.\n\n2. **`Ephemeris::fixstar_ayanamsa(jd_tt, flags)`** — build flags per §\"Flag construction\":\n   - `let epheflag = flags & CalcFlags::EPHMASK;` `let iflag_base = epheflag | CalcFlags::NONUT;`\n   - `let iflag_galequ = iflag_base | CalcFlags::TRUEPOS;` (galactic-pole modes 31/32/33)\n   - `let mut iflag_true = iflag_base;` then OR in `TRUEPOS`, `NOABERR`, `NOGDEFL` if `flags` (caller's otherflag) contains them.\n   - Match `self.config.sidereal_mode` against the 12 indices → `(star_key, iflag_arg, offset)` per the §\"Per-mode dispatch\" table. Call `self.fixstar2(star_key, jd_tt, iflag_arg | CalcFlags::SPEED)` → `(_, result)`; `let lon = result.data[0]; let lon_sp = result.data[3];`\n   - daya formulas (offsets EXACT): 17 `lon-240`, 27 `lon-180`, 28 `lon-359.8333333333`, 29 `lon-106`, 30 `lon-(210.0+90.0*0.3819660113)`, 31 `lon-150`, 32 `lon-150`, 33 `lon-(150.0+6.6666666667)`, 35 `lon-240`, 39 `lon-103.49264221625`, 40 `lon-270`. Return `(normalize_degrees(daya), lon_sp)`.\n   - **Mode 36** (GALCENT_MULA_WILHELM): call `fixstar2(\",SgrA*\", jd_tt, iflag_true | EQUATORIAL | SPEED)` → `ra = result.data[0]` (deg). `let eps_deg = obliquity(jd_tt, flags, models).eps.to_degrees();` `let daya = normalize_degrees(armc_to_mc(ra, eps_deg) - 246.6666666667);` For the speed, finite-difference `armc_to_mc` over a small dt (e.g. recompute at `jd_tt + FIXSTAR_DT`) — or document that the projection-speed for mode 36 is approximate. (Mode 36 uses `iflag` — not `empty` — for obliquity; see c-ref-ayanamsa.md FP §4.)\n   - Star keys: 17/30/40/36 = `\",SgrA*\"`; 27 = `\"Spica\"`; 28 = `\",zePsc\"`; 29/39 = `\",deCnc\"`; 35 = `\",laSco\"`; 31 = `\",GP1958\"`; 32/33 = `\",GPol\"`.\n\n3. **Route in `Ephemeris::get_ayanamsa_ex`**: if `self.config.sidereal_mode` is one of the 12 indices, `return Ok(self.fixstar_ayanamsa(jd_tt, flags)?.0)`. Do NOT add the generic ayanamsa nutation/correction on top — the C fixed-star branches `return *daya` directly with `NONUT` already in the star flags (mirror C exactly). Otherwise delegate to the existing `ayanamsa::get_ayanamsa_ex_nut` path as today.\n\n4. **Route in `apply_sidereal`'s default branch** (and the `calc_speed3` sidereal path): if the mode is a fixed-star index, obtain `(daya, daya_sp)` from `self.fixstar_ayanamsa(jd_tt, flags)` and feed `crate::calc::apply_sidereal_default(xreturn, daya, has_speed)` (using daya_sp for the speed component) instead of calling `ayanamsa::get_ayanamsa_with_speed`. Leave ECL_T0/SSY branches untouched (these modes never set those bits).\n\n5. Uncomment the three `ayanamsa→…` `forbidden_dep` blocks in `.sutra/rules.toml`; verify `ayanamsa.rs` imports no backend module.\n\n## C reference\n`docs/c-ref-fixstar.md` §\"Fixed-Star Ayanamsa Integration\" (flag construction, per-mode dispatch table, GALCENT_MULA_WILHELM); `docs/c-ref-ayanamsa.md` §\"Fixed-Star Ayanamsas\".\n\n## Golden tests\n- **C harness** `tests/c-gen/gen_fixstar_ayanamsa.c`: for each of the 12 indices, `swe_set_sid_mode(idx, 0, 0)`; for `tjd` in {2451545.0, 2415020.0, 2469807.5, 2086302.5}: emit `swe_get_ayanamsa_ex(tjd, SEFLG_MOSEPH, &daya, serr)` → `{idx, tjd, daya, retflag}`. Additionally, for a couple of indices (e.g. 27 TRUE_CITRA, 17 GALCENT_0SAG), emit `swe_calc(tjd, SE_SUN, SEFLG_MOSEPH|SEFLG_SIDEREAL, x, serr)` longitude to validate the projection path.\n- **Rust** `tests/golden/fixstar_ayanamsa.rs`: for each idx, `let mut cfg = EphemerisConfig { ephemeris_source: Moshier, ephe_path: Some(\"../swisseph/ephe\".into()), ..Default::default() }; cfg.set_sidereal_mode(idx, 0.0, 0.0);` build `Ephemeris`; assert `get_ayanamsa_ex(tjd, MOSEPH)` within **1e-8** deg; for the projection cases assert `calc(Sun, MOSEPH|SIDEREAL).data[0]` within 1e-8.\n- Add `mod fixstar_ayanamsa;` to `tests/golden/main.rs`.\n\n## Acceptance criteria\n- `cargo test --test golden fixstar_ayanamsa -- --nocapture` passes (all 12 modes).\n- `cargo build` and `cargo clippy --all-targets` clean.\n- `.sutra/rules.toml` ayanamsa constraints uncommented; no new constraint violations.\n\n## Escape hatch\nIf any mode's ayanamsa diverges from C by > 1e-8 after two attempts, STOP and report which indices/epochs fail with actual vs expected and what you tried. Mode 36 (armc_to_mc projection) and the galactic-pole modes (31/32/33, which use built-in stars with FK5/FK4 epochs) are the likeliest to surface frame-transform issues from the prior sub-task. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward port. The task description's implementation plan was accurate. Key decisions: used a 2-point numerical derivative (tintv=0.001d) for fixstar_ayanamsa speed rather than extracting star speed from fixstar2 — this mirrors C's swi_get_ayanamsa_with_speed pattern exactly and handles mode 36's armc_to_mc projection without special-casing. FIXED_STAR_INDICES was already populated in ayanamsa.rs; just needed pub(crate). The ayanamsa constraint blocks in .sutra/rules.toml were already uncommented before this session. Stars constraint blocks (→moshier/jpl/sweph) were pre-existing WIP from /54; committed here. All 69 golden tests pass; clippy clean.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "b80ffd6"
+    }
+  ],
+  "files": [
+    "src/math.rs",
+    "src/context.rs",
+    ".sutra/rules.toml",
+    "tests/c-gen/gen_fixstar_ayanamsa.c",
+    "tests/golden/fixstar_ayanamsa.rs",
+    "tests/golden/main.rs"
+  ],
+  "tags": [
+    "fixstar",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782825246105,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 56
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782829864570,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782830118113,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "vidhi-review (wave 54–58): APPROVE WITH NOTES. All 12 ayanamsa modes golden-tested to 1e-8 on value; the `get_ayanamsa_ex` dpsi-nutation addition correctly diverges from the original plan note (\"return daya directly\") to match C, validated by the MOSEPH (non-NONUT) golden case. One MEDIUM finding lives here: `fixstar_ayanamsa` speed (`daya_sp`) is untested and has a latent 360°-wrap bug from differencing two `normalize_degrees`'d values — full writeup in the swisseph-rs/55 review comment. Recommend a follow-up to use `math::diff_degrees` and add a SEFLG_SPEED golden case.",
+      "ts": 1782843163055
+    }
+  ],
+  "created_at": 1782825246105,
+  "updated_at": 1782830118113,
+  "completed_at": 1782830118113,
+  "arc_id": "019efa3c-1423-7163-82fa-986d55233c70",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f18aa-d1f5-7d71-9f29-94b8a67cd844",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/56",
+      "target": "swisseph-rs/55",
+      "note": null,
+      "created_at": 1782825275893
+    },
+    {
+      "id": "019f18aa-e0bd-7211-987d-c83c76f74bb3",
+      "edge_type": "refines",
+      "source": "swisseph-rs/56",
+      "target": "swisseph-rs/10",
+      "note": null,
+      "created_at": 1782825279677
+    }
+  ]
+}

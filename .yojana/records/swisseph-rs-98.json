@@ -1,0 +1,60 @@
+{
+  "id": "019f24a7-8aa5-76b2-8e2c-cc5f8f19db98",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/98",
+  "sequence_number": 98,
+  "title": "pctr golden matrix: add SWIEPH frame-chain + sidereal coverage, fix vacuous pass",
+  "description": "From swisseph-rs/90 review (vidhi-review, codex+Opus). The pctr golden matrix pins all EQUATORIAL/XYZ/J2000 flag combos to SEFLG_MOSEPH, which calc_pctr rejects (BARYCTR unsupported) → 72 error cases. The only numeric-success combo is SWIEPH|SPEED (ecliptic-of-date). So extract_output's EQUATORIAL/XYZ/J2000 branches and §8's J2000-precession-skip are never compared against C. Additionally tests/golden/pctr.rs:81 silently `continue`s SWIEPH cases when ../swisseph/ephe is absent, and nothing asserts ok_count>0, so the whole test passes vacuously without the fixture — inconsistent with calc_sweph.rs which builds the Swiss eph unconditionally.\n\nAlso: C's swe_calc_pctr supports SEFLG_SIDEREAL (sweph.c:8217-8243, same three sub-algorithms via apply_sidereal); the Rust calc_pctr:717 apply_sidereal call is legit and pctr_pipeline returns a real x2000, but no golden case exercises it (tropical-only matrix).\n\nFix:\n- gen_pctr.c: add SWIEPH success cases across all output flags — EQUATORIAL, XYZ, EQUATORIAL|XYZ, J2000, J2000|EQUATORIAL, TRUEPOS, NOABERR, NOGDEFL — plus SIDEREAL (traditional + at least one rigorous ECL_T0/SSY_PLANE projection via swe_set_sid_mode).\n- pctr.rs: build Swiss eph unconditionally (match calc_sweph convention); assert ok_count == expected success count (>0) so error-regressions and vacuous passes both fail.\n- Configure the Rust sidereal mode to match the C generator's swe_set_sid_mode.",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": "The pctr golden matrix assigned all EQUATORIAL/XYZ/J2000 output flags to SEFLG_MOSEPH, which calc_pctr rejects (BARYCTR unsupported) — so those 3 of 4 frame-chain output paths were never numerically compared against C. The test also silently skipped SWIEPH cases when the ephe fixture was absent with no ok_count>0 guard, letting it pass vacuously. Coverage gap, not a logic error in the ported math.</root_cause>\n<parameter name=\"execution_record\">Expanding the matrix to actually exercise the J2000 output path immediately surfaced a genuine bug (fixed in the same commit, see swisseph-rs/99 note and commit body): calc_pctr passed obliquity-of-date to the §9 ecliptic rotation even for SEFLG_J2000, where it must use obliquity(J2000)/oec2000 — a 1.24e-5° longitude error. Fixed by selecting obliquity(J2000) in the J2000 branch, mirroring calc::precess_and_ephem. Also added SWIEPH|SIDEREAL coverage (Lahiri/ECL_T0/SSY_PLANE/USER-ECL_T0) since C supports sidereal pctr (sweph.c:8217) and apply_sidereal was untested; pctr_pipeline returns a real x2000 so the rigorous projections work. Matrix now 196 cases (178 success, 18 error); Swiss eph built unconditionally like calc_sweph. Full suite + clippy green (2 pre-existing complex-type warnings on pctr_bary_state, not new).",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "51cb916"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783026387621,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 98
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783027043907,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783026387621,
+  "updated_at": 1783027043907,
+  "completed_at": 1783027043907,
+  "edges": [
+    {
+      "id": "019f24b1-b217-7e60-963c-3f66c4eafb5a",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/98",
+      "target": "swisseph-rs/90",
+      "note": null,
+      "created_at": 1783027053079
+    }
+  ]
+}

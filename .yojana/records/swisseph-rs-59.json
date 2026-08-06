@@ -1,0 +1,120 @@
+{
+  "id": "019f19d4-3014-7e51-9164-b5b0dc1151b4",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/59",
+  "sequence_number": 59,
+  "title": "Houses 1/9: module scaffold, core trig, driver, angles, special points, Equal family",
+  "description": "### Summary\nFoundation of the house-systems port: the `src/houses.rs` module skeleton, public output types, the degree-domain core trig (`Asc1`/`Asc2`/`AscDash`/`fix_asc_polar`), the `calc_h` core with always-run setup (MC, Ascendant, the 5 special points, post-switch opposite-cusp mirror), the `houses_armc` driver (incl. the finite-difference speed scaffold), and the Equal-family house systems (A/E/D/N/V/W). This is the base every other houses sub-task builds on. Internal math is in DEGREES end-to-end, matching the C.\n\n### Files\n- `src/houses.rs` (currently an empty stub) — everything below.\n- `src/lib.rs` — add re-exports for the new public types (insert into the `pub use ...` block per docs/codebase-map.md \"Insertion Points\").\n- `tests/c-gen/gen_houses.c` — NEW C golden generator.\n- `tests/golden-data/houses.json` — NEW generated fixture.\n- `tests/golden/houses.rs` — NEW Rust golden test module.\n- `tests/golden/main.rs` — add `mod houses;`.\n- `docs/codebase-map.md` — add the `houses.rs` row + golden rows (small edit).\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §1, §2, §3, §4, §7 and the \"A/E\", \"D\", \"N\", \"V\", \"W\" subsections of §5 in full before coding.\n\n1. **Constants** (ref §1, §13): `const VERY_SMALL: f64 = 1e-10;` `const VERY_SMALL_PLAC_ITER: f64 = 1.0/360000.0;` `const MILLIARCSEC: f64 = 1.0/3600000.0;` `const SOLAR_YEAR: f64 = 365.24219893;` `const ARMCS: f64 = (SOLAR_YEAR + 1.0)/SOLAR_YEAR * 360.0;` `const NITER_MAX: i32 = 100;`\n2. **Degree-trig helpers** (ref §1 macros) — private fns: `sind(x)=`(x*DEGTORAD).sin()`, cosd, tand, asind(x)=x.asin()*RADTODEG, acosd, atand, atan2d(y,x)`. Use `crate::constants::{DEGTORAD, RADTODEG}`. For `swe_degnorm` use `crate::math::normalize_degrees`; for `swe_difdeg2n` use `crate::math::diff_degrees` (it returns the diff normalized to (-180,180]); for `swe_cotrans` use `crate::math::cotrans`.\n3. **Public types** (put in houses.rs, re-export from lib.rs — same pattern as `stars::Star`):\n   ```rust\n   #[derive(Debug, Clone, Copy, PartialEq)]\n   pub struct AscMc { pub ascendant: f64, pub mc: f64, pub armc: f64, pub vertex: f64,\n       pub equatorial_ascendant: f64, pub coascendant_koch: f64, pub coascendant_munkasey: f64, pub polar_ascendant: f64 }\n   impl AscMc { pub fn as_array(&self) -> [f64; 8] { /* [ascendant, mc, armc, vertex, equatorial_ascendant, coascendant_koch, coascendant_munkasey, polar_ascendant] = C ascmc[0..8] */ } }\n   #[derive(Debug, Clone)]\n   pub struct HouseResult { pub cusps: [f64; 37], pub cusp_speeds: [f64; 37], pub ascmc: AscMc, pub ascmc_speeds: AscMc }\n   ```\n   `cusps[0]` unused (=0); normal systems fill `[1..=12]`, Gauquelin `[1..=36]`. `ascmc_speeds` reuses `AscMc` for the 8 parallel speed values.\n4. **Core trig** (ref §2 — port the exact branch structure, NOT simplified atan2):\n   - `fn asc2(x: f64, f: f64, sine: f64, cose: f64) -> f64` — ref §2 `Asc2`, replicate the `sinx==0`/`ass==0` degenerate-branch ORDER (FP hazard §4).\n   - `fn asc1(x1: f64, f: f64, sine: f64, cose: f64) -> f64` — ref §2 `Asc1`, the quadrant fold + cardinal snaps.\n   - `fn asc_dash(x: f64, f: f64, sine: f64, cose: f64) -> f64` — ref §2 `AscDash`, the `ARMCS` scaling, `d>VERY_SMALL` guard.\n   - `fn fix_asc_polar(asc, armc, eps, geolat) -> f64` — ref §2 (used later by house_pos; implement now).\n5. **`calc_h`** — the core. Signature:\n   ```rust\n   struct CalcH { cusps: [f64;37], cusp_speeds: [f64;37], ascmc: AscMc, ascmc_speeds: AscMc, do_interpol: bool }\n   fn calc_h(armc: f64, geolat: f64, eps: f64, hsys: HouseSystem, sundec: Option<f64>, do_speed: bool) -> Result<CalcH, Error>\n   ```\n   Implement ref §3 \"CalcH top-level structure\":\n   - Always-run setup (§3 step 1): `cose/sine/tane`, pole clamp `geolat` to ±(90−VERY_SMALL) when within VERY_SMALL of ±90, `tanfi`. MC via the inline `tand(th)/cose` formula WITH unconditional final `normalize_degrees` (FP hazard §1, the CalcH variant). `mc_speed = asc_dash(th,0,sine,cose)`. Ascendant `ac = asc1(th+90, geolat, sine, cose)`, `ac_speed = asc_dash(th+90, geolat, sine, cose)`. `armc_speed = ARMCS`. Seed `cusps[1]=ac, cusps[10]=mc` and their speeds. (Skip the deprecated-lowercase warning logic — the Rust API takes a typed `HouseSystem`, so there is no lowercase-char path except `SunshineAlt`, handled in sub-task 6.)\n   - `match hsys` — in THIS sub-task implement only: Equal (A/E), EqualMC (D), EqualAries (N), Vehlow (V), WholeSign (W). All other variants: `return Err(Error::CError(format!(\"house system {:?} not yet implemented\", hsys)))` as a temporary stub (later sub-tasks replace each arm). Algorithms from ref §5 \"A/E\", \"D\", \"N\", \"V\", \"W\" — replicate the exact cusp_speed behavior including the §4.2(e) stale/zero quirk for N and W (do NOT \"fix\" it).\n   - Post-switch opposite-cusp mirror (§3 step 3): apply for all systems implemented here (none are in the G/Y/I exclusion set). Mirror speeds only `if do_speed && !do_interpol`.\n   - Special points block (§3 step 4 / §7): always compute vertex/equasc/coasc1/coasc2/polasc and their speeds, gated by `do_speed`. Port ref §7 formulas exactly (vertex tropical-latitude flip; equasc MC-style projection at th+90; coasc1/coasc2/polasc).\n6. **`houses_armc` driver** (ref §3 \"swe_houses_armc_ex2\", §4.2(d)):\n   ```rust\n   pub fn houses_armc(armc: f64, geolat: f64, eps: f64, hsys: HouseSystem, sundec: Option<f64>) -> Result<HouseResult, Error>\n   ```\n   - `let armc = normalize_degrees(armc);`\n   - `let mut h = calc_h(armc, geolat, eps, hsys, sundec, true)?;`\n   - If `h.do_interpol`: do the central finite-difference cusp-speed pass exactly as §4.2(d): `dt = 1.0/86400.0; darmc = dt*ARMCS;` call `calc_h(armc-darmc,...,do_speed=false)` and `calc_h(armc+darmc,...,do_speed=false)`; apply the 90°-wrap guard via `crate::math::diff_degrees` on the `.ascmc.ascendant`; fill `cusp_speeds[1..=12] = diff_degrees(hp.cusps[i], hm.cusps[i]) / 2.0 / dt`. (No do_interpol system exists yet — this branch is dead until sub-task 2 — but implement it now so later tasks just flip the flag.)\n   - Build and return `HouseResult` from `h`.\n7. **lib.rs**: `pub use houses::{AscMc, HouseResult};` (and `houses_armc` is reachable as `crate::houses::houses_armc`).\n\n### C reference\n`docs/c-ref-houses.md` — §1 (types/macros/constants), §2 (core trig), §3 (CalcH structure + driver), §4 (speed mechanism), §5 A/E/D/N/V/W, §7 (special points). FP hazards §12.1, §12.2, §12.4.\n\n### Golden tests\n- **C harness** `tests/c-gen/gen_houses.c`: model on `tests/c-gen/gen_sidereal_time.c` (printf JSON, no swetest). Emit a single top-level JSON object. For THIS task add two keys:\n  - `\"angles_special\"`: for each `(armc, geolat, eps)` in the battery below, call `swe_houses_armc_ex2(armc, geolat, eps, 'P', cusp, ascmc, cusp_speed, ascmc_speed, serr)` and emit `{armc, geolat, eps, ascmc:[0..8], ascmc_speed:[0..8]}` (the 8 special points + speeds are system-independent, so use any valid system; 'P' is fine — only ascmc is read here).\n  - `\"equal_family\"`: for each system char in `['A','D','N','V','W']` and each battery triple, call `swe_houses_armc_ex2` and emit `{hsys, armc, geolat, eps, cusps:[1..12], cusp_speed:[1..12]}`.\n  - **Battery** (reuse in all later houses tasks): armc ∈ {0.0, 47.5, 123.4, 215.7, 290.1, 350.0}; geolat ∈ {51.5, -33.87, 0.0, 64.0, -64.0}; eps ∈ {23.4392911}. (Cartesian product = 30 cases/system. Keep eps single-valued for now; sub-tasks may add more.)\n  - Build/run (from repo root): `cc -O2 -I../swisseph -o tests/c-gen/gen_houses tests/c-gen/gen_houses.c -L../swisseph -lswe -lm && ./tests/c-gen/gen_houses > tests/golden-data/houses.json`. If `../swisseph/libswe.a` is missing, run `make -C ../swisseph libswe.a` first.\n- **Rust test** `tests/golden/houses.rs`: `#[derive(Deserialize)]` case structs; `load()` via `super::golden_data_path(\"houses.json\")`. Two `#[test]` fns: `angles_special` (assert each of the 8 `ascmc`/`ascmc_speed` values) and `equal_family` (assert cusps[1..=12] + cusp_speeds). Map the C `ascmc[0..8]` to `AscMc::as_array()`. Assertions: positions via `super::assert_f64_eps(label, exp, act, 1e-9)`; speeds via `1e-7`. (Try `assert_f64_exact` first where it passes; fall back to eps and leave a comment.)\n- Add `mod houses;` to `tests/golden/main.rs`.\n\n### Acceptance criteria\n- `cargo build` and `cargo clippy --all-targets` clean (no new warnings).\n- `cargo test --test golden houses::angles_special -- --nocapture` passes.\n- `cargo test --test golden houses::equal_family -- --nocapture` passes.\n- `tests/golden-data/houses.json` regenerated and committed.\n\n### Escape hatch\nIf golden tests fail with position errors > 1e-8 after two debugging attempts, STOP and report: which cases fail, actual vs expected, what you tried. For FP-fidelity mismatches read swehouse.c directly (per CLAUDE.md §c_source_budget) — the ref doc abstracts evaluation order. Do not exceed two attempts; escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782844764180,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 59
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782846241856,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782846244071,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Implemented: src/houses.rs (AscMc/HouseResult types, Asc1/Asc2/AscDash/fix_asc_polar core trig, mc_like shared MC/equasc helper, calc_h with Equal-family systems A/D/N/V/W, houses_armc driver with finite-diff speed scaffold). All other house systems return Error::CError(\"not yet implemented\") for now.\n\nGolden harness: tests/c-gen/gen_houses.c (angles_special: 30 cases, equal_family: 150 cases — battery of 6 armc x 5 geolat x 1 eps reused by later houses sub-tasks), tests/golden-data/houses.json, tests/golden/houses.rs.\n\nAll cases pass bitwise-exact (assert_f64_exact), tighter than the eps fallback specified in the acceptance criteria. cargo build/clippy clean, full test suite (73 golden tests) green.\n\nOne bug caught during implementation: a digit-transposition typo in SOLAR_YEAR (365.249_198_93 instead of 365.242_198_93) silently propagated into ARMCS and broke all speed values by ~1.4e-5 deg/day — caught immediately by the golden test eps check, root-caused via isolated unit test comparing against a Python reference implementation.\n\ndocs/codebase-map.md updated with the new houses.rs row and golden test/data/gen-harness rows.",
+      "ts": 1782846237191
+    },
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. One confirmed medium finding (verified against ../swisseph/swehouse.c:622-774): houses_armc's do_interpol finite-difference scaffold (src/houses.rs:473-491) uses `?` on both side-call calc_h results, so a single side-probe failure aborts the whole call with Err. C gates the differencing block on `rp1 >= 0 && rm1 >= 0` and otherwise keeps the already-computed main cusp_speeds, still returning the main result. Dead code for this task (no system here sets do_interpol), but swisseph-rs/62 (Placidus/Koch Newton iteration) builds directly on this scaffold and is exactly where near-polar non-convergence triggers it. Fixing now in a follow-up commit before swisseph-rs/62 starts. Everything else (trig branch order, N/W stale-speed quirk preserved, pole clamp, unconditional normalize_degrees on MC, special points, HouseSystem coverage, golden tests) checked out clean.",
+      "ts": 1782846597613
+    }
+  ],
+  "created_at": 1782844764180,
+  "updated_at": 1782846244071,
+  "completed_at": 1782846244071,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-8274-7ab0-a4f7-21378234072c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/59",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845047412
+    },
+    {
+      "id": "019f19d8-b4ff-7992-b380-e63f16d40294",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/60",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845060351
+    },
+    {
+      "id": "019f19d8-ba75-7942-9d17-d79d31907c56",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/61",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845061749
+    },
+    {
+      "id": "019f19d8-be3f-7863-bdd9-63ea302456e1",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/62",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845062719
+    },
+    {
+      "id": "019f19d8-c5c8-7ec3-b50e-1a8d22611478",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/63",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845064648
+    },
+    {
+      "id": "019f19d8-ca75-7091-a14c-c58fb1e81b64",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/64",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845065845
+    }
+  ]
+}

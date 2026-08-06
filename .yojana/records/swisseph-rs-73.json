@@ -1,0 +1,143 @@
+{
+  "id": "019f1e18-5069-7643-aafc-c66d47b0c79f",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/73",
+  "sequence_number": 73,
+  "title": "RSE 6/12: Solar eclipse local circumstances (eclipse_how)",
+  "description": "### Summary\nPort `eclipse_how` (local circumstances at an observer: magnitude, obscuration, contact geometry, az/alt) and its public wrapper `swe_sol_eclipse_how`. Exposes `Ephemeris::sol_eclipse_how` (`&self`).\n\nDepends on **RSE 5** (eclipse module, `calc_planet_star`, constants) and **RSE 2** (`swe_azalt`) and **RSE 1** (topocentric `calc` — this uses `TOPOCTR|EQUATORIAL` Sun/Moon positions).\n\n### Files\n- `src/eclipse.rs` — add `EclipseHow` (attr) result struct, `eclipse_how`, `swe_sol_eclipse_how`.\n- `src/context.rs` — `pub fn sol_eclipse_how(&self, tjd_ut, ifl: CalcFlags, geopos:[f64;3]) -> Result<EclipseHow, Error>`.\n- `src/lib.rs` — re-export `EclipseHow`.\n- `tests/c-gen/gen_eclipse.c` — add key `sol_how`; regenerate `eclipse.json`.\n- `tests/golden/eclipse.rs` — add `#[test] sol_how`.\n\n### Implementation steps\nRead `docs/c-ref-eclipse-solar.md` §4.1–§4.11.\n\n1. **`EclipseHow`** result: name fields per the `attr[]` index table in §4.9 (`attr[0]`=magnitude, `attr[1]`=diameter ratio, `attr[2]`=obscuration, `attr[3]`=core shadow, `attr[4]`=azimuth, `attr[5]`=true altitude, `attr[6]`=apparent altitude, `attr[7]`=elongation, `attr[8]`=NASA magnitude, `attr[9]`=... — copy exactly from §4.9).\n2. **`eclipse_how`** (§4): setup (§4.1) — topocentric `calc(... TOPOCTR|EQUATORIAL)` for Sun & Moon via `self.calc` with `config.topographic` set from `geopos`; az/alt via `swe_azalt` (§4.2); angular radii + centre separation (§4.3); phase classification (§4.4); magnitude `attr[0]` = `(-dctr + rsun + rmoon)/(2*rsun)`, ratio `attr[1]` (§4.5); obscuration `attr[2]` via the circular-segment lens-area formula (§4.6 — spelled out; preserve the exact segment algebra); visibility threshold (§4.7); NASA magnitude + Saros (§4.8).\n   - **STATELESS NOTE:** C calls `swe_set_topo` then reads `swed.topd`. Here, build a per-call `Ephemeris` view whose `config.topographic = Some(TopoPosition::from(geopos))`, OR pass `geopos` into an internal topocentric-calc helper. Do NOT mutate `self`. If threading topo through `calc` is awkward, add a private `calc_topo(&self, geopos, jd, body, flags)` that clones config with the observer set (same pattern as `houses_ex2`'s `deltat_config` clone at context.rs:286).\n3. **`swe_sol_eclipse_how`** (§4.11): public wrapper; note (§4.11) its horizon-visibility override can zero the whole result when the eclipse is below the horizon — replicate.\n\n### C reference\n`docs/c-ref-eclipse-solar.md` §4 (all subsections), §0 (radii constants).\n\n### Golden tests\n- **C harness** add key `sol_how`: for the same eclipse epochs as `sol_where` and observers `geopos ∈ {(8.55,47.37,500), (-100.0,40.0,0)}` (one near-central, one off-track), call `swe_sol_eclipse_how(tjd_ut, SEFLG_MOSEPH, geopos, attr, serr)`. Emit `{tjd_ut, geopos, retval, attr:[0..11]}`. Regenerate `eclipse.json`.\n- **Rust test** `#[test] sol_how`: assert `attr` fields via `assert_f64_eps(.., 1e-7)`; assert returned flags == `retval`.\n- `cargo test --test golden eclipse::sol_how -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::sol_how -- --nocapture` passes (1e-7).\n\n### Escape hatch\nIf `attr` fails > 1e-6 after two attempts, STOP and report which `attr[]` index diverges. Read `swecl.c:967–1152` directly. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "cargo build + cargo clippy --all-targets clean"
+    },
+    {
+      "done": false,
+      "text": "cargo test --test golden eclipse::sol_how -- --nocapture passes (1e-7)"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Read swecl.c directly (not just the ref doc) for two things the ref doc explicitly left out as raw data: the 181-entry saros_data_solar[] table (swecl.c:107-298, transcribed verbatim into a `const [(i32, f64); 181]`) and the exact eclipse_how/swe_sol_eclipse_how bodies (swecl.c:922-1157) to confirm loop/branch structure the ref doc summarized. No other divergence from the task brief -- implemented calc_planet_star_topo (topo-config-aware variant of calc_planet_star, planet branch only, stars still unsupported for TOPOCTR matching riseset.rs's existing limitation), eclipse_how, EclipseHow, sol_eclipse_how, Ephemeris::sol_eclipse_how, gen_eclipse.c sol_how key (8 cases: 4 sol_where epochs x 2 observers), and the Rust golden test. All golden cases passed on the first run (no debugging cycle needed).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "9bd1c62"
+    },
+    {
+      "type": "git:commit",
+      "value": "11037ac"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916337769,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 73
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782939992732,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1782940139632,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782940172176,
+      "kind": "status_changed",
+      "payload": {
+        "from": "done",
+        "to": "needs-review"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1782948584220,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-review",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review: approve with notes. eclipse_how/sol_eclipse_how verified line-by-line against swecl.c:922-1152 — obscuration=1.0 no-eclipse fallback, Saros d=0.0000001 nudge, attr 0-3/8-10 zeroing all match C exactly; Saros table transcription verified 181/181 entries. Notes (shared with 74/75 review): compiled binary tests/c-gen/gen_eclipse (992KB) was committed in 9bd1c62 and recommitted in d735aa0/f5371ca — siblings are untracked/ignored; recommend git rm --cached + gitignore. EclipseHow.flags doc omits that sol_eclipse_how merges CENTRAL/NONCENTRAL in.",
+      "ts": 1782948342796
+    }
+  ],
+  "created_at": 1782916337769,
+  "updated_at": 1782948584220,
+  "completed_at": 1782948584220,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-9623-7bb3-8296-a2ce64cadbd2",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/73",
+      "target": "swisseph-rs/72",
+      "note": null,
+      "created_at": 1782916486691
+    },
+    {
+      "id": "019f1e1a-9b94-7581-b458-d7d54bbd0146",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/73",
+      "target": "swisseph-rs/69",
+      "note": null,
+      "created_at": 1782916488084
+    },
+    {
+      "id": "019f1e1a-a794-7823-ac35-78646dff9207",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/75",
+      "target": "swisseph-rs/73",
+      "note": null,
+      "created_at": 1782916491156
+    },
+    {
+      "id": "019f1e1a-cde8-7181-8a58-f651616ec134",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/73",
+      "note": null,
+      "created_at": 1782916500968
+    },
+    {
+      "id": "019f1e1a-f9da-7510-99f0-63d038ca4bd4",
+      "edge_type": "refines",
+      "source": "swisseph-rs/73",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916512218
+    }
+  ]
+}

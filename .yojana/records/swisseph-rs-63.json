@@ -1,0 +1,96 @@
+{
+  "id": "019f19d6-2547-7491-9006-65caeaaa1436",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/63",
+  "sequence_number": 63,
+  "title": "Houses 5/9: Krusinski, APC, Pullen SD, Pullen SR (U/Y/L/Q)",
+  "description": "### Summary\nAdd the remaining closed-form systems: Krusinski-Pisa-Goelzer (U, multi-rotation cotrans chain), APC (Y, radians-domain `apc_sector` helper), Pullen SD (L) and Pullen SR (Q, Cardano-style sinusoidal). U has stale/zero cusp speeds (§4.2e); Y/L/Q are finite-difference (`do_interpol`).\n\n### Files\n- `src/houses.rs` — replace stub arms for U/Y/L/Q in `calc_h`; add `fn apc_sector(n: i32, ph: f64, e: f64, az: f64) -> f64` (radians in for ph/e/az, degrees out — ref §5 \"Y\" / FP hazard §12.3).\n- `tests/c-gen/gen_houses.c` — add `\"closed_form_misc\"` key.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add `closed_form_misc` test.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §5 \"U\", \"Y\", \"L\", \"Q\"; §4.2(d),(e); §12.3, §12.6.\n1. **Pullen SD (L)** — ref §5 \"L\": after the ac/dc swap and `acmc` recompute, `q1=180-acmc; d=(acmc-90)/4`; degenerate `acmc<=30` branch (cusps 11=12=mc+acmc/2); else `cusps[11]=mc+30+d, [12]=mc+60+3d`; symmetric on the AC side with `q1`. Set `do_interpol=true`.\n2. **Pullen SR (Q)** — ref §5 \"Q\": Cardano-style `r` solve (no iteration). Replicate the multiplication grouping EXACTLY (§12.6: `xr3 = xr*r*r` as `(xr*r)*r`, `xr4=xr3*r`). Honor the `acmc>90` branch swap of `{xr,x}` vs `{xr3,xr4}` and the `q<1e-30` degenerate path. Set `do_interpol=true`.\n3. **Regiomontanus (R) — already done (sub-task 3); ignore.**\n4. **Krusinski (U)** — ref §5 \"U\": the rotation chain via `crate::math::cotrans`. CHECK cotrans signature/units (src/math.rs:271) — it takes `[f64;3]` and an angle; confirm whether the angle is radians or degrees and pass accordingly (C `swe_cotrans` takes degrees-of-arc? NO — verify; the existing Rust cotrans is used by other modules, match their call convention). Steps A1–A5 then the 6-iteration B1–B5 loop filling cusps 1..6 and opposite 7..12 via the `tand(x[0])/cosd(ekl)` MC-style projection. No `do_interpol` (U has stale speeds per §4.2e — leave cusp_speeds as the post-switch-mirror result; verify empirically against the golden fixture, do NOT invent analytical speeds).\n5. **APC (Y)** — ref §5 \"Y\": `apc_sector(i, fi.to_radians(), ekl.to_radians(), th.to_radians())` for i=1..=12; then `cusps[10]=mc`, `cusps[4]=degnorm(mc+180)`. Polar shift on ALL 12 cusps when `|fi|>=90-ekl && diff_degrees(ac,mc)<0`. Set `do_interpol=true`. Y is in the post-switch-mirror EXCLUSION set (§3 step 3) — do NOT run the 12-cusp opposite mirror for Y.\n   - `apc_sector` body: ref §5 \"Y\" — works in RADIANS internally with plain `tan/atan/atan2/sin/cos` (NOT degree macros); only the final return converts via `*RADTODEG` inside `normalize_degrees`. Match the final `atan2` argument order literally (§12.3).\n\n### C reference\n`docs/c-ref-houses.md` §5 U/Y/L/Q; §4.2(d)(e); §12.3 (apc_sector radians), §12.6 (Pullen SR grouping). Confirm `crate::math::cotrans` units at src/math.rs:271.\n\n### Golden tests\n- C harness: key `\"closed_form_misc\"`: chars `['U','Y','L','Q']` × battery → `{hsys, armc, geolat, eps, cusps:[1..12], cusp_speed:[1..12]}`. Regenerate houses.json.\n- Rust test `closed_form_misc`: cusps eps 1e-9; speeds eps 1e-7 (Y/L/Q finite-diff; U stale — assert U's speeds match the C fixture exactly as-is, including zeros/stale values; do not skip them).\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::closed_form_misc -- --nocapture` passes.\n- All prior houses tests still pass.\n\n### Escape hatch\nSame as sub-task 1. APC's radians-domain `atan2` and Pullen SR's Cardano expression are the highest-risk; for FP mismatches read swehouse.c:782–825 (apc_sector) and 1336–1380 (Pullen SR) directly. Stop after two attempts; escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "All four systems ported clean on first pass — no FP-fidelity mismatches encountered, all golden tests passed without iteration. Confirmed crate::math::cotrans matches swe_cotrans's degree-domain signature exactly (internally forces r=1, passes through xpo[2] unchanged) by reading swephlib.c directly, so the U (Krusinski) rotation chain ported literally with no unit-conversion surprises. Verified the C source for L/Q/U/Y directly (not just the ref doc) given the task's flagged FP-fidelity risk; ref doc was accurate in all cases. Added a `closed_form_misc` key to gen_houses.c/houses.json (U/Y/L/Q × the standard 30-case battery) and a matching Rust test; U's cusp speeds are asserted with eps=0 (bitwise) since they're stale pre-switch values per §4.2e, not finite-differenced.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "96097c3"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782844892487,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 63
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782858700368,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782858706916,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Codex review: approve. No ship-blocking issues. Checked hardest: apc_sector branch order/atan2 args against swehouse.c:782-825, Pullen SR's `xr*r*r` grouping and the acmc>90 cusp swap, the Krusinski cotrans chain (degree-domain signature, x[2] passthrough, x[0]-=x[0] no-op), and U's exclusion from do_interpol / Y's skip_mirror. All matched the cited C control flow; test indexing (1-indexed cusps[1..12] vs 0-indexed serde arrays) consistent. No findings raised.",
+      "ts": 1782859501646
+    }
+  ],
+  "created_at": 1782844892487,
+  "updated_at": 1782858706916,
+  "completed_at": 1782858706916,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-9377-7b23-a2c9-72919a7ca717",
+      "edge_type": "refines",
+      "source": "swisseph-rs/63",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845051767
+    },
+    {
+      "id": "019f19d8-c5c8-7ec3-b50e-1a8d22611478",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/63",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845064648
+    },
+    {
+      "id": "019f19d8-dd75-7060-9373-4059bd91e07f",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/63",
+      "note": null,
+      "created_at": 1782845070709
+    }
+  ]
+}

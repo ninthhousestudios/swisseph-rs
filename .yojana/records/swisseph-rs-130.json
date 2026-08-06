@@ -1,0 +1,66 @@
+{
+  "id": "019f2f7c-23af-7cc0-9ecf-ccd67c0e75b2",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/130",
+  "sequence_number": 130,
+  "title": "ported Alcabitius house system",
+  "description": "line 160 of README.md indicates that alcabitius is incompletely ported. finish this port",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": null,
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": "1. Add Alcabitius cusp branch in calc_h (after Sripati, before Meridian)\\n2. Generate golden data via C swetest\\n3. Add golden test assertions in quad_arith group\\n4. Update README to remove from 'Not ported' table",
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "5a4f517"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783208092591,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 130
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783209136626,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783209353356,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review: approve with notes (both findings addressed in 4fe68f0).\\n\\n1. [fixed] Ref doc inconsistency — B was listed under §4.2(e) 'neither' group and algorithm section still said 'NOT set'. Moved to §4.2(d) finite-difference list, fixed algorithm section.\\n2. [fixed] Golden data did not stress r-clamp boundary — added 12 near-polar cases (geolat=±78) where |r|→0.997. Note: mathematical analysis confirms |r|>1 is geometrically unreachable (ascendant declination is bounded by 90-geolat), so the clamp is a floating-point safety net only.",
+      "ts": 1783209870453
+    }
+  ],
+  "created_at": 1783208092591,
+  "updated_at": 1783209353356,
+  "completed_at": 1783209353356,
+  "edges": []
+}

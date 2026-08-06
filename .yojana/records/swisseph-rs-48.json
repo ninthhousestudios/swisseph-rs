@@ -1,0 +1,70 @@
+{
+  "id": "019f13e3-2ab8-78c0-b61f-5cd716267193",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/48",
+  "sequence_number": 48,
+  "title": "Repo-wide clippy cleanup (cargo clippy --all-targets clean)",
+  "description": "`cargo clippy --all-targets -- -D warnings` does not pass repo-wide. As of rust/clippy 1.95.0 this is ~158 errors, almost all pre-existing code newly flagged by the toolchain bump — NOT introduced by recent feature work (verified during the swisseph-rs/49-52 review: the ayanamsa/sidereal diff added zero new lints). The red baseline undermines the \"no new warnings\" acceptance gate on every task — agents can't distinguish new lint from baseline noise.\n\n## Scope: whole crate, not just moshier/\nDistribution of the ~158 (by file, approximate):\n- src/precession.rs — ~94 `clippy::excessive_precision` (verbatim C coefficient tables)\n- src/obliquity.rs — ~28 (excessive_precision + `needless_range_loop`)\n- src/moshier/moon.rs, moshier/tables.rs — `approx_constant` (TAU, FRAC_1_PI, LOG10_E) + excessive_precision\n- src/calc.rs — `needless_range_loop` (the `loop variable i used to index xx` copy loops), `collapsible_if`\n- src/context.rs — `collapsible_if` (build_leap_seconds)\n- src/sweph_file/{mod,segment,parse,evaluate}.rs — `unnecessary_map_or` (map_or→is_some_and), `manual_div_ceil`, range-contains\n- src/bias.rs, sidereal_time.rs, deltat/mod.rs, jpl/interp.rs, math.rs, nutation/data.rs, constants.rs — assorted\n- tests/golden/{debug_sun,math}.rs — unused import `Epsilon`, dead field `ncf`\n\n## Strategy\n- **Verbatim C coefficient tables** (excessive_precision, approx_constant): scoped `#[allow(...)]` on the table/function with a comment (\"verbatim C coefficient, not the std constant / rounded value\"). Do NOT replace literals with std consts or shorter values — bit changes break golden tests. Verify against C source first.\n- **Mechanical lints** (needless_range_loop, collapsible_if, unnecessary_map_or, manual_div_ceil, range-contains): apply the idiomatic fix where it doesn't change FP evaluation order. For the `xx[i]` copy/denormalize loops in calc.rs, prefer `copy_from_slice`/iterators only if the generated code is identical in effect; otherwise scope-allow with a note.\n- **Test warnings**: drop the unused import and dead field.\n- Run `cargo test` after each cluster — coefficient bits and FP order must be unchanged.\n\n## Acceptance criteria\n- `cargo clippy --all-targets -- -D warnings` clean (0 errors, 0 warnings) OR documented scoped `#[allow]`s with rationale.\n- All tests still pass (`cargo test`) — coefficient bits and FP evaluation order unchanged.\n- After this lands, the \"no new clippy warnings\" gate on future tasks becomes meaningful again.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "All 158 clippy errors resolved; `cargo clippy --all-targets -- -D warnings` is clean and all 131 tests pass. Distribution closely matched the task estimate (116 excessive_precision, 14 needless_range_loop, 7 manual_range_contains, 6 if_same_then_else, 6 collapsible_if, 3 approx_constant, plus div_ceil/map_or/assign_op/large_const_arrays/too_many_arguments singletons).\n\nApproach divergences from the plan:\n- excessive_precision: used module-level `#![allow]` in precession.rs and obliquity.rs (each is almost entirely verbatim coefficient tables) rather than per-table allows — cleaner. Used per-item allows in files with only a few coefficient literals (constants.rs STR, bias.rs BIAS_IAU2006, deltat match-arm, sidereal_time gmst_era, evaluate.rs SEPS/CEPS2000).\n- if_same_then_else: the precess/obliquity model-selection chains and the calc_{jpl,sweph} test tolerance tables are intentional (mirror C's short-term/long-term selection; document per-branch tolerance rationale). Scope-allowed with comments rather than collapsing.\n- approx_constant: 6.28 (moon.rs, a perturbation amplitude), 0.31831 (MAR_LON_TBL ≈ FRAC_1_PI), -0.43420 (URA_LON_TBL ≈ LOG10_E) are coincidental coefficient matches — scope-allowed.\n- collapsible_if: collapsed to let-chains (stable since 1.88). One math.rs branch couldn't collapse (outer if has an else) so only the KEEP_SIGN else-if was merged.\n- needless_range_loop: rewrote as iterator/enumerate where FP-identical (elementwise xx[i] copy loops in calc.rs, parallel comparison loops in tests). Used `.take(n)` where the backing array is longer than the loop bound (jpl interp pv, segment nsize, corrections xx). Kept range-indexed loops in precession.rs (parallel-row coefficient-matrix indexing) under scope-allow.\n- assign_op_pattern: `x = STR * x` -> `x *= STR` is bit-identical (IEEE mul is commutative).\n- large_const_arrays: NPL const -> static (used only by reference).\n- too_many_arguments: scope-allowed on unpack_integer_coeffs (binary-decode helper).\nsutra modification-guard required sutra_impact acks on context.rs/math.rs/calc.rs/mod.rs/obliquity_bias.rs (all low risk).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "00b57d2"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782745082552,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 48
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782765465387,
+      "kind": "updated",
+      "payload": {
+        "field": "title",
+        "from": "Investigate clippy errors + warnings in moshier/",
+        "to": "Repo-wide clippy cleanup (cargo clippy --all-targets clean)"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782765607020,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782766409724,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782745082552,
+  "updated_at": 1782766409724,
+  "completed_at": 1782766409724,
+  "edges": []
+}

@@ -1,0 +1,120 @@
+{
+  "id": "019f19d7-e438-7431-a88f-ebee7bd826a0",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/66",
+  "sequence_number": 66,
+  "title": "Houses 8/9: swe_house_pos (planet → house position) + swe_gauquelin_sector (imeth 0/1)",
+  "description": "### Summary\nAdd the inverse: `house_pos(armc, geolat, eps, hsys, xpin, sundec) -> Result<f64, Error>` giving a continuous house position (1.0..13.0) for a planet at ecliptic `[lon, lat]`, plus the geometric Gauquelin-sector lookup (`imeth 0/1`) on `Ephemeris`. The rise/set Gauquelin methods (imeth 2–5) depend on the not-yet-ported rise/trans module and are explicitly out of scope.\n\n### Files\n- `src/houses.rs` — add `pub fn house_pos(armc: f64, geolat: f64, eps: f64, hsys: HouseSystem, xpin: [f64;2], sundec: Option<f64>) -> Result<f64, Error>` and the static `armc_to_mc` variant used only here (ref §2 / §12.1 — the `degnorm`-before-and-after-`+180` form). Add `pub fn gauquelin_sector_geometric(...)` as an `Ephemeris` method in context.rs.\n- `tests/c-gen/gen_houses.c` — add `\"house_pos\"` and `\"gauquelin_sector\"` keys.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add `house_pos` and `gauquelin_sector` tests.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §8 (full per-system table + Sunshine/APC shared formula), §10 (gauquelin_sector), §12.5 (Sripati wrap).\n1. **Common setup** (ref §8 setup): `hsys` uppercased semantics (SunshineAlt and Sunshine both map to the I/i branch). Pre-check: compute the 12 cusps via `houses_armc(...)`; if `xpin` matches a cusp within MILLIARCSEC and `xpin[1]==0`, return the integer house. Compute `xeq = cotrans([xpin[0], xpin[1], 1.0], -eps)`, `ra=xeq[0]`, `de=xeq[1]`; `mdd/mdn` per ref §8 (signed RA offsets in (-180,180]). For Sunshine, `dsun=sundec` (required, else Err); for APC, `dsun = declination of ascendant` via `cotrans([ascmc.ascendant,0,1], -eps)[1]`.\n2. **Per-system inverse** — implement the ref §8 table. Group by method:\n   - Trivial: N, X.\n   - Closed-form shared-setup: A/E/D/V/W, O/S (S adds the §12.5 `+0.5`/wrap-to-1 quirk — replicate exactly), B (Alcabitius semiarc), F, M.\n   - Rotation/projection: C (`cotrans(.., -geolat)`), H (`cotrans(.., 90-geolat)`), U (multi-rotation; the `xp[1]` term is vestigial/dead — compute but ignore), R (closed-form with mdd≈0/±180 special cases), K (circumpolar-aware; can FAIL → return `Err`/hpos=0 with the \"Koch house position failed in circumpolar area\" condition).\n   - Iterative bisection: T (binary search on pole height, `fac` doubling, ≤1000 loops) — distinct from CalcH's Newton.\n   - Placidus/Gauquelin: P, G — shared \"Otto Ludwig\" circumpolar formula; G rescales (`/10`, clockwise `360-xp0`).\n   - Sunshine/APC shared geometric approximation: I, i, Y (ref §8 \"Sunshine/APC shared formula\").\n   - default fallback (incl. L, Q): bracket the 12 cusps and linearly interpolate (sets a \"simplified algorithm\" note). J also uses the bracket-interpolate pattern.\n   - Every branch adds `MILLIARCSEC` before `/30 + 1` (ref §8 final note).\n   NOTE: if this function exceeds ~600 lines, split the iterative/approximate branches (T, I/i/Y) into a follow-up task and have them return `Err(unimplemented)` for now — but attempt all in one pass first.\n3. **gauquelin_sector_geometric** (ref §10, imeth 0/1): on `Ephemeris`: compute `tjde`, `eps_true`, `armc` (same as sub-task 7 §3); get body position `x0` via `self.calc(tjde, body, flags)` (or fixstar2 if a star name given — optional, can defer star path); if `imeth==1` zero `x0[1]`; `*dgsect = house_pos(armc, geolat, eps_true, Gauquelin, [x0[0],x0[1]], None)`. imeth 2–5: `return Err(Error::CError(\"gauquelin rise/set methods need rise_trans (not ported)\".into()))`.\n\n### C reference\n`docs/c-ref-houses.md` §8 (per-system inverse — read the whole table), §8 \"Sunshine/APC shared formula\", §10, §12.5, §12.1. Read swehouse.c:2216–2876 directly for any system whose inverse mismatches.\n\n### Golden tests\n- C harness: key `\"house_pos\"`: for each system char (all 24, incl. lowercase 'i') × a few `(armc, geolat, eps)` triples × a few planet positions `xpin` (e.g. `[10,0], [123.4,2.5], [280,-1.0]`), call `swe_house_pos(armc, geolat, eps, hsys, xpin, serr)` (set `ascmc[9]=sundec` first for 'I'/'i' by calling `swe_houses_armc_ex2` once to populate the C cache, or pass sundec via the documented sentinel — match whatever makes the C return correct values; record the sundec used). Emit `{hsys, armc, geolat, eps, xpin:[2], sundec, hpos}`. Key `\"gauquelin_sector\"`: `swe_gauquelin_sector(t_ut, ipl, NULL, iflag, imeth, geopos, 0,0, &dgsect, serr)` for imeth ∈ {0,1}, a few planets/dates/locations; emit `{tjd_ut, ipl, imeth, geolon, geolat, dgsect}`. Regenerate houses.json.\n- Rust tests `house_pos` (assert hpos eps 1e-7; Koch-circumpolar-fail cases assert `Err`) and `gauquelin_sector` (eps 1e-6, Moshier backend).\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::house_pos -- --nocapture` passes (or, if split per step 2's note, the implemented subset passes and the deferred branches are filed as a follow-up task).\n- `cargo test --test golden houses::gauquelin_sector -- --nocapture` passes.\n- All prior houses tests still pass.\n\n### Escape hatch\nSame as sub-task 1. This is the largest single function — if it balloons past 600 lines or a branch resists fidelity after two attempts, STOP, file the remaining branches as a follow-up sub-task (refines swisseph-rs/11), and report. Escalate fidelity issues to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Followed the task spec closely, reading the actual C source (swehouse.c:2216-2904, swecl.c:6298-6428) directly rather than relying solely on the ref doc, since house_pos is described as the largest single function and fidelity-critical. Key implementation decisions: (1) added a THIRD armc_to_mc variant (armc_to_mc_house_pos) distinct from both crate::math::armc_to_mc and mc_like, matching swehouse.c:2149-2166's degnorm-before-and-after-+180 structure exactly — confirmed via careful C reading these three produce different bit patterns; (2) added mc_transform_raw for Morinus's un-normalized inline transform (no final normalize at all, unlike armc_to_mc_house_pos); (3) unified J/default(L,Q) bracket-interpolation into one bracket_interpolate_12 helper; (4) the \"err\" flag in golden data is driven by hpos==0.0 (Koch's genuine sentinel), NOT by serr being non-empty, since P/G/J/L/Q/default all set an informational (non-error) serr on valid results — an early attempt using serr-non-empty produced 19 false \"err\" cases; (5) had to hunt for actual Koch-failure parameters via a throwaway C scan since the initial polar battery (geolat=78) never triggered the true circumpolar failure, only the \"doubtful result\" warning.\n\nFound and fixed a pre-existing bug in sidereal_time.rs's sidtime_long_term while debugging a gauquelin_sector golden test failure at 1600/1800 AD epochs: its 2 internal deltaT calls used the caller's real config (picking up Moshier's DE404 tid_acc) instead of forcing TIDAL_DEFAULT like C's swe_deltat_ex(tjd,-1,NULL) sentinel always does — same class of bug as the already-documented houses_ex2 deltaT/tid_acc inconsistency (commit 6d07c98), just in a different call site. Fixed with the same override pattern; confirmed bit-exact against C for all 6 test epochs afterward.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782845006904,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 66
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782913395930,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782913406931,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Implemented house_pos (all 25 HouseSystem variants, incl. Alcabitius which calc_h doesn't have yet — house_pos's Alcabitius branch is self-contained) and gauquelin_sector_geometric (imeth 0/1). 150 house_pos golden cases (incl. 1 genuine Koch circumpolar-failure case asserting Err) + 36 gauquelin_sector cases, all passing at 1e-7/1e-6.\n\nBonus find: gauquelin_sector's golden test caught a pre-existing bug in sidereal_time.rs's sidtime_long_term (used for pre-1850/post-2050 dates) — its two internal deltaT calls used the caller's real config instead of forcing TIDAL_DEFAULT, unlike C's swe_deltat_ex(tjd,-1,NULL) sentinel. Same class of bug as the already-documented houses_ex2 deltaT/tid_acc inconsistency. Fixed with the same pattern (local deltat_config override). Confirmed bit-exact against C afterward for all 6 test epochs incl. 1600/1800 AD.\n\ncargo clippy --all-targets -- -D warnings clean, full golden suite (84 tests) + lib unit tests (80 tests) green.",
+      "ts": 1782913379984
+    },
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, tasks 65/66/67 together): approve with notes. Verified against C swehouse.c: the omitted second precheck loop (`i+=3`) only sets a temporary `xp[0]` overwritten immediately — vestigial in C, correct to drop. Sunshine's explicit `sundec` param correctly replaces C's `ascmc[9]==99` static-cache hack. APC's `house_pos` `ok_or_else(Err(\"requires computable ascendant\"))` is unreachable defensive code — houses_armc('Y') is infallible (calc_h handles APC explicitly, not sundec-gated) — so no divergence from C's dsun=0 fallthrough; fine as-is. house_pos golden covers all 24 systems incl Koch circumpolar Err path. clippy clean, 85/85 golden.",
+      "ts": 1782914787005
+    }
+  ],
+  "created_at": 1782845006904,
+  "updated_at": 1782913406931,
+  "completed_at": 1782913406931,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-9e44-7070-a4d4-f38269d42a3f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845054532
+    },
+    {
+      "id": "019f19d8-d5eb-7602-aced-4b9eb65d4a5e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/64",
+      "note": null,
+      "created_at": 1782845068779
+    },
+    {
+      "id": "019f19d8-d996-70f3-9027-493ee55a7741",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/62",
+      "note": null,
+      "created_at": 1782845069718
+    },
+    {
+      "id": "019f19d8-dd75-7060-9373-4059bd91e07f",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/63",
+      "note": null,
+      "created_at": 1782845070709
+    },
+    {
+      "id": "019f19d9-2fc9-7b93-b4b2-e8c020222fdd",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/60",
+      "note": null,
+      "created_at": 1782845091785
+    },
+    {
+      "id": "019f19d9-31fe-7562-b62a-e40c1daca28b",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/61",
+      "note": null,
+      "created_at": 1782845092350
+    }
+  ]
+}

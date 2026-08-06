@@ -1,0 +1,88 @@
+{
+  "id": "019f14c8-1a5c-7ec0-b854-e56c61eedb08",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/49",
+  "sequence_number": 49,
+  "title": "Ayanamsa data table + sidereal config plumbing",
+  "description": "### Summary\nTranscribe the 47-entry C `ayanamsa[]` init table into Rust and add the sidereal config plumbing: two new `EphemerisConfig` fields plus a `set_sidereal_mode` setter that mirrors C's `swe_set_sid_mode` (bit decomposition, auto-flags, true-star bit-clear, USER handling, PREC_ORIG model override). NO ayanamsa math in this task — that is the next sub-task.\n\n### Architecture notes (corrections to base task)\n- The base task said `swe_set_sid_mode` → `EphemerisConfig.sidereal: Option<SiderealConfig>`. That is STALE. The config already has flat fields `sidereal_mode: Option<SiderealMode>`, `sidereal_t0: f64`, `sidereal_ayan_t0: f64` (src/context.rs:21-23). Do NOT introduce a `SiderealConfig` struct. Add two more flat fields (below).\n- `SiderealMode` enum (47 modes + User=255) already exists at src/types.rs:394-503. `SiderealBits` flags (ECL_T0=256, SSY_PLANE=512, USER_UT=1024, ECL_DATE=2048, NO_PREC_OFFSET=4096, PREC_ORIG=8192) already exist at src/flags.rs:33-43.\n- Stateless: no global `swed.sidd`, no `ayana_is_set`. Config holds everything explicitly.\n\n### Files\n- **src/ayanamsa.rs** (currently empty stub): add `AyaInit` struct, the `AYANAMSA: [AyaInit; 47]` const table, and a `pub(crate) fn aya_init(index: usize) -> AyaInit` accessor.\n- **src/context.rs**: add two fields to `EphemerisConfig` + its `Default`; add `impl EphemerisConfig { pub fn set_sidereal_mode(...) }`.\n- (No change needed to src/flags.rs or src/types.rs — enum & bits already present.)\n\n### Implementation steps\n\n1. **`AyaInit` struct** in src/ayanamsa.rs. Cite docs/c-ref-ayanamsa.md §\"struct aya_init Definition\". Shape:\n```rust\n#[derive(Debug, Clone, Copy)]\npub(crate) struct AyaInit {\n    pub t0: f64,          // epoch JD (TT or UT per t0_is_ut)\n    pub ayan_t0: f64,     // ayanamsa value in DEGREES at t0\n    pub t0_is_ut: bool,\n    pub prec_offset: i32, // 0=none, -1=unclear, 1=IAU1976, 11=Newcomb\n}\n```\n\n2. **`AYANAMSA: [AyaInit; 47]` const**. Cite docs/c-ref-ayanamsa.md §\"Ayanamsa Data Table\" — transcribe ALL 47 rows (indices 0-46) exactly. For the entries whose `ayan_t0` is written as an arithmetic expression in C (indices 1, 3, 4, 5, 6, 7, 8, 46 — listed in the ref doc's \"Computed numeric values\" block), write the SAME arithmetic expression in Rust as a const expression (e.g. `ayan_t0: 23.250182778 - 0.004658035`) so the folded double matches C bit-for-bit; do not hand-paste the pre-computed decimal. Map `t0_is_UT` TRUE→`true`. Use named JD constants where the ref shows them (J2000=2451545.0 etc., already in src/constants.rs). The 12 fixed-star override rows (17, 27-33, 35, 36, 39, 40) have `t0:0.0, ayan_t0:0.0` — transcribe as-is (their data is never consulted).\n\n3. **Two new `EphemerisConfig` fields** (src/context.rs, after `sidereal_ayan_t0` at line 23):\n```rust\npub sidereal_bits: crate::flags::SiderealBits,\npub sidereal_t0_is_ut: bool,\n```\nAdd to the `Default` impl: `sidereal_bits: SiderealBits::empty(), sidereal_t0_is_ut: false,`.\n\n4. **`EphemerisConfig::set_sidereal_mode(&mut self, sid_mode: i32, t0: f64, ayan_t0: f64)`**. Cite docs/c-ref-ayanamsa.md §\"swe_set_sid_mode()\". Signature takes a raw `i32` word (index | projection bits) to mirror the C API 1:1 so golden tests can pass identical integers. Steps:\n   1. `if sid_mode < 0 { sid_mode = 0; }`\n   2. `let index = (sid_mode % 256) as usize;` (SE_SIDBITS mask = 256, index is low 8 bits)\n   3. Determine effective bits:\n      - if `index` ∈ {18, 19, 20, 34}: bits = `SiderealBits::ECL_T0` (REPLACE, not OR — these standard-equinox modes are auto-flagged ECL_T0).\n      - else if `index` ∈ {17, 27, 28, 29, 30, 31, 32, 33, 35, 36, 39, 40}: bits = `SiderealBits::empty()` (true-star/galactic strip all projection bits).\n      - else: `bits = SiderealBits::from_bits_truncate((sid_mode as u32) & !0xFFu32)` (high bits = projection flags).\n   4. Bounds: `if index >= 47 && index != 255 { index = 0; bits = SiderealBits::empty(); }` (silent fallback to Fagan-Bradley).\n   5. Load t0/ayan_t0/t0_is_ut:\n      - if `index == 255` (USER): `self.sidereal_t0 = t0; self.sidereal_ayan_t0 = ayan_t0; self.sidereal_t0_is_ut = bits.contains(SiderealBits::USER_UT);`\n      - else: `let a = AYANAMSA[index]; self.sidereal_t0 = a.t0; self.sidereal_ayan_t0 = a.ayan_t0; self.sidereal_t0_is_ut = a.t0_is_ut;`\n   6. PREC_ORIG override (cite ref §\"PREC_ORIG feature\"): if `bits.contains(SiderealBits::PREC_ORIG) && index != 255 && AYANAMSA[index].prec_offset > 0`:\n      - set `self.astro_models.prec_longterm` and `prec_shortterm` to `PrecessionModel::try_from(prec_offset)?` (prec_offset is 1=IAU1976 or 11=Newcomb; PrecessionModel repr matches — IAU1976=1, Newcomb=11).\n      - set nutation model: if prec_offset==11 → `NutationModel::Woolard` (5); if prec_offset==1 → `NutationModel::IAU1980` (1).\n   7. Store: `self.sidereal_mode = Some(SiderealMode::try_from(index as i32).unwrap()); self.sidereal_bits = bits;`\n\n### C reference\ndocs/c-ref-ayanamsa.md §\"struct aya_init Definition\", §\"Ayanamsa Data Table\", §\"swe_set_sid_mode()\", §\"SE_SIDBIT Flag Constants\", §\"SE_SIDM_* Index Constants\". FP note 6 (arithmetic-expression constants).\n\n### Golden tests\nNo external golden data needed for this task — the numeric table values are validated transitively by the next sub-task's ayanamsa golden tests. Add `#[cfg(test)] mod tests` in src/ayanamsa.rs:\n- `AYANAMSA.len() == 47`.\n- Spot-check 3 values against the ref table: index 0 `ayan_t0 ≈ 24.042044444` and `prec_offset == 11`; index 9 `t0_is_ut == true`; index 1 `ayan_t0 ≈ 23.245524743`.\n- `set_sidereal_mode(18, 0.0, 0.0)` (J2000) → `sidereal_bits.contains(ECL_T0)` and `sidereal_t0 == 2451545.0`.\n- `set_sidereal_mode(27 | 256, 0.0, 0.0)` (TrueCitra with ECL_T0 requested) → `sidereal_bits.is_empty()` (true-star strips bits).\n- `set_sidereal_mode(255 | 1024, 1900000.0, 5.0)` (USER|USER_UT) → `sidereal_t0 == 1900000.0 && sidereal_ayan_t0 == 5.0 && sidereal_t0_is_ut == true`.\n\n### Acceptance criteria\n- `cargo build` succeeds.\n- `cargo test --lib ayanamsa -- --nocapture` passes.\n- `cargo clippy --all-targets -- -D warnings` clean.\n\n### Escape hatch\nThis task is pure data + config logic; no numerical pipeline. If `cargo build` fails on enum `try_from` availability for PrecessionModel/NutationModel, check src/types.rs for the existing `TryFrom<i32>` impls and use them; if absent, add a minimal match. If anything about the table semantics is ambiguous, re-read sweph.h:351-596 via the C source (not the ref doc) per CLAUDE.md.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward port. One notable detail: the task spec showed the AYANAMSA table as inline struct literals but the formatter expanded them to multi-line; verified arithmetic const expressions (indices 1, 3-8, 46) compile fine on Rust 1.95. The aya_init() accessor needed #[allow(dead_code)] since it's not yet called — next subtask will use it. Pre-existing clippy failures (~158 errors in obliquity/bias/calc etc.) were already present; only ayanamsa.rs is clean.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "66742db"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "ayanamsa"
+  ],
+  "history": [
+    {
+      "ts": 1782760086108,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 49
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782761039007,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782761220249,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, batch 49-52): approve. set_sidereal_mode bits logic verified faithful against C swe_set_sid_mode (sweph.c:2861) — standard-equinox modes REPLACE bits with ECL_T0 (C does sip->sid_mode=sid_mode; |=ECL_T0 after the %=256 mask), true-star modes reset to bare index, PREC_ORIG guard matches. Table + config tests pass.",
+      "ts": 1782764901586
+    }
+  ],
+  "created_at": 1782760086108,
+  "updated_at": 1782761220249,
+  "completed_at": 1782761220249,
+  "arc_id": "019efa3c-0958-7191-8176-140a89304f9a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f14ca-b7a4-77d3-bbfe-2db8a88bbccb",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/50",
+      "target": "swisseph-rs/49",
+      "note": null,
+      "created_at": 1782760257444
+    },
+    {
+      "id": "019f14ca-c41b-7af0-a3d5-d70ee7fe6241",
+      "edge_type": "refines",
+      "source": "swisseph-rs/49",
+      "target": "swisseph-rs/9",
+      "note": null,
+      "created_at": 1782760260635
+    }
+  ]
+}

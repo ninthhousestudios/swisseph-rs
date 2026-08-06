@@ -1,0 +1,88 @@
+{
+  "id": "019f1396-d20c-75c2-934b-7a420e83c7ef",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/43",
+  "sequence_number": 43,
+  "title": "JPL DE backend: mmap reader + header parse",
+  "description": "Port the JPL DE binary file open + header parse (swejpl.c `fsizer` / `state` first-call init) as a stateless, mmap-backed reader. No Chebyshev interpolation in this sub-task — that is the next sub-task.\n\nRead `docs/c-ref-jpl.md` first (whole doc; this sub-task uses §Constants, §Data Structures, §File Format, §\"Byte Order / Endianness\", §`fsizer`).\n\n## Architecture invariants (non-negotiable)\n- Stateless: `JplFile` holds read-only data (mmap + parsed header). All methods take `&self`. No `&mut self`, no interior mutability, no cached-record field. The OS page cache + mmap replaces C's mutable record cache.\n- Backend isolation (sutra forbidden_dep, severity=blocking): the `jpl` module MUST NOT import from `sweph_file` or `moshier`. Define its own byte-order reader; do not reuse `sweph_file::types::ByteOrder`. The minor duplication is required by the independence constraint.\n- Use mmap, NOT BufReader (the file `ephe/de441.eph` is 2.7 GB).\n\n## Files\n- Convert `src/jpl.rs` (currently an empty stub) into a directory module:\n  - `src/jpl/mod.rs` — declares submodules; defines `JplFile` (mmap + `JplHeader`), `JplFile::open`, accessors. Re-export `JplHeader`.\n  - `src/jpl/header.rs` — local `ByteOrder` enum + `Reader`, endian detection, header parse, ksize computation, `JplHeader` struct.\n  - To convert: `mv src/jpl.rs /tmp/` is blocked by policy; instead create `src/jpl/mod.rs` and `src/jpl/header.rs`. The empty `src/jpl.rs` and the new `src/jpl/` cannot coexist — ask Josh to remove the empty `src/jpl.rs`, or (preferred) keep a single-file `src/jpl.rs` ONLY IF you also place header code inline; but the dir-module layout mirroring `sweph_file/` is the target. Coordinate the one-file deletion with Josh (file deletion is on the auto-deny list).\n- `src/lib.rs`: `pub mod jpl;` already present (line 16); a directory module resolves identically — no edit needed.\n- Update the backend-isolation constraint patterns: the forbidden_dep constraints (provenance `yojana:swisseph-rs §module-tree`) reference `src/jpl.rs`; once jpl becomes a directory they go inert (zero-match), silently disabling isolation enforcement. Update the module-tree source so the patterns read `src/jpl/**` (mirror the same fix needed for `src/sweph_file/**`). Note this in the execution_record.\n- Tests: `tests/golden/jpl_header.rs` (new), `tests/c-gen/gen_jpl_header.c` (new), register `mod jpl_header;` in `tests/golden/main.rs`.\n\n## Implementation steps\n\n1. **`ByteOrder` + `Reader`** (header.rs). Define `enum ByteOrder { Little, Big }` with `read_i16/read_i32/read_f64(&self, bytes) -> _` (swap iff Big). Define a `Reader<'a> { data: &'a [u8], pos: usize, order: ByteOrder }` with `read_i32/read_f64/skip/seek` and bounds checks returning `Error::FileFormat`. Mirror the shape of `sweph_file/parse.rs`'s `Reader` but write it fresh inside jpl. Cite c-ref-jpl.md §\"reorder()\".\n\n2. **Endian detection** (c-ref-jpl.md §\"Detection Strategy\"). JPL files have NO magic number. Read `ss[0..3]` (3 f64 at byte offset 2652) as Little-endian; if `ss[2] < 1.0 || ss[2] > 200.0`, the file is Big-endian → re-read as Big. Validate plausibility: `ss[0],ss[1]` ∈ [-5_583_942.0, 9_025_909.0], `ss[2]` ∈ [1.0, 200.0]; else `Error::FileFormat`.\n\n3. **Header parse** (c-ref-jpl.md §\"Record 0 — File Header\" offset table). From the mmap with the detected order: skip 252 (title) + 2400 (cnam) = offset 2652; read `ss[3]`; read `ncon: i32` @2676; `au: f64` @2680; `emrat: f64` @2688; `ipt[0..36]` (36 × i32) @2696; `numde: i32` @2840; `lpt[0..3]` (3 × i32) @2844, copy into `ipt[36..39]`. Result: `ipt: [i32; 39]`.\n\n4. **ksize computation** (c-ref-jpl.md §`fsizer`). DE441 is NOT in the known-ksize table — compute generically: iterate `i in 0..13`, track `kmx`/`khi` = (max `ipt[i*3]`, `i+1`); `nd = if khi == 12 { 2 } else { 3 }`; `ksize = ((ipt[khi*3-3] + nd*ipt[khi*3-2]*ipt[khi*3-1] - 1) * 2) as usize`; if `ksize == 1546 { ksize = 1652 }`; validate `1000 <= ksize <= 5000`. Derive `irecsz = 4*ksize` (bytes), `ncoeffs = ksize/2` (doubles per record).\n\n5. **File-length validation** (c-ref-jpl.md §\"File Validation\" step 1). Compute `nseg = ((ss[1]-ss[0])/ss[2])` segments; expected coefficient doubles = Σ over bodies `i in 0..12` of `ipt[i*3+1]*ipt[i*3+2]*(if i==11 {2} else {3})*nseg`, plus `2*nseg` (start/end JD per segment), ×8 bytes, plus `2*ksize*4` (header+constants records). Accept `mmap.len() == expected` OR `expected + ksize*4`. Else `Error::FileFormat`.\n\n6. **`JplFile::open(path: &Path)`** (mod.rs). Open file, mmap with `unsafe { Mmap::map(&file) }` and the same SAFETY comment as `SwissEphFile::open` (src/sweph_file/mod.rs:28-32). Parse header (steps 2-5). Store `mmap` + `header`. Provide `&self` accessors: `header() -> &JplHeader`, `bytes() -> &[u8]`, `byte_order() -> ByteOrder` (so the next sub-task can read records). Add a `_assert_send_sync` test like sweph_file/mod.rs:143.\n\n## `JplHeader` (pub, in header.rs)\n```rust\npub struct JplHeader {\n    pub byte_order: ByteOrder,\n    pub ss: [f64; 3],   // [start_jd, end_jd, seg_days]\n    pub au: f64,        // AU in km\n    pub emrat: f64,     // Earth/Moon mass ratio\n    pub denum: i32,     // DE number (expect 441)\n    pub ncon: i32,\n    pub ipt: [i32; 39], // 13 bodies × 3 (offset[1-based], ncf, na)\n    pub ksize: usize,\n    pub irecsz: usize,  // bytes per record\n    pub ncoeffs: usize, // doubles per record\n}\n```\n\n## C reference\n`docs/c-ref-jpl.md` §§ Constants, Data Structures, File Format, \"Byte Order / Endianness\", `fsizer`, \"File Validation\".\n\n## Golden tests\n- **`gen_jpl_header.c`** (standalone parser, NOT linked against libswe internals — model on `tests/c-gen/gen_se1_header.c`): open `ephe/de441.eph` with `fopen`/`fread`, replicate the header parse independently, and emit `tests/golden-data/jpl_header.json` with `{ ss:[3], au, emrat, denum, ncon, ipt:[39], ncoeffs }`. Build/run instructions in a header comment matching gen_se1_header.c.\n  - Use the absolute path `<repo>/ephe/de441.eph` (NOT `../swisseph/ephe`, which has no `.eph` file).\n- **`jpl_header.rs`**: locate `ephe/de441.eph` via `PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")).join(\"ephe\").join(\"de441.eph\")`. If `!path.exists()` → `return` (skip, gated on file presence). Else open `JplFile`, deserialize the JSON, assert: `ss` exact (assert_f64_exact), `au` exact, `emrat` exact, `denum == 441`, `ncon`, `ipt[39]` element-wise exact, `ncoeffs` matches.\n\n## Acceptance criteria\n- `cargo build` clean.\n- `cargo test --test golden jpl_header -- --nocapture` passes (de441.eph IS present, so it must actually run and pass — a silent skip is a failure to report).\n- `cargo clippy --all-targets` — no new warnings.\n- `mcp__sutra__sutra_constraints action=violations` shows no new blocking forbidden_dep violations from the jpl module.\n\n## Escape hatch\nIf header fields mismatch the C reference after two debugging attempts, STOP and report: which fields, actual vs expected (esp. ksize/ncoeffs and ipt[]), and the endian-detection outcome. The most likely culprits are endian detection and the 1-based ipt offsets. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward port. Two non-obvious points: (1) serde doesn't implement Deserialize for [i32; 39] (max is 32), so the golden test uses Vec<i32> instead; (2) the file-length validation loop must cover all 13 bodies (0..13) including librations — the ref doc's 'for i in 0..12' notation is inclusive/13-body, not exclusive/12-body. Confirmed by checking that sum-of-body-coefficients + 2 JDs per segment × 8 bytes + 2 header records × ksize×4 equals the actual 2.7 GB file size. Backend-isolation constraints now bind (all four jpl-touching constraints show non-zero matched_file_count, zero violations).\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "f3e82e7"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-3",
+    "jpl"
+  ],
+  "history": [
+    {
+      "ts": 1782740079116,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 43
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782741460642,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782741846910,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "opus-planner",
+      "text": "UPDATE (checkpoint:swisseph-rs/8 tend pass, 2026-06-29): The backend-isolation forbidden_dep globs have ALREADY been re-pointed to `src/jpl/**` in `.sutra/rules.toml` — you do NOT need to edit the constraint patterns. They are currently inert (intentional: `src/jpl/**` matches nothing until you create the directory). Your only constraint-related step: after converting `src/jpl.rs` → `src/jpl/` and adding code, run a sutra reparse (`sutra_add_root` on the repo) then `sutra_constraints action=violations` and CONFIRM the four jpl-touching backend-isolation constraints now bind (no `dead_constraint` warning for `backend-isolation:moshier→jpl`, `jpl→moshier`, `jpl→sweph`, `sweph→jpl`) and report zero real violations from the jpl module. If `jpl→moshier`/`jpl→sweph` show violations, your module is importing another backend — fix the import, don't waive.",
+      "ts": 1782740893969
+    }
+  ],
+  "created_at": 1782740079116,
+  "updated_at": 1782741846910,
+  "completed_at": 1782741846910,
+  "arc_id": "019efa3b-ffd4-7111-894d-963830d91b4a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1398-f220-7f51-9ac5-9a50a2ab29df",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/44",
+      "target": "swisseph-rs/43",
+      "note": null,
+      "created_at": 1782740218400
+    },
+    {
+      "id": "019f1398-fc50-7d11-8ed2-5b51bd78d2f3",
+      "edge_type": "refines",
+      "source": "swisseph-rs/43",
+      "target": "swisseph-rs/8",
+      "note": null,
+      "created_at": 1782740221008
+    }
+  ]
+}

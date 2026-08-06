@@ -1,0 +1,73 @@
+{
+  "id": "019f28f1-2661-7593-9de4-ed54e5016bc6",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/119",
+  "sequence_number": 119,
+  "title": "Polish 6/7: Send+Sync guarantee (assertion + concurrency test) and FFI design doc",
+  "description": "### Summary\nPin the crate's core FFI premise — `Ephemeris: Send + Sync` with no interior mutability — via a compile-time assertion and a real concurrency test, and write docs/ffi-design.md recording the C-ABI layer decision for the future Dart binding (successor to swisseph.dart). The FFI layer itself is NOT implemented here — this task makes the decision durable and the precondition enforced.\n\n### Files\n- `tests/send_sync.rs` (new) — or a module in an existing integration test target\n- `docs/ffi-design.md` (new)\n\n### Implementation steps\n1. **Compile-time assertion**:\n   ```rust\n   fn assert_send_sync<T: Send + Sync>() {}\n   #[test]\n   fn ephemeris_is_send_sync() {\n       assert_send_sync::<swisseph::Ephemeris>();\n       assert_send_sync::<swisseph::EphemerisConfig>();\n   }\n   ```\n   Verify it actually compiles today — Ephemeris fields are config + Vec<SwissEphFile> (memmap2::Mmap is Send+Sync) + Option<JplFile> + StarCatalog. If any field breaks the bound, STOP and report (that's an architecture violation, not something to patch around with unsafe impls).\n2. **Concurrency determinism test** (same file): `std::thread::scope` with 8 threads sharing one `&Ephemeris` (Moshier config so it runs without data files), each computing calc_ut for all 10 planets at 100 epochs; join and assert every thread's results are bitwise-identical to a serially computed baseline (compare f64 bits, not epsilon). This is the \"zero synchronization, identical answers\" guarantee in executable form.\n3. **docs/ffi-design.md** — record these decisions with rationale (they are MADE, the doc's job is to persist them and their reasoning):\n   - **Approach: hand-rolled C ABI + cbindgen-generated header, in a separate `swisseph-ffi` crate (cdylib, workspace member added when the Dart work starts). NOT flutter_rust_bridge.** Rationale: the API is flat numeric data (f64 arrays, i32 codes, UTF-8 names) with no async/streams/callbacks — frb's codegen+runtime buys nothing here; the consumer (swisseph.dart successor) already speaks dart:ffi against the C Swiss Ephemeris ABI, so a hand-controlled ABI can mirror shapes that binding already handles; raw-pointer-as-int isolate sharing needs a stable, auditable ABI surface, not generated glue that owns the handle model. Rejected alternative recorded: flutter_rust_bridge — revisit only if the Dart side ever needs streams/async event search.\n   - **Handle model**: `swisseph_new(config…) -> *mut Ephemeris` via Box::into_raw; Dart isolates pass the pointer as an int (Dart can't send objects across isolates but can send ints); every calc call takes the handle + params; `swisseph_free(*mut Ephemeris)` via Box::from_raw, registered with Dart NativeFinalizer. Config is immutable after construction — NO set_* mutators in the ABI; per-call variance (topo position, sidereal mode) rides as explicit call parameters mapping to the existing `*_with_config` pattern.\n   - **Error convention**: i32 return codes (0 = OK, negative = error, mirroring C's retflag < 0 convention) + out-params for results; an error-code enum mapped 1:1 from `swisseph::Error` variants + a `swisseph_last_error_message(handle_or_threadlocal…)`-free design — prefer a `char* err_buf, usize err_cap` out-param per call (stateless, isolate-safe) over any thread-local last-error.\n   - **Type flattening table**: CalcResult → `double xx[6]` + `int32 flags_used` out-params; enums → i32 with the existing C constant values (Body already mirrors ipl numbering via as_c_int-style mapping); &str star names → UTF-8 `const char*` in, caller-allocated buffer out.\n   - **What the lib crate must uphold** (this is the contract the assertion test enforces): Send+Sync, no interior mutability ever added to Ephemeris (any future cache must be a separate opt-in wrapper type), `#[repr]`-stability not required on Rust types (FFI crate defines its own #[repr(C)] mirrors).\n   - Cross-reference: the capstone N-isolates-vs-copy-per-isolate benchmark lives in the benchmarks task (Polish 7/7).\n\n### C reference\nNone.\n\n### Golden tests\nNone — the concurrency test asserts internal consistency (parallel == serial, bitwise), not C parity.\n\n### Acceptance criteria\n- `cargo test --test send_sync` (or the chosen target) passes, including the 8-thread bitwise-determinism test\n- `cargo test` passes\n- docs/ffi-design.md exists and contains the decision, rationale, rejected alternative, handle model, and error convention sections\n\n### Escape hatch\nIf `Ephemeris` fails the Send+Sync bound, STOP immediately and report which field and why — do not add `unsafe impl Send/Sync` under any circumstances.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Uneventful — Ephemeris/EphemerisConfig passed the Send+Sync bound on first compile (no interior mutability anywhere, escape hatch never triggered). tests/send_sync.rs: compile-time assertion + 8-thread scope test, 10 planets × 100 epochs (1900–2037, 500-day steps, MOSEPH|SPEED), results compared as raw f64 bits ([u64;6] + flags_used bits) against a serial baseline — all threads bitwise-identical. docs/ffi-design.md written with all required sections (decision + rationale + rejected frb alternative, handle model, error convention, flattening table, lib-crate contract, Polish 7/7 cross-ref). cargo test: all 5 targets pass.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "b8fe914"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "polish"
+  ],
+  "history": [
+    {
+      "ts": 1783098320481,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 119
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783207722578,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783207896082,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783098320481,
+  "updated_at": 1783207896082,
+  "completed_at": 1783207896082,
+  "arc_id": "019efa3c-5e24-7e02-a28d-10100bfe9806",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f28f2-26be-7270-ad2a-d220a3c9c9c4",
+      "edge_type": "refines",
+      "source": "swisseph-rs/119",
+      "target": "swisseph-rs/15",
+      "note": null,
+      "created_at": 1783098386110
+    }
+  ]
+}

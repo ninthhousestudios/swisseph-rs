@@ -1,0 +1,60 @@
+{
+  "id": "019f4db1-2999-7c60-b666-e32282b62f1a",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/151",
+  "sequence_number": 151,
+  "title": "swetest bug",
+  "description": "this command: swetest -house86.0134,39.9573,w -b10.07.2026 -ut18:00 -sid1 -emos doesnt align with c's swetest. the house cusp speeds vary, but c-swetest indicates they are all the same, as they should be for whole sign houses. hopefully this is just a bug in swetest, not in swisseph-rs itself. check it out",
+  "category": "bug",
+  "status": "done",
+  "slice_type": null,
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": "HouseSystem::try_from(u8) only matched uppercase ASCII letters. C's swehouse.c uses toupper(hsys) at the entry point so lowercase works, but the Rust TryFrom returned Err for lowercase input. swetest's unwrap_or(Placidus) silently swallowed the error, causing all lowercase house system letters to compute Placidus cusps regardless of the requested system.",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "cb7a643"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783714883993,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 151
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781035490,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783781042883,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783714883993,
+  "updated_at": 1783781042883,
+  "completed_at": 1783781042883,
+  "edges": []
+}

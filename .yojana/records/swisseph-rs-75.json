@@ -1,0 +1,135 @@
+{
+  "id": "019f1e18-e940-7ab0-8d2c-8412045ebe07",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/75",
+  "sequence_number": 75,
+  "title": "RSE 8/12: Solar eclipse local search (swe_sol_eclipse_when_loc + eclipse_when_loc)",
+  "description": "### Summary\nPort `swe_sol_eclipse_when_loc` + its worker `eclipse_when_loc`: find the next/previous solar eclipse VISIBLE from a given `geopos`, with local contact times C1–C4 and the full `attr[]` circumstances. Exposes `Ephemeris::sol_eclipse_when_loc` (`&self`).\n\nDepends on **RSE 5** (`eclipse_where`, types), **RSE 6** (`eclipse_how` — the local-circumstances fill), and **RSE 3** (`find_zero`).\n\n### Files\n- `src/eclipse.rs` — add `SolarEclipseLocal` result struct, `eclipse_when_loc`, `sol_eclipse_when_loc`.\n- `src/context.rs` — `pub fn sol_eclipse_when_loc(&self, tjd_start, ifl: CalcFlags, geopos:[f64;3], backward: bool) -> Result<SolarEclipseLocal, Error>`.\n- `src/lib.rs` — re-export `SolarEclipseLocal`.\n- `tests/c-gen/gen_eclipse.c` — add key `sol_when_loc`; regenerate `eclipse.json`.\n- `tests/golden/eclipse.rs` — add `#[test] sol_when_loc`.\n\n### Implementation steps\nRead `docs/c-ref-eclipse-solar.md` §6.1–§6.4. **Critical:** §6.3 warns the LOCAL `tret[]` has DIFFERENT slot semantics than the global search (§5.8) — name `SolarEclipseLocal`'s fields from §6.3, not §5.8.\n\n1. **`SolarEclipseLocal`**: `tret[0..10]` per §6.3 (maximum, C1=first contact, C2=second/total begin, C3=third/total end, C4=last contact, sunrise/sunset interaction slots) + `attr[]` (reuse `EclipseHow` from RSE 6) + type bitmask.\n2. **`swe_sol_eclipse_when_loc`** public wrapper (§6.1).\n3. **`eclipse_when_loc`** worker (§6.2): the local search loop; contacts 1–4 via `find_zero` + secant refinement; sunrise/sunset interaction; `attr[]` fill via the RSE 6 `eclipse_how` path; visibility flags. Preserve the load-bearing descending-order visibility scan flagged in the doc summary (the shared `attr[]` output is clobbered by each call — order matters). Uses topocentric `calc` (RSE 1) via the same `geopos`→config-clone pattern as RSE 6.\n   - `backward` flips stepping direction.\n\n### C reference\n`docs/c-ref-eclipse-solar.md` §6 (all subsections), §4 (attr via eclipse_how), §7.\n\n### Golden tests\n- **C harness** add key `sol_when_loc`: for `geopos ∈ {(8.55,47.37,500), (-71.0,-33.0,500) /*Chile 2019/2020*/}`, `tjd_start ∈ {2451545.0, 2458800.5}`, `backward ∈ {0,1}`, call `swe_sol_eclipse_when_loc(tjd_start, SEFLG_MOSEPH, geopos, tret, attr, backward, serr)`. Emit `{geopos, tjd_start, backward, retval, tret:[0..10], attr:[0..11]}`. Regenerate `eclipse.json`.\n- **Rust test** `#[test] sol_when_loc`: assert `tret`/`attr` via `assert_f64_eps(.., 1e-5)`; assert returned flags == `retval`.\n- `cargo test --test golden eclipse::sol_when_loc -- --nocapture` passes.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::sol_when_loc -- --nocapture` passes (1e-5 day).\n\n### Escape hatch\nIf contact times fail > 1e-4 day after two attempts, STOP and report failing `(geopos, tjd_start, backward)` + diverging slot. Read `swecl.c:2019–2410` directly (note the §6.3 tret-semantics difference). Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "cargo build + cargo clippy --all-targets clean"
+    },
+    {
+      "done": false,
+      "text": "cargo test --test golden eclipse::sol_when_loc -- --nocapture passes (1e-5 day)"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Task's C ref doc (§6.2) summarized the local-search worker's main convergence loop and contact-refinement mechanics in prose rather than literal C, which wasn't precise enough to port correctly on the first attempt (the task itself flagged this risk via its escape hatch). Rather than reading swecl.c directly in the implementation context, dispatched a general-purpose agent (2 passes) to read swecl.c and extend docs/c-ref-eclipse-solar.md §6.2 to the same literal-C precision as the already-implemented §5 (global search) sections, including two genuinely tricky/asymmetric literal quirks: contacts 2/3 apply a 0.99916 rmoon correction to flanking samples but not the reused center dc[1]; contacts 1/4 apply fabs(rsplusrm) only in the secant-refinement dc formula, not the initial 3-point sample. Also extracted meeus_new_moon_estimate() as a shared helper (per the ref doc's own porting note) used by both sol_eclipse_when_glob and the new eclipse_when_loc -- committed separately first, confirmed no regression via the existing sol_when_glob golden test. With the precise ref doc, the Rust port passed all 8 golden cases (2 geopos x 2 tjd_start x 2 backward) at 1e-5 day tolerance on the first implementation attempt -- no escape-hatch escalation to Opus needed.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "f5371ca"
+    },
+    {
+      "type": "git:commit",
+      "value": "11037ac"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916376896,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 75
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782947276416,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1782947827834,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782947875059,
+      "kind": "status_changed",
+      "payload": {
+        "from": "done",
+        "to": "needs-review"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1782948586119,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-review",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review: approve with notes. eclipse_when_loc/sol_eclipse_when_loc verified against swecl.c:2019-2410 — 0.99916 factor placement, contacts-1/4 fabs asymmetry, descending visibility scan, iflag-vs-ifl inconsistency in rise_trans, NONCENTRAL-only merge in wrapper all match C literally; dropping the loop's dead polar calc fetches is safe stateless cleanup. One note (same find_zero-None divergence as 74, slightly sharper here): if contacts-1/4 find_zero returned None, tret[1] stays 0.0 and rise_trans(tret[1]-0.001) would evaluate at JD≈0 instead of C's near-eclipse fallback. Unreachable in practice (dc[1]=rsplusrm-dctrmin≥0 by construction); worth a comment or guard.",
+      "ts": 1782948351613
+    }
+  ],
+  "created_at": 1782916376896,
+  "updated_at": 1782948586119,
+  "completed_at": 1782948586119,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-a794-7823-ac35-78646dff9207",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/75",
+      "target": "swisseph-rs/73",
+      "note": null,
+      "created_at": 1782916491156
+    },
+    {
+      "id": "019f1e1a-ab97-70b3-aec7-4ebc86630d40",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/75",
+      "target": "swisseph-rs/70",
+      "note": null,
+      "created_at": 1782916492183
+    },
+    {
+      "id": "019f1e1a-c807-7560-be97-70ba9137bba6",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/79",
+      "target": "swisseph-rs/75",
+      "note": null,
+      "created_at": 1782916499463
+    },
+    {
+      "id": "019f1e1b-01e4-7682-8222-f4ef4d651b55",
+      "edge_type": "refines",
+      "source": "swisseph-rs/75",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916514276
+    }
+  ]
+}

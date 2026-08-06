@@ -1,0 +1,62 @@
+{
+  "id": "019f13e3-08b9-7272-85a0-f46bd9deafbb",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/47",
+  "sequence_number": 47,
+  "title": "Fix JPL backend review findings (43-46) + sweph_eval boundary test",
+  "description": "Review of the JPL DE backend (swisseph-rs/43-46) surfaced findings. Fix them in one pass. Golden tests (calc_sweph, calc_jpl, jpl_pleph, jpl_header) must stay green.\n\n## Findings to fix\n\n**1. (medium, correctness) Retarded-epoch file fallback dropped in the /45 refactor.**\nOriginal calc_*_sweph used `find_file_for_jd(.., ret_jd).unwrap_or(planet_file)` for retarded light-time epochs — a deliberate C-fidelity fallback (C extrapolates the cached segment rather than erroring). The refactor unified everything to `find_file_for_jd(..).ok_or(BeyondEphemerisLimits)?`, so a calc within ~light-time of the absolute earliest ephemeris epoch now errors where it previously succeeded. Restore via a bounded nearest-file fallback in SwephProvider (margin ~0.3 day, > max light-time, << file span) so genuine out-of-range still errors. Location: src/calc.rs SwephProvider::positions/moon_geo.\n\n**3. (low) interp pc[18]/vc[18] fixed arrays with no ncf bound.** DE441 max ncf=14, but ncf>18 panics OOB instead of clean Error::FileFormat. Validate max ncf during header parse. src/jpl/interp.rs, src/jpl/header.rs.\n\n**4. (low, FP fidelity) Epoch decomposition order deviates from spec.** et_fr computed as `et - et_mn` instead of C's `s - floor(s)`. ULP-level but project rule is to match C accumulation order. src/jpl/interp.rs:124-126.\n\n**5. (low, slop) Dead code in jpl/header.rs.** Reader::skip, Reader::seek, ByteOrder::read_i16 unused (#[allow(dead_code)] / no caller) — interp reads bytes directly. Remove.\n\n## Deferred (NOT in this pass — fidelity risk > benefit)\n\n**2. (medium, performance) ~10x redundant record decode per JPL position.** JplProvider::positions issues 3 jpl_pleph calls at one jd; each state() re-decodes the full ~1018-double record and re-interpolates the Sun. Batching needs a shared-assembly refactor of jpl_pleph (one state() call, assemble multiple barycentric targets). Deliberately deferred: the gain is astronomically irrelevant for chart-volume use, and a reimplementation of the body-assembly risks a subtle fidelity regression in code that currently matches C at 1e-8. Revisit only if JPL throughput becomes a real need; file as its own task then.\n\n## sweph_eval boundary test\nsweph_eval::evaluate_body_matches_c fails at body0@2378496.5 (sepl_18 tfstart, 1800-Jan-1) with ~2.4e-9 position diff. This is the documented stateless file-boundary artifact (CLAUDE.md §stateless_tolerance): C's golden gen used the cached earlier file (sepl_12) at the boundary; stateless Rust selects sepl_18. Expected, not a bug. Fix: relaxed-tolerance carve-out for known boundary epochs (assert_f64_eps ~1e-8) with an inline comment citing stateless_tolerance, so the test is green and agents stop re-investigating.\n\n## Acceptance criteria\n- cargo build clean\n- cargo test --test golden (full) passes — including sweph_eval\n- calc_sweph still ZERO element failures\n- No new forbidden_dep violations",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [
+    {
+      "decision": "Restore retarded-epoch file fallback via a bounded nearest-file lookup (find_file_or_nearest, BOUNDARY_SLOP=0.3d) rather than accepting the error-at-edge behavior",
+      "rationale": "C extrapolates the cached Chebyshev segment at the absolute ephemeris boundary rather than erroring; the original code preserved this with unwrap_or(primary_file). 0.3d > max one-way light-time (Pluto ~0.23d) and << a file's century span, so genuine out-of-range epochs still error via None.",
+      "rejected_alternatives": "Accept the new error-at-edge behavior and just document it (option b in the review) — rejected because it silently diverges from C in a refactor billed as behavior-preserving, and the edge is real even if extreme."
+    },
+    {
+      "decision": "Defer the JPL record-decode batching (finding #2) instead of fixing it in this pass",
+      "rationale": "Batching needs a shared-assembly refactor of jpl_pleph that risks a subtle fidelity regression in code that currently matches C at 1e-8; the perf gain is astronomically irrelevant for chart-volume use.",
+      "rejected_alternatives": "Implement batched state() now — rejected: fidelity risk > benefit; revisit only if JPL throughput becomes a real need."
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Landed in commits 7081b1b (JPL/calc fixes) + aff81c2 (sweph_eval test). 4 files.\n\n#1 retarded-file fallback: find_file_or_nearest() in calc.rs (bounded nearest-file, BOUNDARY_SLOP=0.3d); SwephProvider uses it. #3 ncf bound: MAX_NCF=18 const + parse_header rejection. #4 FP order: et_fr = s - floor(s). #5 dead code removed. #2 (perf) deferred — see decisions; confirmed with Josh he only cares about correctness, not perf, so this stays deferred indefinitely unless throughput becomes a need.\n\nsweph_eval boundary — corrected root cause: NOT file caching. The C generator (gen_sweph_eval.c) already swe_close()s before every case, so caching is ruled out. The real mechanism is independent file/segment SELECTION at an exact boundary: stateless find_file_for_jd picks a different (equally valid) Chebyshev segment than C's swe_calc. Measured at 2378496.5: inner bodies (0,2,3,4,5) same neval, ~1e-9 diff; outer planets (6,7,8,9) different neval (C picks lower-degree adjacent segment), ~4e-8–8e-8 diff; Moon (body1) BITWISE-EXACT. First-pass fix relaxed all bodies by jd alone, which wrongly relaxed the bitwise-exact Moon (spillover Josh flagged). Final fix scopes via is_boundary_case(body_id, jd): body_id != 1 at sepl boundary epochs, eps 1e-6, neval not checked. Moon stays strict bitwise. Both calc_sweph and the full suite stay green (62+54, 0 fail).\"",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "aff81c2"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782745073849,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 47
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782746006303,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782745073849,
+  "updated_at": 1782746006303,
+  "completed_at": 1782746006303,
+  "edges": []
+}

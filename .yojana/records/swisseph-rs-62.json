@@ -1,0 +1,130 @@
+{
+  "id": "019f19d5-ba1e-7e72-939e-719d3157599a",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/62",
+  "sequence_number": 62,
+  "title": "Houses 4/9: Placidus, Koch, Gauquelin-36 (P/K/G) — Newton iteration",
+  "description": "### Summary\nAdd the iterative semi-arc systems: Placidus (default, P), Koch (K), and Gauquelin 36-sectors (G). Placidus and Gauquelin share an identical Newton-iteration skeleton (extract a shared helper). All three fall back to Porphyry inside the polar circle. G produces 36 cusps (`cusps[1..=36]`), the only system that does.\n\n### Files\n- `src/houses.rs` — replace the stub arms for Placidus (the `_` default arm → Placidus), Koch, Gauquelin in `calc_h`; add `fn placidus_newton_cusp(rectasc: f64, fh_init: f64, divisor: f64, sine, cose, tane, tanfi, geolat) -> NewtonOutcome` shared by P and G (ref §5 default + G). Define an enum/result capturing {converged cusp + converged `f` (for the AscDash speed), or DegenerateAxis (cusp=rectasc, speed=armc_speed), or NonConverged (→ Porphyry)}.\n- `tests/c-gen/gen_houses.c` — add `\"iterative\"` and `\"gauquelin36\"` keys.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add `iterative` and `gauquelin36` tests.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §5 \"K\", \"G\", \"Default — Placidus\", and §4.2(a), §12.7 (convergence uses `diff_degrees`, not raw subtraction).\n1. **Shared Newton helper** `placidus_newton_cusp` — ref §5 \"Default — Placidus\" per-cusp loop AND §5 \"G\" loop (they are the same skeleton; Gauquelin's divisor is `9/ih2`, Placidus's is fixed `3` or `1.5`). Steps: seed `tant` from `tand(asind(sine*sind(asc1(rectasc, fh_init,...))))`; if `|tant|<VERY_SMALL` → DegenerateAxis (cusp=rectasc, speed=ARMCS). Else compute `f=atand(sind(asind(tanfi*tant)/divisor)/tant)`, `cusp=asc1(rectasc,f,...)`, then loop `i=1..=NITER_MAX`: recompute `tant` from the current cusp, recompute `f`, recompute cusp; converged when `i>1 && diff_degrees(cusp, cuspsv).abs() < VERY_SMALL_PLAC_ITER`; track `cuspsv`. If `i` reaches NITER_MAX → NonConverged. On convergence the speed is `asc_dash(rectasc, f, sine, cose)` at the CONVERGED `f`.\n2. **Placidus (default arm)** — ref §5 default. `if |fi| >= 90-ekl`: call `fill_porphyry` (from sub-task 2) and return. Else `a=asind(tand(fi)*tane)`; run the helper for cusps 11 (fh1=atand(sind(a/3)/tane), rectasc=degnorm(30+th), divisor=3), 12 (fh2=atand(sind(a*2/3)/tane), 60+th, divisor=1.5), 2 (fh2, 120+th, 1.5), 3 (fh1, 150+th, 3). Any NonConverged → `fill_porphyry` + return (mirrors `goto porphyry`). Mirror fills opposite cusps.\n3. **Koch (K)** — ref §5 \"K\": `if |fi|>=90-ekl` → fill_porphyry+return (no iteration). Else closed-form: `sina=sind(mc)*sine/cosd(fi)` clipped to [-1,1], `cosa=sqrt(1-sina²)`, `c=atand(tanfi/cosa)`, `ad3=asind(sind(c)*sina)/3`; cusps 11/12/2/3 at `th+30-2ad3`, `th+60-ad3`, `th+120+ad3`, `th+150+2ad3` (pole height `fi`); speeds via asc_dash. (Analytical — do_interpol stays false.)\n4. **Gauquelin (G)** — ref §5 \"G\": `if |fi|>=90-ekl` → fill_porphyry+return. Two mirrored loops (ih=2..9 with ih2=10-ih and rectasc=degnorm((90/9)*ih2+th); ih=29..36 with ih2=ih-28 and rectasc=degnorm(180-ih2*90/9+th)), each using the shared helper with `divisor = 9.0/(ih2 as f64)` and `fh_init=atand(sind(a*ih2/9)/tane)`. Fill `cusps[ih]` + opposite `cusps[ih±18]` and their speeds (§5 \"G\" final block: cusps[1]=ac, [10]=mc, [19]=ac+180, [28]=mc+180). G is in the post-switch-mirror EXCLUSION set (§3 step 3) — do NOT run the 12-cusp mirror for G. `ito=36` for G.\n\n### C reference\n`docs/c-ref-houses.md` §5 K/G/Default; §4.2(a); §12.7 (difdeg2n convergence — critical for bit-fidelity). Read swehouse.c:1623–1983 directly if the iteration count diverges from C (FP order in the Newton loop affects which iteration captures `f`).\n\n### Golden tests\n- C harness: key `\"iterative\"` for chars `['P','K']` × battery → `{hsys, armc, geolat, eps, cusps:[1..12], cusp_speed:[1..12]}`; key `\"gauquelin36\"` for `'G'` × battery → `{armc, geolat, eps, cusps:[1..36], cusp_speed:[1..36]}`. IMPORTANT: include polar-circle geolat (±78 — add to the battery for THIS task only) to verify the Porphyry fallback path. Regenerate houses.json.\n- Rust tests `iterative` and `gauquelin36`: cusps eps 1e-9, speeds eps 1e-7 (these are analytical-at-converged-point; if iteration replicates exactly, 1e-9 may pass — try it). Assert the polar cases fall back to Porphyry values (they will match C's Porphyry output through the same fixture).\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::iterative -- --nocapture` passes.\n- `cargo test --test golden houses::gauquelin36 -- --nocapture` passes.\n- All prior houses tests still pass.\n\n### Escape hatch\nSame as sub-task 1. The Newton convergence (count + captured `f`) is the highest-risk fidelity point — if cusps are off by ~1e-6 (≈ VERY_SMALL_PLAC_ITER), the iteration converged one step early/late; read swehouse.c and match the `diff_degrees` test and `cuspsv` update order exactly. Stop after two attempts; escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Codex adversarial review (vidhi-review, combined diff 743f5e9..474b5f1 with swisseph-rs/61) flagged the cap-boundary mismatch; verified directly against swehouse.c (3 call sites, identical `i >= niter_max` semantics) before accepting. Fix: in `placidus_newton_cusp`'s loop, both the degenerate-axis and converged early-returns now check `i >= NITER_MAX` first and `break` to fall through to `NonConverged` instead of returning success, matching C's cap rejection exactly. cargo clippy --all-targets clean; full `cargo test` (77 tests) and the houses golden suite (great_circle, iterative, gauquelin36) pass unchanged. No new golden case added for the exact cap-iteration boundary — golden battery doesn't hit it; flagged as residual gap below.",
+  "reproduction": null,
+  "root_cause": "The shared Newton-iteration helper (`placidus_newton_cusp`) ported the convergence-check `for` loop body faithfully but missed that C's post-loop guard `if (i >= niter_max) goto porphyry` (swehouse.c:1667/1865/1901) rejects results obtained on the cap iteration itself, not just true non-convergence. The Rust loop returned `Converged`/`DegenerateAxis` as soon as the in-loop condition was met, with no check on which iteration it was — so convergence landing exactly on i==NITER_MAX shipped a real cusp where C silently falls back to Porphyry.",
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782844865054,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 62
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782848424417,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782848426877,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782848451135,
+      "kind": "status_changed",
+      "payload": {
+        "from": "done",
+        "to": "needs-review"
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1782849145150,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-review",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "user",
+      "text": "Implemented Placidus (P, default arm), Koch (K), Gauquelin-36 (G) in calc_h. Shared `placidus_newton_cusp` Newton helper (NewtonCusp enum: Converged{cusp,f}/DegenerateAxis/NonConverged) used by both P and G. All three fall back to fill_porphyry inside the polar circle (|geolat|>=90-eps). Gauquelin sets a new `skip_mirror` flag to exclude itself from the post-switch opposite-cusp mirror only on full 36-cusp convergence (matches C's hsy-reassignment-on-fallback semantics).\n\nGolden battery extended with polar geolats (+-78, eps=23.4392911 -> cutoff ~66.56deg) to exercise the Porphyry fallback. New keys: `iterative` (P/K x 6 armc x 7 geolat = 84 cases) and `gauquelin36` (G x 6 armc x 7 geolat = 42 cases, cusps[1..36] via Vec<f64> since serde's array impl tops out at 32 elements).\n\nAll tests passed on first generation/run — no FP-fidelity debugging needed. cargo clippy --all-targets clean, full test suite (80+12+77 tests) green.",
+      "ts": 1782848419947
+    },
+    {
+      "author": "user",
+      "text": "Codex review (combined with swisseph-rs/61, diff 743f5e9..474b5f1): needs-attention.\n\nCONFIRMED finding [medium] — Newton convergence cap-boundary mismatch (src/houses.rs:285-297, `placidus_newton_cusp`):\nThe shared Placidus/Gauquelin Newton loop is `for i in 1..=NITER_MAX { ...; if converged { return Converged } }`. C's loop is `for (i=1; i<=niter_max; i++) { ...; if (converged) break; }` followed by `if (i >= niter_max) { goto porphyry; }`. Because C's post-loop check is `>=` not `>`, C treats convergence achieved exactly on the cap iteration (i==niter_max==100) as a FAILURE and falls back to Porphyry — but the Rust port accepts convergence on i==100 as success. Verified this pattern is identical across all three C call sites (Placidus cusp 11, cusp 12, and Gauquelin's mirrored loops) at swehouse.c:1648-1670, 1850-1869, 1886-1905.\n\nImpact: any cusp that first converges exactly on the 100th Newton iteration will diverge from C — Rust ships the converged Placidus/Gauquelin cusp+speed where C silently falls back to Porphyry (and for Gauquelin, this also wrongly skips the mirror-exclusion path). Most likely near the polar circle where convergence is slow. The golden battery (including the new ±78° polar cases) apparently doesn't hit this exact boundary, since both golden tests pass.\n\nFix: change the loop to reject convergence on the cap iteration too, e.g. iterate `1..NITER_MAX` (exclusive) for the convergence check, or explicitly return `NonConverged` when `i == NITER_MAX` even if the diff threshold was met — matching C's `i >= niter_max` semantics. Add a boundary-case golden/unit test that forces exactly 100 iterations near-polar to lock this in.\n\nNo other findings from Codex's pass (polar-shift subsets R/C/T/H/J, Horizon's recompute+unconditional-180 sequencing, Gauquelin's mirror exclusion, Koch's non-iterative closed form, and calc_h's complexity all checked out). Verdict: request changes — fix the cap-boundary bug before closing.",
+      "ts": 1782849014359
+    }
+  ],
+  "created_at": 1782844865054,
+  "updated_at": 1782849145150,
+  "completed_at": 1782849145150,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-8fc8-7911-9e71-dca028fdc4de",
+      "edge_type": "refines",
+      "source": "swisseph-rs/62",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845050824
+    },
+    {
+      "id": "019f19d8-be3f-7863-bdd9-63ea302456e1",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/62",
+      "target": "swisseph-rs/59",
+      "note": null,
+      "created_at": 1782845062719
+    },
+    {
+      "id": "019f19d8-c230-7d80-9b77-1ac84628e599",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/62",
+      "target": "swisseph-rs/60",
+      "note": null,
+      "created_at": 1782845063728
+    },
+    {
+      "id": "019f19d8-d2f5-7a00-8dbf-e877904b816c",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/62",
+      "note": null,
+      "created_at": 1782845068021
+    },
+    {
+      "id": "019f19d8-d996-70f3-9027-493ee55a7741",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/66",
+      "target": "swisseph-rs/62",
+      "note": null,
+      "created_at": 1782845069718
+    }
+  ]
+}

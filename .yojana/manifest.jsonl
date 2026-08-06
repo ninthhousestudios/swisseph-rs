@@ -1,0 +1,159 @@
+{"id":"swisseph-rs/1","title":"Plan & scaffold: cargo init, module tree, constants, core types, error type","status":"done","closed_at":1782317787780}
+{"id":"swisseph-rs/2","title":"Plan: Date/Time module (swedate.c)","status":"done","closed_at":1782325254803}
+{"id":"swisseph-rs/3","title":"Plan: Math utilities module (swephlib.c partial)","status":"done","closed_at":1782331130526}
+{"id":"swisseph-rs/4","title":"Plan: Precession, Nutation, Obliquity, Delta-T, Sidereal Time","status":"done","closed_at":1782393766499}
+{"id":"swisseph-rs/5","title":"Plan: Moshier ephemeris backend","status":"done","closed_at":1782430824224}
+{"id":"swisseph-rs/6","title":"Plan: Core dispatcher & apparent position pipeline","status":"done","closed_at":1782483999566}
+{"id":"swisseph-rs/7","title":"Plan: Swiss Ephemeris .se1 file backend","status":"done","closed_at":1782565518847}
+{"id":"swisseph-rs/8","title":"Plan: JPL DE backend","status":"done","closed_at":1782740272046}
+{"id":"swisseph-rs/9","title":"Plan: Ayanamsa & Sidereal mode","status":"done","closed_at":1782760302677}
+{"id":"swisseph-rs/10","title":"Plan: Fixed Stars","status":"done","closed_at":1782825314038}
+{"id":"swisseph-rs/11","title":"Plan: House systems","status":"done","closed_at":1782845148015}
+{"id":"swisseph-rs/12","title":"Plan: Rise/Set, Eclipses, Occultations","status":"done","closed_at":1782916589459}
+{"id":"swisseph-rs/13","title":"Plan: Phenomena, Nodes, Orbits, Crossings, Gauquelin","status":"done","closed_at":1782951050843}
+{"id":"swisseph-rs/14","title":"Plan: Heliacal events & visibility","status":"done","closed_at":1783034806075}
+{"id":"swisseph-rs/15","title":"Plan: Public API, docs, feature flags, benchmarks","status":"done","closed_at":1783098759164}
+{"id":"swisseph-rs/16","title":"Differential testing harness: golden data from C swetest","status":"done","closed_at":1782326101529}
+{"id":"swisseph-rs/17","title":"Harden Body parameterized variants with range validation","status":"done","closed_at":1782331860068}
+{"id":"swisseph-rs/18","title":"Obliquity + Frame bias","status":"done","closed_at":1782396435984}
+{"id":"swisseph-rs/19","title":"Precession (3 algorithm families, 11 models)","status":"done","closed_at":1782404488992}
+{"id":"swisseph-rs/20","title":"Nutation data tables (swenut2000a.h)","status":"done","closed_at":1782410955604}
+{"id":"swisseph-rs/21","title":"Nutation algorithms (5 models)","status":"done","closed_at":1782416731446}
+{"id":"swisseph-rs/22","title":"Delta-T (tabulated + 5 models + Bessel interpolation)","status":"done","closed_at":1782426211869}
+{"id":"swisseph-rs/23","title":"Sidereal time (4 models + equation of equinoxes)","status":"done","closed_at":1782428201742}
+{"id":"swisseph-rs/24","title":"Moshier planet coefficient tables (PlantTbl + scripted transcription)","status":"done","closed_at":1782475910673}
+{"id":"swisseph-rs/25","title":"Moshier planetary series evaluation (moshplan2 core)","status":"done","closed_at":1782476646935}
+{"id":"swisseph-rs/26","title":"Moshier lunar ephemeris: tables, mean elements, and series evaluation","status":"done","closed_at":1782478166594}
+{"id":"swisseph-rs/27","title":"Moshier backend wrappers: speed, coord conversion, public API","status":"done","closed_at":1782480421250}
+{"id":"swisseph-rs/28","title":"C reference doc for calc module (sweph.c dispatch + pipeline)","status":"done","closed_at":1782484681904}
+{"id":"swisseph-rs/29","title":"Relativistic corrections: aberration, gravitational deflection, meff","status":"done","closed_at":1782485810697}
+{"id":"swisseph-rs/30","title":"Apparent position coordinate pipeline (app_pos_rest)","status":"done","closed_at":1782500966957}
+{"id":"swisseph-rs/31","title":"Light-time iteration and body-specific apparent position paths","status":"done","closed_at":1782559311237}
+{"id":"swisseph-rs/32","title":"Body dispatch, flag validation, and mean node/apogee formulas","status":"done","closed_at":1782561391492}
+{"id":"swisseph-rs/33","title":"Public Ephemeris::calc() entry point and integration golden tests","status":"done","closed_at":1782564291147}
+{"id":"swisseph-rs/34","title":"Fix calc pipeline: TRUEPOS positions, planet speeds, Moon light-time","status":"done","closed_at":1782500437775}
+{"id":"swisseph-rs/35","title":"Process lesson: instrument-first debugging for porting work","status":"done","closed_at":1782500695953}
+{"id":"swisseph-rs/36","title":"calc_ut Delta T should use effective ephemeris, not configured source","status":"done","closed_at":1782564760442}
+{"id":"swisseph-rs/37","title":"SE1 file format types, header parsing, and memory mapping","status":"done","closed_at":1782567039835}
+{"id":"swisseph-rs/38","title":"SE1 segment coefficient unpacking and position evaluation","status":"done","closed_at":1782590354849}
+{"id":"swisseph-rs/39","title":"SE1 file manager, sweplan orchestration, and calc pipeline integration","status":"done","closed_at":1782673878917}
+{"id":"swisseph-rs/40","title":"EP4 file format reader and Everett interpolation","status":"ready-for-agent","closed_at":null}
+{"id":"swisseph-rs/41","title":"Fix remaining golden_calc_sweph failures (1560 element errors)","status":"done","closed_at":1782673862064}
+{"id":"swisseph-rs/42","title":"SPEED3 mixed-backend fallback at SE1 coverage edges","status":"needs-triage","closed_at":null}
+{"id":"swisseph-rs/43","title":"JPL DE backend: mmap reader + header parse","status":"done","closed_at":1782741846910}
+{"id":"swisseph-rs/44","title":"JPL DE backend: interp() + swi_pleph body assembly","status":"done","closed_at":1782742564478}
+{"id":"swisseph-rs/45","title":"Refactor sweph calc pipeline over a barycentric position provider","status":"done","closed_at":1782743403602}
+{"id":"swisseph-rs/46","title":"Wire JPL backend into calc dispatch (EphemerisSource::Jpl)","status":"done","closed_at":1782744306224}
+{"id":"swisseph-rs/47","title":"Fix JPL backend review findings (43-46) + sweph_eval boundary test","status":"done","closed_at":1782746006303}
+{"id":"swisseph-rs/48","title":"Repo-wide clippy cleanup (cargo clippy --all-targets clean)","status":"done","closed_at":1782766409724}
+{"id":"swisseph-rs/49","title":"Ayanamsa data table + sidereal config plumbing","status":"done","closed_at":1782761220249}
+{"id":"swisseph-rs/50","title":"Scalar ayanamsa computation (get_ayanamsa) + golden tests","status":"done","closed_at":1782761607734}
+{"id":"swisseph-rs/51","title":"Wire SEFLG_SIDEREAL into calc + default-branch ayanamsa projection","status":"done","closed_at":1782762108769}
+{"id":"swisseph-rs/52","title":"ECL_T0 + SSY_PLANE sidereal projection (J2000 coordinate plumbing)","status":"done","closed_at":1782763543453}
+{"id":"swisseph-rs/53","title":"SIDEREAL|SPEED3 with ECL_T0/SSY_PLANE returns zero longitude speed","status":"done","closed_at":1782765441826}
+{"id":"swisseph-rs/54","title":"Fixed stars: catalog parser, types & lookup (src/stars.rs)","status":"done","closed_at":1782826591234}
+{"id":"swisseph-rs/55","title":"Fixed stars: position pipeline + Ephemeris fixstar2 API (Moshier)","status":"done","closed_at":1782829447310}
+{"id":"swisseph-rs/56","title":"Fixed stars: the 12 fixed-star ayanamsa modes + armc_to_mc","status":"done","closed_at":1782830118113}
+{"id":"swisseph-rs/57","title":"Fixed stars: SWIEPH + JPL backend support for fixstar2","status":"done","closed_at":1782842894775}
+{"id":"swisseph-rs/58","title":"Debug SWIEPH/JPL fixstar xobs coordinate frame: wrong frame causes position failures","status":"done","closed_at":1782842917495}
+{"id":"swisseph-rs/59","title":"Houses 1/9: module scaffold, core trig, driver, angles, special points, Equal family","status":"done","closed_at":1782846244071}
+{"id":"swisseph-rs/60","title":"Houses 2/9: Porphyry, Sripati, Meridian, Morinus, Carter (O/S/X/M/F)","status":"done","closed_at":1782846969222}
+{"id":"swisseph-rs/61","title":"Houses 3/9: Regiomontanus, Campanus, Polich/Page, Horizon, Savard-A (R/C/T/H/J)","status":"done","closed_at":1782849145593}
+{"id":"swisseph-rs/62","title":"Houses 4/9: Placidus, Koch, Gauquelin-36 (P/K/G) — Newton iteration","status":"done","closed_at":1782849145150}
+{"id":"swisseph-rs/63","title":"Houses 5/9: Krusinski, APC, Pullen SD, Pullen SR (U/Y/L/Q)","status":"done","closed_at":1782858706916}
+{"id":"swisseph-rs/64","title":"Houses 6/9: Sunshine houses (I/i) — Treindl + Makransky + sundec plumbing","status":"done","closed_at":1782860030353}
+{"id":"swisseph-rs/65","title":"Houses 7/9: Ephemeris UT wrappers (houses / houses_ex / houses_ex2) + traditional sidereal","status":"done","closed_at":1782910950731}
+{"id":"swisseph-rs/66","title":"Houses 8/9: swe_house_pos (planet → house position) + swe_gauquelin_sector (imeth 0/1)","status":"done","closed_at":1782913406931}
+{"id":"swisseph-rs/67","title":"Houses 9/9: sidereal house modes ECL_T0 + SSY_PLANE projection","status":"done","closed_at":1782914482502}
+{"id":"swisseph-rs/68","title":"RSE 1/12: Topocentric swe_calc support (swi_get_observer + TOPOCTR pipeline)","status":"done","closed_at":1782921124613}
+{"id":"swisseph-rs/69","title":"RSE 2/12: Refraction + horizontal coordinates (swe_refrac[_extended], swe_azalt[_rev])","status":"done","closed_at":1782931831487}
+{"id":"swisseph-rs/70","title":"RSE 3/12: Rise/set/transit module + full algorithm + meridian transit","status":"done","closed_at":1782933708234}
+{"id":"swisseph-rs/71","title":"RSE 4/12: Rise/set fast algorithm + swe_rise_trans dispatcher","status":"done","closed_at":1782935532803}
+{"id":"swisseph-rs/72","title":"RSE 5/12: Eclipse module scaffold + shared helpers + solar shadow geometry (eclipse_where)","status":"done","closed_at":1782938550581}
+{"id":"swisseph-rs/73","title":"RSE 6/12: Solar eclipse local circumstances (eclipse_how)","status":"done","closed_at":1782948584220}
+{"id":"swisseph-rs/74","title":"RSE 7/12: Solar eclipse global search (swe_sol_eclipse_when_glob)","status":"done","closed_at":1782948585130}
+{"id":"swisseph-rs/75","title":"RSE 8/12: Solar eclipse local search (swe_sol_eclipse_when_loc + eclipse_when_loc)","status":"done","closed_at":1782948586119}
+{"id":"swisseph-rs/76","title":"RSE 9/12: Lunar eclipse geometry (lun_eclipse_how + swe_lun_eclipse_how)","status":"done","closed_at":1782990665557}
+{"id":"swisseph-rs/77","title":"RSE 10/12: Lunar eclipse search (swe_lun_eclipse_when + swe_lun_eclipse_when_loc)","status":"done","closed_at":1782991322301}
+{"id":"swisseph-rs/78","title":"RSE 11/12: Occultation where + global search (swe_lun_occult_where + swe_lun_occult_when_glob)","status":"done","closed_at":1782994676822}
+{"id":"swisseph-rs/79","title":"RSE 12/12: Occultation local search (swe_lun_occult_when_loc + occult_when_loc)","status":"done","closed_at":1782997742467}
+{"id":"swisseph-rs/80","title":"Extend calc_topo golden coverage to SWIEPH/JPL backends + non-SPEED3 flag shapes","status":"done","closed_at":1782923809731}
+{"id":"swisseph-rs/81","title":"JPL backend + TOPOCTR diverges from C away from J2000 (Moon up to 0.024°, other bodies smaller)","status":"done","closed_at":1782931131233}
+{"id":"swisseph-rs/82","title":"PNOC 1/9: Activate sutra architectural constraints for Phase 12 app modules","status":"done","closed_at":1782999716104}
+{"id":"swisseph-rs/83","title":"PNOC 2/9: Phenomena module (swe_pheno / swe_pheno_ut → phenomena.rs)","status":"done","closed_at":1783002336082}
+{"id":"swisseph-rs/84","title":"PNOC 3/9: Body::TrueNode + Body::OscuApogee in the calc pipeline (lunar_osc_elem + swi_plan_for_osc_elem)","status":"done","closed_at":1783006078243}
+{"id":"swisseph-rs/85","title":"PNOC 4/9: Nodes & apsides module scaffold + mean-elements branch (swe_nod_aps MEAN + swe_nod_aps_ut → nodaps.rs)","status":"done","closed_at":1783013306042}
+{"id":"swisseph-rs/86","title":"PNOC 5/9: Nodes & apsides osculating branch (swe_nod_aps OSCU / OSCU_BAR / FOPOINT)","status":"done","closed_at":1783015719928}
+{"id":"swisseph-rs/87","title":"PNOC 6/9: Orbital elements module (swe_get_orbital_elements + swe_orbit_max_min_true_distance → orbit.rs)","status":"done","closed_at":1783019720274}
+{"id":"swisseph-rs/88","title":"PNOC 7/9: Zodiacal crossings module (swe_solcross / mooncross / mooncross_node / helio_cross + UT variants → crossings.rs)","status":"done","closed_at":1783021204333}
+{"id":"swisseph-rs/89","title":"PNOC 8/9: Gauquelin sector rise/set methods (swe_gauquelin_sector imeth 2–5 + full dispatcher)","status":"done","closed_at":1783022179623}
+{"id":"swisseph-rs/90","title":"PNOC 9/9: Planetocentric positions (swe_calc_pctr → Ephemeris::calc_pctr)","status":"done","closed_at":1783025547095}
+{"id":"swisseph-rs/91","title":"Break calc↔context module cycle: extract EphemerisConfig/TopoPosition into leaf config.rs","status":"done","closed_at":1782992404145}
+{"id":"swisseph-rs/92","title":"Golden coverage for occultation ifltype filtering + untested branches (RSE 11/12 follow-up)","status":"done","closed_at":1782999060259}
+{"id":"swisseph-rs/93","title":"Golden coverage for occult_when_loc body rise/set slots tret[5]/tret[6] (true branch)","status":"ready-for-agent","closed_at":null}
+{"id":"swisseph-rs/94","title":"Add dedicated SEFLG_HELCTR golden coverage (calc)","status":"done","closed_at":1783002932030}
+{"id":"swisseph-rs/95","title":"Plan: Asteroid ephemeris support","status":"done","closed_at":1783034243245}
+{"id":"swisseph-rs/96","title":"Implement heliocentric Earth path in calc (calc(Body::Earth, HELCTR) returns real position)","status":"done","closed_at":1783168758816}
+{"id":"swisseph-rs/97","title":"gauquelin_sector: thread starname through geometric branch (imeth 0/1)","status":"done","closed_at":1783023022362}
+{"id":"swisseph-rs/98","title":"pctr golden matrix: add SWIEPH frame-chain + sidereal coverage, fix vacuous pass","status":"done","closed_at":1783027043907}
+{"id":"swisseph-rs/99","title":"pctr deflection tolerance: verify/tighten 5e-8 and correct incorrect root-cause comment","status":"done","closed_at":1783027052028}
+{"id":"swisseph-rs/100","title":"Asteroid SE1 metadata: MPC-line parsing, config numbers, file loading","status":"done","closed_at":1783078003647}
+{"id":"swisseph-rs/101","title":"Asteroid calc dispatch (all backends) + main-asteroid golden battery","status":"done","closed_at":1783079581470}
+{"id":"swisseph-rs/102","title":"Numbered-asteroid, MOSEPH-mode, and error-path golden coverage","status":"done","closed_at":1783080917678}
+{"id":"swisseph-rs/103","title":"Asteroid H/G/diameter consumers: pheno + eclipse/riseset radius + goldens","status":"done","closed_at":1783082281587}
+{"id":"swisseph-rs/104","title":"Heliacal 1/8: sutra constraints + module scaffolding + atmospheric extinction & optics layer","status":"done","closed_at":1783085604032}
+{"id":"swisseph-rs/105","title":"Heliacal 2/8: Schaefer sky brightness model (Bsky + components)","status":"done","closed_at":1783086458675}
+{"id":"swisseph-rs/106","title":"Heliacal 3/8: object location & magnitude layer (Ephemeris-consuming helpers)","status":"done","closed_at":1783087516940}
+{"id":"swisseph-rs/107","title":"Heliacal 4/8: VisLimMagn + Ephemeris::vis_limit_mag (first public API)","status":"done","closed_at":1783089778996}
+{"id":"swisseph-rs/108","title":"Heliacal 5/8: TopoArcVisionis + HeliacalAngle + public wrappers","status":"done","closed_at":1783090642014}
+{"id":"swisseph-rs/109","title":"Heliacal 6/8: heliacal_pheno_ut + Yallop lunar crescent","status":"done","closed_at":1783092265671}
+{"id":"swisseph-rs/110","title":"Heliacal 7/8: event-search infrastructure (conjunctions, oblique ascension, day search, visibility timing)","status":"done","closed_at":1783093533169}
+{"id":"swisseph-rs/111","title":"Heliacal 8/8: event drivers + Ephemeris::heliacal_ut (arc completion)","status":"done","closed_at":1783096172141}
+{"id":"swisseph-rs/112","title":"Enforce epheflag/EphemerisConfig source consistency","status":"done","closed_at":1783098679626}
+{"id":"swisseph-rs/113","title":"Heliacal golden tests: add SE_HELFLAG_HIGH_PRECISION coverage","status":"ready-for-agent","closed_at":null}
+{"id":"swisseph-rs/114","title":"Polish 1/7: Cargo feature flags, optional deps, package metadata","status":"done","closed_at":1783193912149}
+{"id":"swisseph-rs/115","title":"Polish 2/7: Curated crate-root API surface + crate-level docs in lib.rs","status":"done","closed_at":1783204420282}
+{"id":"swisseph-rs/116","title":"Polish 3/7: Doc-comment sweep A — core types, flags, error, config, Ephemeris methods (+ swe_* doc aliases)","status":"done","closed_at":1783205833172}
+{"id":"swisseph-rs/117","title":"Polish 4/7: Doc-comment sweep B — application & backend modules, missing_docs lint","status":"done","closed_at":1783207114644}
+{"id":"swisseph-rs/118","title":"Polish 5/7: README, LICENSE (AGPL-3.0 + Astrodienst attribution), examples/","status":"done","closed_at":1783207661134}
+{"id":"swisseph-rs/119","title":"Polish 6/7: Send+Sync guarantee (assertion + concurrency test) and FFI design doc","status":"done","closed_at":1783207896082}
+{"id":"swisseph-rs/120","title":"Polish 7/7: Criterion benchmarks, C comparison harness, multithread-scaling capstone","status":"done","closed_at":1783210762698}
+{"id":"swisseph-rs/121","title":"Scope decision: planet moons (SE_PLMOON, sat/*.se1) and Body::Comet — port, descope, or remove the enum variants","status":"done","closed_at":1783101245787}
+{"id":"swisseph-rs/122","title":"Fictitious planets 1/2: element layer — built-in table, seorbel.txt parser, swi_kepler, swi_osc_el_plan core","status":"done","closed_at":1783180270431}
+{"id":"swisseph-rs/123","title":"Fictitious planets 2/2: calc dispatch + apparent-position pipeline + swe_calc golden battery","status":"done","closed_at":1783183082006}
+{"id":"swisseph-rs/124","title":"Utility completeness: time_equ/lmt↔lat, name lookups, delta_t_userdef, centisecond formatters","status":"done","closed_at":1783185396794}
+{"id":"swisseph-rs/125","title":"Planet-moon SE1 loading: config numbers + sat/ file loading + header verification","status":"done","closed_at":1783186296577}
+{"id":"swisseph-rs/126","title":"PlanetMoon + SEFLG_CENTER_BODY calc dispatch (all backends) + golden battery","status":"done","closed_at":1783188198969}
+{"id":"swisseph-rs/127","title":"Plmoon MOSEPH, quirk, and error-path golden coverage + cross-function behavior","status":"done","closed_at":1783191621813}
+{"id":"swisseph-rs/128","title":"Remove Body::Comet / CometId — unbacked API surface, pre-1.0 cleanup","status":"done","closed_at":1783192371808}
+{"id":"swisseph-rs/129","title":"Implement SEFLG_BARYCTR for planets and Moon (Swiss/JPL backends)","status":"done","closed_at":1783178221326}
+{"id":"swisseph-rs/130","title":"ported Alcabitius house system","status":"done","closed_at":1783209353356}
+{"id":"swisseph-rs/131","title":"FFI 1/8: swisseph-ffi crate scaffold — workspace, handle model, error infra, config flattening, cbindgen","status":"done","closed_at":1783257457361}
+{"id":"swisseph-rs/132","title":"FFI 2/8: core calc surface — calc, calc_pctr, fixstar family, ayanamsa, planet names","status":"done","closed_at":1783259139924}
+{"id":"swisseph-rs/133","title":"FFI 3/8: date/time surface — julday, UTC conversions, deltat, sidereal time, equation of time, formatting","status":"done","closed_at":1783260942777}
+{"id":"swisseph-rs/134","title":"FFI 4/8: houses, house position, Gauquelin sectors, azalt, refraction","status":"done","closed_at":1783263600024}
+{"id":"swisseph-rs/135","title":"FFI 5/8: rise/set, solar & lunar eclipses, occultations","status":"done","closed_at":1783264831293}
+{"id":"swisseph-rs/136","title":"FFI 6/8: phenomena, nodes/apsides, orbital elements, crossings","status":"done","closed_at":1783265832144}
+{"id":"swisseph-rs/137","title":"FFI 7/8: heliacal family — events, phenomena, visibility limit, heliacal angle","status":"done","closed_at":1783266957769}
+{"id":"swisseph-rs/138","title":"FFI 8/8: capstone — C-side smoke test, concurrent ABI test, header audit, docs","status":"done","closed_at":1783275800610}
+{"id":"swisseph-rs/139","title":"FFI 0/8: coverage audit — swisseph.dart's used swe_* symbols vs planned FFI surface and lib-crate ports","status":"done","closed_at":1783208781950}
+{"id":"swisseph-rs/140","title":"FFI: ephemeris file introspection — lib accessor + swisseph_get_current_file_data wrapper","status":"done","closed_at":1783268194768}
+{"id":"swisseph-rs/141","title":"FFI _where functions: populate attr[20] for C parity","status":"done","closed_at":1783269019886}
+{"id":"swisseph-rs/142","title":"Design Python bindings via PyO3 + maturin","status":"done","closed_at":1783475136078}
+{"id":"swisseph-rs/143","title":"swisseph-ffi: refcounted handle sharing (swisseph_share / Arc-backed free)","status":"done","closed_at":1783342856942}
+{"id":"swisseph-rs/144","title":"Design: port swisseph's swetest to swisseph-rs","status":"done","closed_at":1783343872913}
+{"id":"swisseph-rs/145","title":"swetest: binary scaffold + CLI argument parser","status":"done","closed_at":1783344720184}
+{"id":"swisseph-rs/146","title":"swetest: main computation loop + body dispatch + header","status":"done","closed_at":1783351032228}
+{"id":"swisseph-rs/147","title":"swetest: format-sequence output engine (-f)","status":"done","closed_at":1783352237338}
+{"id":"swisseph-rs/148","title":"swetest: special events output (eclipses, rise/set, heliacal, orbel)","status":"done","closed_at":1783353790936}
+{"id":"swisseph-rs/149","title":"swetest: remaining modes + integration polish","status":"done","closed_at":1783356019756}
+{"id":"swisseph-rs/150","title":"swisseph-ffi: swisseph_azalt missing lapse_rate parameter","status":"done","closed_at":1783475121948}
+{"id":"swisseph-rs/151","title":"swetest bug","status":"done","closed_at":1783781042883}
+{"id":"swisseph-rs/152","title":"swetest houses bug 2","status":"done","closed_at":1783781044618}
+{"id":"swisseph-rs/153","title":"change epsilon and nutation display to dms to match c-swetest","status":"done","closed_at":1783781542446}
+{"id":"swisseph-rs/154","title":"checkout third column in this command","status":"done","closed_at":1783781322228}
+{"id":"swisseph-rs/155","title":"Export cotrans / cotrans_with_speed through swisseph-ffi","status":"done","closed_at":1784385269220}
+{"id":"swisseph-rs/156","title":"mooncross_ut infinite loop with DE441 .se1 files","status":"done","closed_at":1785175665958}
+{"id":"swisseph-rs/157","title":"review: DE431 → DE441 ephemeris file migration","status":"done","closed_at":1784554978779}
+{"id":"swisseph-rs/158","title":"calcPctr: extend SwephProvider for numbered asteroids and planet moons","status":"done","closed_at":1784656120894}
+{"id":"swisseph-rs/159","title":"nodaps: wire asteroid_files into nodaps_osc_body_j2000's SwephProvider","status":"done","closed_at":1784656747615}

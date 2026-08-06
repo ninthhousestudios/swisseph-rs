@@ -1,0 +1,72 @@
+{
+  "id": "019f33a4-65e3-7de1-9ef0-8b584803522e",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/142",
+  "sequence_number": 142,
+  "title": "Design Python bindings via PyO3 + maturin",
+  "description": "Design a `swisseph-python` workspace member that wraps the `swisseph` lib crate directly via PyO3 (not through swisseph-ffi). Maturin for wheel builds and distribution. Key design questions: API surface (mirror C swetest names vs Pythonic rename), GIL release strategy (Ephemeris is Send+Sync so release during calc), wheel CI matrix, whether to publish to PyPI.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "HITL",
+  "acceptance_criteria": [],
+  "decisions": [
+    {
+      "decision": "Use PyO3 + maturin, not ctypes/cffi wrapping swisseph-ffi",
+      "rationale": "swisseph-ffi's flattened C ABI (out-params, error buffers, nullable pointers) was designed for Dart's dart:ffi. Wrapping it in Python means un-flattening everything. Going straight from swisseph lib → PyO3 skips the round-trip, gives native Python exceptions, keyword args, type stubs. Distribution via pip install is the killer feature over ctypes/cffi.",
+      "rejected_alternative": "ctypes/cffi wrapping the existing cdylib — avoids new Rust code but produces awkward Python ergonomics and has no pip-installable wheel story"
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Design completed via brainstorm + domain session 2026-07-07. Deliverables live in the new standalone repo ~/nhs/soft/astrology/pyswisseph-rs: CONTEXT.md (mapping rules, closed deviation list, naming/GIL/construction rules), ADR 0001 (PyO3 direct on lib crate, not swisseph-ffi), ADR 0002 (strict 1:1 transliteration). PRD published as pyswisseph-rs/1 in the new yojana project. Divergence from task description: standalone repo consuming swisseph-rs 0.1.0 from crates.io, NOT a workspace member. Key decisions beyond the pre-recorded one: Pythonic-only API (no pyswisseph compat shim), full api-surface.md coverage, import name swisseph_rs, abi3-py311 wheels via maturin-action + PyPI trusted publishing, verbatim Rust variant names for exception classes in swisseph_rs.errors.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "yojana:task",
+      "value": "pyswisseph-rs/1",
+      "label": "resulting PRD"
+    },
+    {
+      "type": "doc:path",
+      "value": "docs/ffi-design.md",
+      "label": "FFI design doc (Dart-oriented, context for why not to reuse)"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783277839843,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 142
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783475126532,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783475136078,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783277839843,
+  "updated_at": 1783475136078,
+  "completed_at": 1783475136078,
+  "edges": []
+}

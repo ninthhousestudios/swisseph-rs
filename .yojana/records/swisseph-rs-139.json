@@ -1,0 +1,48 @@
+{
+  "id": "019f2f82-b66d-7813-a0fe-1d0fcb8e3742",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/139",
+  "sequence_number": 139,
+  "title": "FFI 0/8: coverage audit — swisseph.dart's used swe_* symbols vs planned FFI surface and lib-crate ports",
+  "description": "### Summary\nDiff the set of C `swe_*` functions that swisseph.dart (../swisseph.dart) actually binds/uses against (a) the planned swisseph-ffi surface (swisseph-rs/131–138 task descriptions) and (b) what the swisseph-rs lib crate has actually ported. Output: a coverage table with three buckets — covered by the plan, missing from the plan but portable now (→ amend the relevant FFI task), missing from the lib crate entirely (→ new swisseph-rs port tasks). De-risks the Dart-binding work before FFI implementation starts, while the plan is cheap to amend.\n\n### Method\n1. Enumerate symbols from swisseph.dart: its ffigen output / bindings file(s) and, separately, which of those the public Dart API layer actually calls (bound-but-unused symbols are noise).\n2. Match against the FFI task descriptions (swisseph-rs/131–138) and src/context.rs + module-level pub fns in swisseph-rs.\n3. Amend FFI task descriptions in yojana for trivial gaps; file new tasks for lib-crate gaps; record the full table in this task's close-out.\n\n### Acceptance criteria\n- Every swe_* symbol used by swisseph.dart's public API is classified into one of the three buckets\n- FFI tasks amended / new tasks filed as needed\n- Findings table recorded in execution_record or a comment",
+  "category": "experiment",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Method: extracted swe_* symbols from ../swisseph.dart lib/src/bindings.dart and lib/src/swiss_eph.dart (grep -ohE, sort -u). Both sets are IDENTICAL — 94 symbols, every bound symbol is used by the public Dart API layer.\n\nClassification of all 94:\n\nBUCKET A — covered by FFI plan as-is (76): swe_calc(_ut), calc_pctr, fixstar2(_ut/_mag), get_ayanamsa(_ut/_ex/_ex_ut), get_planet_name (131/132); julday, revjul, date_conversion, day_of_week, utc_time_zone, utc_to_jd, jdet_to_utc, jdut1_to_utc, deltat(_ex), sidtime(0), time_equ, lmt_to_lat, lat_to_lmt, cs-format fns, split_deg (133); houses(_ex/_ex2), houses_armc(_ex2), house_pos, gauquelin_sector, azalt(_rev), refrac(_extended) (134); rise_trans(_true_hor), all sol/lun eclipse + occult fns (135); pheno(_ut), nod_aps(_ut), get_orbital_elements, orbit_max_min_true_distance, all 8 crossing fns (136); heliacal_ut, heliacal_pheno_ut, vis_limit_mag, heliacal_angle, topo_arcus_visionis (137); swe_version (131). Global set_* absorbed by SweConfig/per-call params: set_ephe_path, set_jpl_file, set_sid_mode, set_topo, set_tid_acc, set_delta_t_userdef, set_lapse_rate (refrac_extended param). swe_close → swisseph_free.\n\nBUCKET B — lib has it, plan missed the wrapper → task descriptions AMENDED (14): degnorm/radnorm/difdegn/difdeg2n/deg_midp/rad_midp/cotrans/cotrans_sp (all in src/math.rs) + split_deg confirmation → 133; get_ayanamsa_name (SiderealMode::name, types.rs:615) → 132; house_name (HouseSystem::name, types.rs:412) → 134; get_tid_acc + get/set_astro_models (AstroModels flattening was a \"deliberate omission\" — reversed, swisseph.dart has astro_models_test.dart) → 131.\n\nBUCKET C — lib-crate gap → new task (1): get_current_file_data → swisseph-rs/140 (Ephemeris::file_data(kind, jd) + FFI wrapper; stateless divergence: jd-selects-file instead of C's last-call global).\n\nBUCKET D — no FFI needed, Dart layer handles (2): get_library_path (loader concern); set_interpolate_nut — NOT ported and recommend never porting: it is a C performance knob (interpolated vs exact nutation) that slightly changes results; stateless Rust always computes exact nutation. Dart wrapper should no-op it with a deprecation note. Recorded here as the disposition rather than filing a wontfix port task.\n\nNet result: plan held up well — 76/94 covered as designed, 14 were trivial wrapper omissions (now amended into 131-134), 1 real lib gap (140), 2 intentionally out of scope. No FFI task resizing needed; amendments are all thin wrappers over existing lib fns.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208523373,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 139
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783208781950,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783208523373,
+  "updated_at": 1783208781950,
+  "completed_at": 1783208781950,
+  "edges": []
+}

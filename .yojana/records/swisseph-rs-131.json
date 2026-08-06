@@ -1,0 +1,125 @@
+{
+  "id": "019f2f7d-6c24-70b2-af83-827884e2c404",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/131",
+  "sequence_number": 131,
+  "title": "FFI 1/8: swisseph-ffi crate scaffold — workspace, handle model, error infra, config flattening, cbindgen",
+  "description": "### Summary\nCreate the `swisseph-ffi` cdylib workspace member implementing docs/ffi-design.md's foundation: opaque handle model (`swisseph_new`/`swisseph_free`), `#[repr(C)]` config flattening, i32 error-code convention with per-call `err_buf`, panic containment, cbindgen-generated header — plus ONE calculation function (`swisseph_calc_ut`) as a vertical slice proving the whole chain (handle → flags → out-params → error path). Read docs/ffi-design.md first; it is the contract this task implements.\n\n### Files\n- `Cargo.toml` (root — add `[workspace] members = [\"swisseph-ffi\"]`, root package stays)\n- `swisseph-ffi/Cargo.toml` (new: `crate-type = [\"cdylib\", \"staticlib\"]`, `swisseph = { path = \"..\" }`, license AGPL-3.0-or-later)\n- `swisseph-ffi/src/lib.rs`, `src/error.rs`, `src/config.rs`\n- `swisseph-ffi/cbindgen.toml`, `swisseph-ffi/include/swisseph.h` (generated, committed)\n- `swisseph-ffi/tests/handle.rs`\n- `src/context.rs` (lib crate: widen `calc_with_config`/`calc_ut_with_config`/`fixstar2_with_config` from pub(crate) to pub with doc comments — this IS the \"*_with_config pattern\" ffi-design.md names for per-call variance; document that callers pass a clone of `eph.config()` with per-call fields changed)\n\n### Implementation steps\n1. **Workspace**: add `[workspace]` table to the existing root Cargo.toml. `cargo test` for the root crate must be unaffected.\n2. **Error infra** (`error.rs`): `#[repr(i32)] pub enum SweErrorCode { Ok = 0, ... }` with one negative code per `swisseph::Error` variant, mapped by a `fn error_code(&Error) -> i32`, plus `Panic` and `InvalidArg` (null pointer, bad UTF-8, unknown enum value). Codes are append-only forever — say so in a comment. `write_err(buf: *mut c_char, cap: usize, msg: &str)`: UTF-8, truncates at a char boundary, ALWAYS NUL-terminates, no-op when buf is null or cap == 0. `ffi_guard!` macro wrapping every extern fn body in `catch_unwind` → `SweErrorCode::Panic` (panics must never unwind across the FFI boundary).\n3. **Config** (`config.rs`): `#[repr(C)] pub struct SweConfig` flattening `EphemerisConfig` (src/config.rs:28): `ephemeris_source: i32` (0=Moshier, 1=Swiss, 2=Jpl); `ephe_path`, `jpl_filename`, `leap_seconds_file`: nullable `*const c_char`; sidereal: `has_sidereal: bool` + `sid_mode: i32` (raw C `swe_set_sid_mode` value — reuse `EphemerisConfig::set_sidereal_mode`) + `sid_t0`, `sid_ayan_t0: f64`; topo: `has_topo: bool` + `geolon/geolat/altitude: f64`; `tidal_acceleration`, `delta_t_userdef`: f64 with NAN = unset; `asteroid_numbers`/`planet_moon_numbers`/`extra_leap_seconds`: `*const i32` + `usize` len pairs (null+0 = empty). Provide `swisseph_config_default(*mut SweConfig)` filling sane defaults (a zeroed struct would mean tid_acc = 0.0, which is wrong — NANs must be set explicitly).\n4. **Handle**: `swisseph_new(config: *const SweConfig, out: *mut *mut SweEphemeris, err_buf, err_cap) -> i32` via `Box::into_raw` (SweEphemeris is an opaque newtype over `Ephemeris`); `swisseph_free(*mut SweEphemeris)` via `Box::from_raw`, null-safe; `swisseph_version() -> *const c_char` (static NUL-terminated string).\n5. **Vertical slice**: `swisseph_calc_ut(h, tjd_ut: f64, ipl: i32, iflag: i32, geopos: *const f64 /* NULL or [lon,lat,alt] per-call topo override */, xx: *mut f64 /* [6] */, flags_used: *mut i32, err_buf, err_cap) -> i32`. Body via `TryFrom<i32>` (types.rs:195); flags via `CalcFlags::from_bits_retain` (mirror C's tolerance of unknown bits); non-null geopos → clone handle config, set `topographic`, call the newly-pub `calc_ut_with_config`.\n6. **cbindgen**: config in `cbindgen.toml`; commit `include/swisseph.h`; add a test that regenerates the header in-memory (cbindgen as dev-dependency) and asserts it matches the committed file (freshness guard).\n7. **Tests** (Rust, calling the extern fns directly with raw pointers): new/free round-trip (Moshier default config); bad ephe_path → correct code + message lands in err_buf NUL-terminated; null out-param → InvalidArg; tiny err_cap (e.g. 4) → truncated but NUL-terminated; `swisseph_calc_ut` bitwise-parity vs `Ephemeris::calc_ut` for a few Moshier bodies/epochs, with and without geopos override.\n\n### Audit amendments (swisseph-rs/139 — swisseph.dart uses these)\n- **astro_models in SweConfig** (was \"deliberate omission\", now required — swisseph.dart exposes get/set_astro_models and has astro_models_test.dart): flatten `AstroModels` into SweConfig as i32 fields (precession, nutation, bias, sidereal-time, deltaT, JPL-horizon modes — one i32 per `AstroModels` field, 0 = library default matching C's convention). Plus `swisseph_get_astro_models(h, out: *mut i32 /* array, len = model count */)` returning the resolved values. Skip C's description-string variant (Dart layer can render names).\n- **`swisseph_get_tid_acc(h) -> f64`**: returns the RESOLVED tidal acceleration (Ephemeris::new resolves it from the file denum when unset — the caller can't know it without asking).\n\n### Acceptance criteria\n- `cargo build -p swisseph-ffi` produces a cdylib; `cargo test -p swisseph-ffi` passes incl. header-freshness test\n- `cargo test` (workspace root crate) still fully passes\n- `include/swisseph.h` contains the opaque typedef, SweConfig, the error-code enum, and all extern fns, each with a doc comment\n\n### Escape hatch\nIf some `swisseph::Error` variants can't map cleanly to stable codes, add a catch-all `Internal` code and note it in the header — never reorder existing codes. If cbindgen chokes on a construct, simplify the Rust-side type rather than hand-editing the generated header.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented as specified. Key decisions: (1) Added rlib to crate-type so integration tests can link — cdylib+staticlib-only doesn't produce the rlib cargo needs for `--test`. (2) astro_models_to_i32s uses direct `as i32` cast on the enum discriminants rather than a manual match (all model enums have explicit repr discriminants). (3) Moshier doesn't resolve tidal_acceleration at construction (no files opened), so swisseph_get_tid_acc returns NAN for Moshier handles — this matches the lib crate's config().tidal_acceleration being None, with resolution happening at calc time via effective_config. (4) cbindgen 0.29 pinned (latest) to avoid version skew between CLI and library freshness test.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "394fb4c"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208176676,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 131
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783256699270,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783257457361,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review: approve with notes.\\n\\n3 findings:\\n1. [high] Single-owner free unsafe for shared-isolate model — acknowledged as a design choice: one owning Dart object calls free, other isolates hold integer copies without ownership. Not a code bug in the FFI crate; ownership protocol is the Dart layer's responsibility per ffi-design.md.\\n2. [medium] Invalid astro model values silently ignored — FIXED (ade3668). Now rejects unknown nonzero values with InvalidArg.\\n3. [medium] NULL array pointer with nonzero len accepted — FIXED (ade3668). Now errors instead of silently treating as empty.\"",
+      "ts": 1783257822976
+    }
+  ],
+  "created_at": 1783208176676,
+  "updated_at": 1783257457361,
+  "completed_at": 1783257457361,
+  "edges": [
+    {
+      "id": "019f2f7f-bc73-7ba2-b924-17774ba55404",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/132",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208328307
+    },
+    {
+      "id": "019f2f7f-bfc1-7ce3-b49b-a6581d31c97e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/133",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208329153
+    },
+    {
+      "id": "019f2f7f-c332-7091-b844-c3d5a0008362",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/134",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208330034
+    },
+    {
+      "id": "019f2f7f-c709-7f73-8795-86468b5b695e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/135",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208331017
+    },
+    {
+      "id": "019f2f7f-cb28-79e1-a5b2-40ffd9589702",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/136",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208332072
+    },
+    {
+      "id": "019f2f7f-ced1-7243-ac3e-18192b60ef79",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/137",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208333009
+    },
+    {
+      "id": "019f2f86-55e1-7a71-92b4-6a7db5d53c5a",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/140",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208760801
+    }
+  ]
+}

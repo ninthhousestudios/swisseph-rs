@@ -1,0 +1,86 @@
+{
+  "id": "019f32e6-a6cb-77c3-8402-10e409447960",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/141",
+  "sequence_number": 141,
+  "title": "FFI _where functions: populate attr[20] for C parity",
+  "description": "C's `swe_sol_eclipse_where` and `swe_lun_occult_where` internally call `eclipse_how` at the computed central point and fill `attr[20]` with local circumstances (magnitude, azimuth, altitude, Saros, etc.), then overwrite `attr[3]` with `dcore[0]` (core shadow diameter). The Rust FFI wrappers currently zero `attr[20]` because the lib crate's `EclipseWhere` struct only carries geographic/shadow-cone data.\\n\\nThis was correctly handled per swisseph-rs/135's escape hatch (\\\"zero and document — do not add lib-crate computation\\\"), and the header documents \\\"zeroed — local circumstances require swisseph_sol_eclipse_how\\\". But it's a C-parity gap that would surprise consumers porting from the original Swiss Ephemeris.\\n\\n### Options\\n1. **FFI-level fix**: have the FFI `_where` wrappers make an additional `sol_eclipse_how` / equivalent call internally to populate attr. Pros: no lib change. Cons: extra computation the caller might not need; the FFI layer doing work the lib doesn't.\\n2. **Lib-level fix**: extend `EclipseWhere` to optionally carry attr data, computed during `sol_eclipse_where` / `lun_occult_where`. Pros: clean, mirrors C's internal structure. Cons: wider change.\\n\\n### Files\\n- `swisseph-ffi/src/eclipse.rs` — `swisseph_sol_eclipse_where` (line ~297), `swisseph_lun_occult_where` (line ~733)\\n- `src/eclipse.rs` — `EclipseWhere` struct, `sol_eclipse_where`, `lun_occult_where` implementations\\n- `swisseph-ffi/tests/eclipse.rs` — add slot-by-slot attr tests for both _where functions\"",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "swisseph_sol_eclipse_where and swisseph_lun_occult_where populate attr[20] with local circumstances matching C's swe_sol_eclipse_where / swe_lun_occult_where output"
+    },
+    {
+      "done": false,
+      "text": "attr[3] contains core_diameter_km (C's dcore[0] convention)"
+    },
+    {
+      "done": false,
+      "text": "Parity tests verify all 20 attr slots against the lib's sol_eclipse_how / equivalent output at the same central point"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "ca0cde174d9dfbd9cdbab90685e425fbe4eb112b"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783265404619,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 141
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783268511200,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783269019886,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "josh"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review (verdict: needs-attention)\n\nFinding 1 [medium, CONFIRMED]: attr zeroed when _where returns no eclipse (swisseph-ffi/src/eclipse.rs:306-322, 765-780). The FFI gates eclipse_how_at on `!w.flags.is_empty()`, zeroing attr for retval=0. C calls eclipse_how unconditionally — golden data at JD 2451545.0 has retval=0 but non-zero attr (attr[0]=-103.62, attr[3]=-1423.20). FFI tests avoid this by only testing epochs with central eclipses. Same pattern duplicated in lun_occult_where.\n\nRecommendation: Remove the flags.is_empty() short-circuit. After a successful _where call, always call eclipse_how_at. Add a retval=0 FFI test case using JD 2451545.0 to prevent regression.",
+      "ts": 1783275163293
+    },
+    {
+      "author": "agent",
+      "text": "Review: request changes. One confirmed C-parity bug: the flags.is_empty() gate in both swisseph_sol_eclipse_where and swisseph_lun_occult_where incorrectly zeros attr[20] for retval=0 epochs. C calls eclipse_how unconditionally — golden data at JD 2451545.0 shows non-zero attr values even with retval=0. Fix: remove the gate, call eclipse_how_at unconditionally after successful _where, and add a retval=0 test case.",
+      "ts": 1783275169123
+    }
+  ],
+  "created_at": 1783265404619,
+  "updated_at": 1783269019886,
+  "completed_at": 1783269019886,
+  "edges": []
+}

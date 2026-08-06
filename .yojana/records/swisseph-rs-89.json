@@ -1,0 +1,80 @@
+{
+  "id": "019f2027-da17-7293-bdcd-0ad7c43c6666",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/89",
+  "sequence_number": 89,
+  "title": "PNOC 8/9: Gauquelin sector rise/set methods (swe_gauquelin_sector imeth 2–5 + full dispatcher)",
+  "description": "### Summary\nComplete the `swe_gauquelin_sector` port: implement the rise/set-based methods (imeth 2–5) on top of the existing `Ephemeris::rise_trans`, and expose a full dispatcher `Ephemeris::gauquelin_sector` that routes imeth 0/1 to the already-ported geometric method and 2–5 to the new one. Note the C doc-comment only describes imeth 0–3; imeth 4/5 (disc-edge variants) exist in the code and MUST be included.\n\nRead `docs/codebase-map.md` FIRST, then `docs/c-ref-gauquelin-riseset.md` in full. Do NOT read the C source.\n\n### Files\n- `src/context.rs` — new private `gauquelin_sector_risetrans(...)` method + public `Ephemeris::gauquelin_sector(t_ut, body, flags, imeth, geopos, atpress, attemp) -> Result<f64, Error>` dispatcher; the existing `gauquelin_sector_geometric` becomes the imeth 0/1 arm (keep it public or fold it in — keep the existing name working since golden tests call it). If context.rs is getting crowded, a new `src/gauquelin.rs` module is acceptable ONLY if the geometric method moves too; otherwise stay in context.rs beside it.\n- `tests/c-gen/gen_houses.c` — extend the existing `gauquelin_sector` battery generation with imeth 2–5 cases under a NEW key `gauquelin_riseset` (do not touch existing keys' case sets).\n- `tests/golden-data/houses.json` — regenerated (existing keys must be byte-identical; only the new key added).\n- `tests/golden/houses.rs` — new `gauquelin_riseset` test fn.\n\n### Implementation steps\n1. **Dispatcher** (doc §1–2): validate imeth 0..=5; imeth 0/1 → existing geometric path (delete its \"not ported\" Err arm); 2–5 → rise/set path. imeth semantics table (§2): 2 = disc-center + no refraction, 3 = disc-center + refraction, 4 = disc-edge + no refraction, 5 = disc-edge + refraction — each maps to specific `RiseSetFlags`/SE_BIT_* combinations on the rise_trans calls; take the exact bit sets from §2's table.\n2. **epheflag/deltaT** (doc §4–5): extract epheflag from flags per §4; deltaT handling per §5 (note whether it's the caller-flag-carrying pattern like gauquelin_sector_geometric or the forced-TIDAL_DEFAULT pattern like houses_ex2 — the doc records which; follow it exactly, this distinction has bitten twice before, see sidereal_time.rs's codebase-map note).\n3. **Rise/set search** (doc §7, subsections 7.1–7.4): the exact sequence — find next rise, find next set from t_ut, determine above/below horizon bracketing, and the re-search adjustment loops when t_ut isn't bracketed. PRESERVE the control-flow quirk §7 flags: the C pre-sets the OPPOSITE event's found-flag to TRUE before retrying a search and lets the retry's own circumpolar outcome overwrite it — restructure only in ways that provably keep the same outcomes (the doc explains which outcomes matter). Interpolation (§7.4): above horizon `(t − t_rise)/(t_set − t_rise) × 18 + 1`; below `(t − t_set)/(t_rise − t_set) × 18 + 19` — exact expressions from the doc.\n4. **Circumpolar** (doc §8): `Ephemeris::rise_trans` returning `Err(Error::CircumpolarBody)` maps to C's retc −2 contract — propagate per §8 (gauquelin returns an error; never a fabricated sector).\n5. **Fixed stars** (doc §6): our rise_trans has no fixed-star TOPOCTR support and star handling is untested (codebase-map riseset note). Implement the starname path only if `rise_trans` already accepts stars end-to-end; otherwise return the existing unsupported-star error and note it in the task close-out. Bodies Sun..TrueNode must work.\n6. **atpress/attemp** (doc §3): pass through unmodified — defaulting happens inside rise_trans's resolve_atpress (already ported, src/azalt.rs:172); zero special-casing here.\n7. **Golden harness**: extend gen_houses.c — new key `gauquelin_riseset`: reuse the existing 6 ut_triples × bodies {SE_SUN, SE_MOON, SE_MARS} × imeth {2, 3, 4, 5} with SEFLG_MOSEPH, atpress=0, attemp=0 (72 cases); record dgsect + retval (retval<0 cases assert Err in Rust — include at least the existing high-latitude triple so a circumpolar case is plausible; if none of the battery goes circumpolar, that's fine, the full test still locks the happy path). Regenerate houses.json and diff: existing keys byte-identical.\n8. **Rust test**: dgsect eps 1e-6 (rise/set times feed a linear interpolation; rise_trans golden tolerance is 1e-6 day).\n\n### C reference\n`docs/c-ref-gauquelin-riseset.md` — all sections. §9 cross-references the geometric branch already ported (c-ref-houses.md §13 / context.rs).\n\n### Golden tests\n- Rebuild gen_houses + regenerate: `cc -O2 -I../swisseph -o tests/c-gen/gen_houses tests/c-gen/gen_houses.c -L../swisseph -lswe -lm && ./tests/c-gen/gen_houses > tests/golden-data/houses.json`\n- `cargo test --test golden houses -- --nocapture` (all existing house tests must still pass — the regeneration must not disturb existing keys)\n\n### Acceptance criteria\n- `cargo test --test golden houses -- --nocapture` passes including the new gauquelin_riseset fn (~72 cases).\n- Existing houses.json keys byte-identical after regeneration (verify with git diff / jq).\n- `cargo test` full suite passes; no new clippy warnings.\n- Update `docs/codebase-map.md` (context.rs gauquelin entry + gen_houses/houses.json/houses.rs entries).\n\n### Escape hatch\nIf golden tests fail with sector errors > 1e-5 after two debugging attempts, STOP and report: which cases fail, actual vs expected, what you tried. Do not exceed two attempts. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward implementation — no debugging needed, all 72 golden cases passed on the first attempt including the circumpolar error case (Moon at -64° latitude, 1600-Jan-1). Fixed star support is threaded through via the existing starname:Option<&str> parameter on rise_trans but not golden-tested (codebase-map riseset note: fixed stars have no TOPOCTR support in rise_trans yet). The gauquelin_sector_geometric method's old imeth 2-5 error arm was replaced with a proper validation error; the new public gauquelin_sector dispatcher sits alongside it.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "067f12e"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "pnoc"
+  ],
+  "history": [
+    {
+      "ts": 1782950910487,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 89
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783021816414,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783022179623,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. Two findings:\\n1. [high] Fixed-star requests silently dropped for imeth 0/1 — pre-existing gap in gauquelin_sector_geometric (doesn't accept starname). Filed as swisseph-rs/97.\\n2. [medium] Asteroid-134340→Pluto normalization missing — fixed in 1072b68.\\n\\nRise/set core logic (bracket search, flag mapping, interpolation formulas) confirmed correct against the C ref doc.",
+      "ts": 1783022513366
+    }
+  ],
+  "created_at": 1782950910487,
+  "updated_at": 1783022179623,
+  "completed_at": 1783022179623,
+  "arc_id": "019efa3c-46ed-7b32-818d-be319d217d53",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f2029-21ef-7883-b411-5659e50ede78",
+      "edge_type": "refines",
+      "source": "swisseph-rs/89",
+      "target": "swisseph-rs/13",
+      "note": null,
+      "created_at": 1782950994415
+    }
+  ]
+}

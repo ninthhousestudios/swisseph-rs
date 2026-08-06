@@ -1,0 +1,85 @@
+{
+  "id": "019f2f7e-22b9-7453-ae1a-98f743527076",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/133",
+  "sequence_number": 133,
+  "title": "FFI 3/8: date/time surface — julday, UTC conversions, deltat, sidereal time, equation of time, formatting",
+  "description": "### Summary\nFFI wrappers for the calendar/time-scale/formatting functions, plus the handle-free math/coordinate utility cluster the Dart binding uses. Mostly handle-free pure functions; deltaT/sidereal-time/UTC take the handle because they read `EphemerisConfig` (tidal acceleration, leap seconds). Read docs/ffi-design.md and the established swisseph-ffi patterns first.\n\n### Files\n- `swisseph-ffi/src/date.rs` + `swisseph-ffi/src/util.rs` (new modules), header regen, `swisseph-ffi/tests/date.rs`\n\n### Functions to add\nHandle-free (mirror C signatures where the Dart binding already knows them):\n1. `swisseph_julday(year, month, day, hour, gregflag) -> f64` + `swisseph_revjul(jd, gregflag, year/month/day out i32*, hour out f64*)` (src/date.rs:52/78).\n2. `swisseph_date_conversion(y, m, d, hour, cal: c_char, tjd out) -> i32` (date.rs:106), `swisseph_day_of_week(jd) -> i32` (date.rs:127).\n3. `swisseph_utc_time_zone(...)` (date.rs:137) — in/out y,m,d,h,min,sec + timezone offset, all out-params.\n4. Formatting (src/format.rs): `swisseph_cs2timestr`, `swisseph_cs2lonlatstr`, `swisseph_cs2degstr`, `swisseph_csroundsec` — char buffers via the shared write helper. `swisseph_split_deg(ddeg, flags: i32, deg/min/sec out i32*, secfr out f64*, sign out i32*)` wrapping `math::split_degrees` (src/math.rs:368, returns `DegreeParts` — flatten to C's out-param shape).\n\nHandle-based (config-dependent):\n5. `swisseph_utc_to_jd(h, y, m, d, hour, min, sec: f64, gregflag, dret: *mut f64 /*[2] et,ut*/)` and `swisseph_jdet_to_utc` / `swisseph_jdut1_to_utc` (date.rs:185/271/353 — check their actual signatures: they take the leap-seconds context from config/Ephemeris; wrap whatever shape the lib exposes, via `Ephemeris::leap_seconds` if that's the access path).\n6. `swisseph_deltat(h, tjd_ut) -> f64` and `swisseph_deltat_ex(h, tjd_ut, iflag, deltat out, err_buf...)` — `calc_deltat(jd, &config)` with the iflag-resolved effective config (mirror what `Ephemeris::calc_ut` does at context.rs:410).\n7. `swisseph_sidtime(h, tjd_ut) -> f64` + `swisseph_sidtime0(h, tjd_ut, eps, nut) -> f64` (src/sidereal_time.rs:224/279 — these take a config; pass the handle's).\n8. `swisseph_time_equ(h, tjd_et, e out)`, `swisseph_lmt_to_lat(h, tjd_lmt, geolon, tjd_lat out)`, `swisseph_lat_to_lmt(...)` (context.rs:3109/3132/3141).\n\n### Audit amendments (swisseph-rs/139 — swisseph.dart uses all of these; all already exist in src/math.rs, wrappers only)\nHandle-free utility cluster in `util.rs`, C name → lib fn:\n- `swisseph_degnorm` → `normalize_degrees` (math.rs:16); `swisseph_radnorm` → `normalize_radians` (math.rs:28)\n- `swisseph_difdegn` → `diff_degrees_norm` (math.rs:59); `swisseph_difdeg2n` → `diff_degrees` (math.rs:64) — VERIFY the norm/signed mapping against C's docs (difdegn = 0..360, difdeg2n = -180..180) with a parity test, don't trust the name resemblance\n- `swisseph_deg_midp` → `midpoint_degrees` (math.rs:80); `swisseph_rad_midp` → `midpoint_radians` (math.rs:86)\n- `swisseph_cotrans(xpo: *const f64 /*[3]*/, xpn: *mut f64 /*[3]*/, eps)` → `cotrans` (math.rs:326); `swisseph_cotrans_sp` (6-element) → `cotrans_with_speed` (math.rs:338)\n\n### Tests\nParity vs lib crate: julday/revjul round-trips both calendars incl. negative JD; utc_to_jd across a leap-second boundary (2016-12-31 23:59:60); deltat parity for Moshier config at 3 epochs; sidtime parity; format functions vs lib output for edge values (csroundsec 30°-boundary case); split_deg all flag variants vs `split_degrees`; time_equ/lmt/lat round-trip; the util cluster vs lib fns incl. the difdegn/difdeg2n range check.\n\n### Acceptance criteria\n- `cargo test -p swisseph-ffi` and root `cargo test` pass; header regenerated and freshness test green\n- Every fn documented in the header with units (JD vs hours vs centiseconds) — the format fns deal in centiseconds, say so\n\n### Escape hatch\nIf a date fn's lib signature doesn't fit a clean C shape (e.g. returns a struct with borrowed data), define a `#[repr(C)]` mirror rather than exposing pointers into Rust memory; if that still doesn't fit, leave that one fn out with a header TODO note and report.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented in a single pass. Created swisseph-ffi/src/date.rs (handle-free date/calendar + handle-based UTC/deltaT/sidereal-time/equation-of-time/formatting/split_deg) and swisseph-ffi/src/util.rs (handle-free math: degnorm/radnorm/difdegn/difdeg2n/deg_midp/rad_midp/cotrans/cotrans_sp). Widened Ephemeris::effective_config from pub(crate) to pub for deltat_ex's iflag-based tidal acceleration resolution. 28 new FFI functions total. Header regenerated. 30 parity tests in swisseph-ffi/tests/date.rs covering all functions (round-trips, range checks, leap-second boundary).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "bb3e672"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208223418,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 133
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783260452722,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783260942777,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review: 2 findings, both fixed in 729937b.\\n\\n1. [high] deltat_ex iflag=-1 sentinel mishandled — cast to u32 resolved as MOSEPH instead of forcing TIDAL_DEFAULT. Fixed with special-case before bitflag conversion.\\n2. [medium] difdeg2n boundary documented as (-180,180] but impl returns [-180,180). Doc corrected, boundary tests added.\\n\\nVerdict: approve (after fixes landed).\"",
+      "ts": 1783261396482
+    }
+  ],
+  "created_at": 1783208223418,
+  "updated_at": 1783260942777,
+  "completed_at": 1783260942777,
+  "edges": [
+    {
+      "id": "019f2f7f-bfc1-7ce3-b49b-a6581d31c97e",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/133",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208329153
+    },
+    {
+      "id": "019f2f7f-eb24-7a50-925e-48e15c91852d",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/133",
+      "note": null,
+      "created_at": 1783208340260
+    }
+  ]
+}

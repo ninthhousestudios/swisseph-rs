@@ -1,0 +1,2 @@
+project = "swisseph-rs"
+records = true          # optional; true is the default

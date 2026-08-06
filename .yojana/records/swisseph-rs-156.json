@@ -1,0 +1,82 @@
+{
+  "id": "019f7c88-f782-7fa1-a8ae-c068f405f5a5",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/156",
+  "sequence_number": 156,
+  "title": "mooncross_ut infinite loop with DE441 .se1 files",
+  "description": "The Newton refinement loop in mooncross/mooncross_ut (and the TT variants) can enter a stable 2-cycle and never converge for certain inputs when using DE441 .se1 files. The same inputs converge fine with DE431 files — the DE441 Moon Chebyshev coefficients create enough curvature discontinuity at the crossing point that Newton overshoots symmetrically.\n\nReproduced in both C (swe_mooncross_ut) and Rust (crossings::mooncross_ut) with DE441 semo files. The C version hangs indefinitely; the Rust version would too without the instrumented iteration cap we used for diagnosis.\n\nMinimal reproduction: x2cross=353.29103440827396, jd_ut=2283500.8126717205, SEFLG_SWIEPH with DE441 semo files. The iteration oscillates between jd=2283528.074218570 (dist=+1.186e-4) and jd=2283528.074227818 (dist=-1.186e-4), ~427x the 1-mas CROSS_PRECISION tolerance.\n\nBug has been reported upstream to the Swiss Ephemeris maintainers. We will match whatever fix they implement. The same unbounded loop pattern exists in mooncross_node, mooncross_node_ut, solcross, and solcross_ut.\n\nFix options when upstream responds:\n1. **Max iterations + bisect on oscillation**: detect sign-alternating dist for N iterations, average the two bracketing jd values. Most robust — handles the exact failure mode.\n2. **Simple max iterations + return best**: cap at ~20 iterations, return best jd seen. Simpler but less precise on pathological inputs.\n3. **Max iterations + error**: cap at ~20, return Err if not converged. Strictest but callers must handle it.\n\nOption 1 is preferred — it preserves convergence for normal inputs and handles the 2-cycle gracefully. The true crossing is at the midpoint of the two oscillating jd values.",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "HITL",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented option 1 with one refinement discovered during testing: plain bisection on the oscillation bracket cannot reach the 1-mas tolerance either (the discontinuity exceeds it), so bisect_cross also terminates when the bracket collapses to adjacent f64s, returning the collapse point — the crossing time to full f64 precision. All eight crossing loops (solcross/mooncross/helio_cross ±_ut, mooncross_node ±_ut) now share refine_lon_cross/refine_node_cross: 50 capped Newton iterations (bit-identical to old behavior on converging inputs; golden suite unchanged, 74/74 pass), then bisection on the sign-changing bracket tracked during Newton; Error::NoConvergence only if no bracket formed. Regression test mooncross_ut_de441_newton_cycle in tests/golden/crossings.rs uses the minimal repro against ../swisseph/ephe (verified DE441 headers). Committed ea9ff2e on main; upstream still unfixed/unresponsive — we now intentionally diverge from C (which hangs) on these inputs.",
+  "reproduction": "Build C: gcc -O2 mooncross_hang.c sweph.c ... -lm; timeout 10 ./mooncross_hang /path/to/de441/ephe → hangs (exit 124).\nRust: cargo run --example mooncross_debug with DE441 semo files → stable 2-cycle visible in iteration trace, never converges.",
+  "root_cause": "The Newton 2-cycle is caused by a genuine longitude jump discontinuity (~0.43\", 1.19e-4 deg) at a Chebyshev segment boundary in the DE441-compressed semo .se1 file, landing exactly at the crossing point. No jd satisfies the 1-mas CROSS_PRECISION tolerance — dist jumps from +6.2e-5 to -5.7e-5 deg between adjacent f64 jd values — so the unbounded Newton loop oscillates forever. This refines the original \"curvature discontinuity\" diagnosis: it is a POSITION discontinuity, which means any tolerance-only convergence test (including upstream C's) can never terminate on these inputs.",
+  "context_refs": [
+    {
+      "type": "sutra:symbol",
+      "value": "mooncross_ut"
+    },
+    {
+      "type": "sutra:symbol",
+      "value": "mooncross"
+    },
+    {
+      "type": "sutra:symbol",
+      "value": "CROSS_PRECISION"
+    }
+  ],
+  "files": [
+    "src/crossings.rs"
+  ],
+  "tags": [
+    "upstream-blocked",
+    "de441"
+  ],
+  "history": [
+    {
+      "ts": 1784500778882,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 156
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1785175186623,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-info",
+        "to": "ready-for-agent"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1785175190125,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1785175665958,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1784500778882,
+  "updated_at": 1785175665958,
+  "completed_at": 1785175665958,
+  "edges": []
+}

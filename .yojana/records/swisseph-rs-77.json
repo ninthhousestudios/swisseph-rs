@@ -1,0 +1,96 @@
+{
+  "id": "019f1e19-8133-75c3-a01d-6ff73257e8ee",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/77",
+  "sequence_number": 77,
+  "title": "RSE 10/12: Lunar eclipse search (swe_lun_eclipse_when + swe_lun_eclipse_when_loc)",
+  "description": "### Summary\nPort the lunar-eclipse search functions: `swe_lun_eclipse_when` (global next/previous lunar eclipse) and `swe_lun_eclipse_when_loc` (next lunar eclipse visible from `geopos`). Exposes `Ephemeris::lun_eclipse_when` and `lun_eclipse_when_loc` (`&self`).\n\nDepends on **RSE 9** (`lun_eclipse_how` — the geometry/`dcore` the contact search brackets on) and **RSE 3** (`find_maximum`/`find_zero`).\n\n### Files\n- `src/eclipse.rs` — add `LunarEclipseGlobal` + `LunarEclipseLocal` result structs, `lun_eclipse_when`, `lun_eclipse_when_loc`.\n- `src/context.rs` — `pub fn lun_eclipse_when(&self, tjd_start, ifl: CalcFlags, ifltype: EclipseFlags, backward: bool) -> Result<LunarEclipseGlobal, Error>` and `pub fn lun_eclipse_when_loc(&self, tjd_start, ifl: CalcFlags, geopos:[f64;3], backward: bool) -> Result<LunarEclipseLocal, Error>`.\n- `src/lib.rs` — re-export both types.\n- `tests/c-gen/gen_eclipse.c` — add keys `lun_when` + `lun_when_loc`; regenerate `eclipse.json`.\n- `tests/golden/eclipse.rs` — add `#[test] lun_when` + `#[test] lun_when_loc`.\n\n### Implementation steps\nRead `docs/c-ref-eclipse-lunar.md` §4.1–§4.8 (`swe_lun_eclipse_when`), the `tret[]` table after §4.8, and §5 (`swe_lun_eclipse_when_loc`).\n\n1. **`LunarEclipseGlobal`**: `tret[0..8]` per the §4.8 table (maximum, U1=partial begin, U4=partial end, U2=total begin, U3=total end, penumbral begin/end) + type bitmask.\n2. **`lun_eclipse_when`** (§4): setup + `ifltype` normalisation (§4.1); full-moon synodic-month stepping via Meeus lunation number K (§4.2); latitude-argument F pre-filter (§4.3); approximate max time via Meeus periodic series (§4.4); precise refinement to max via `find_maximum` (§4.5); confirm/reject wrong types (§4.6); contact times via `dcore`-based `find_zero` search calling the RSE 9 geometry (§4.7). `backward` flips direction. Reuse `find_maximum`/`find_zero` from `math.rs` (§4.8) — do NOT duplicate.\n3. **`LunarEclipseLocal`** + **`lun_eclipse_when_loc`** (§5): visibility scan (Moon above horizon via `swe_azalt`), moonrise/moonset clipping, the retry-jump logic. HAZARD (per doc): the three rejection sites don't all use the same live `tret[0]` — port the control flow faithfully, don't \"simplify\".\n\n### C reference\n`docs/c-ref-eclipse-lunar.md` §4 (all subsections), §5, §1.\n\n### Golden tests\n- **C harness** add key `lun_when`: `tjd_start ∈ {2451545.0, 2459000.5}`, `backward ∈ {0,1}`, `ifltype=0` → `swe_lun_eclipse_when(...)`. Emit `{tjd_start, backward, retval, tret:[0..8]}`. Add key `lun_when_loc`: `geopos ∈ {(8.55,47.37,500)}`, same `tjd_start`/`backward` → `swe_lun_eclipse_when_loc(...)`. Emit `{geopos, tjd_start, backward, retval, tret:[0..10], attr:[0..11]}`. Regenerate `eclipse.json`.\n- **Rust tests** `#[test] lun_when` + `#[test] lun_when_loc`: assert `tret`/`attr` via `assert_f64_eps(.., 1e-5)`; assert returned flags == `retval`.\n- `cargo test --test golden eclipse::lun_when -- --nocapture` and `eclipse::lun_when_loc` pass.\n\n### Acceptance criteria\n- `cargo build` + `cargo clippy --all-targets` clean.\n- `cargo test --test golden eclipse::lun_when -- --nocapture` and `eclipse::lun_when_loc` pass (1e-5 day).\n\n### Escape hatch\nIf contact times fail > 1e-4 day after two attempts, STOP and report failing `(tjd_start, backward)` + diverging slot + any type mismatch. Read `swecl.c:3378–3728` directly. Escalate to Opus after two attempts.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Implemented as planned per docs/c-ref-eclipse-lunar.md §4/§5, cross-checked against the actual C source (swecl.c:3389-3739) for the trickiest control-flow details (contact-time dt divisors, F1's sin(Om) literal-radians quirk, the when_loc moonrise/moonset sequential-mutation hazard). Extended LunarEclipseCore (src/eclipse.rs) with dcore[0..4] fields (r0/d0/cap_d0/cosf1/cosf2) since lun_eclipse_when's contact search needs them and they weren't previously exposed. Added lun_when + lun_when_loc keys to tests/c-gen/gen_eclipse.c, regenerated eclipse.json against libswe.a. Both golden tests (eclipse::lun_when, eclipse::lun_when_loc) passed on the first implementation attempt -- no escape-hatch escalation needed. cargo build + clippy --all-targets clean; full golden suite (101 tests) green.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "4402e63"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "riseset-eclipse",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782916415795,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 77
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782990719241,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782991322301,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, claude inline, w/ 76): APPROVE. Faithful port of swe_lun_eclipse_when + swe_lun_eclipse_when_loc. Verified vs docs/c-ref-eclipse-lunar.md §4/§5: §4.1 ifltype normalization (strip CENTRAL/NONCENTRAL; ANNULAR/HYBRID→\"don't exist\" guard against infinite loop; default ALLTYPES_LUNAR); §4.4 Meeus series incl. the Om-already-in-radians *DEGTORAD quirk on F1 preserved; §4.5 dtstart 0.1/5 branch + tjd+=dtint+dt (middle-sample offset convention) + 3-pass ET→UT; §4.7 stage-A find_zero coarse bracket over ±2hr then 3-round 2-point secant refine, lun_contact_dc n=0/1/2 boundary formulas correct. §5 moonrise/moonset clipping: the three ±25-day reject sites correctly read the *live* tret[0] (geocentric-max at sites 1&2, tjd_max at site 3) — the documented HAZARD is navigated exactly; sequential tret[6]/tret[7] mutation preserved. CircumpolarBody↔C retc<0 mapping complete (riseset.rs:285). Golden: eclipse::lun_when + lun_when_loc pass @1e-5 (total/partial/penumbral + visibility-bit/moonrise-clip cases, real 17-digit C output). clippy clean. find_zero-failure divergence from C is documented + reasoned unreachable for confirmed eclipses (sound). No findings.",
+      "ts": 1782991700716
+    }
+  ],
+  "created_at": 1782916415795,
+  "updated_at": 1782991322301,
+  "completed_at": 1782991322301,
+  "arc_id": "019efa3c-3a06-7fb3-a848-9a643a9ed34f",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f1e1a-b72f-7f33-ada8-7e0f44bd3619",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/77",
+      "target": "swisseph-rs/76",
+      "note": null,
+      "created_at": 1782916495151
+    },
+    {
+      "id": "019f1e1a-bac3-76b3-8d44-f3776217acf2",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/77",
+      "target": "swisseph-rs/70",
+      "note": null,
+      "created_at": 1782916496067
+    },
+    {
+      "id": "019f1e1b-0a72-77a2-86df-87791da1210f",
+      "edge_type": "refines",
+      "source": "swisseph-rs/77",
+      "target": "swisseph-rs/12",
+      "note": null,
+      "created_at": 1782916516466
+    }
+  ]
+}

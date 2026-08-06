@@ -1,0 +1,126 @@
+{
+  "id": "019efef1-92da-7980-8127-f8a2ad644524",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/21",
+  "sequence_number": 21,
+  "title": "Nutation algorithms (5 models)",
+  "description": "Port the nutation computation functions from swephlib.c. Pure function: `(tjd, model) → Nutation { dpsi, deps }` (nutation in longitude and obliquity). Depends on the data tables from the nutation data task.\n\n## Main entry — swi_nutation (swephlib.c:2126)\nRouter that selects model and calls the appropriate calculator.\n**No interpolation cache.** The C code has a 3-point quadratic interpolation cache — we skip this. Pure function, caller can cache/interpolate if needed.\n\n## Models\n\n### calc_nutation_iau1980 (swephlib.c ~2300)\n105 terms using 5 Delaunay arguments (l, l', F, D, Ω).\nFor each term: compute argument as linear combination of the 5 fundamentals, then accumulate (coeff_sin + coeff_sin_t * T) * sin(arg) for dpsi, (coeff_cos + coeff_cos_t * T) * cos(arg) for deps.\n\n### calc_nutation_iau2000ab (swephlib.c ~2400)\nTwo-stage:\n1. **Luni-solar**: 678 terms (2000A) or 77 terms (2000B), using 5 Delaunay arguments. Each term: compute argument, accumulate sin/cos with T-dependent amplitudes.\n2. **Planetary**: 687 terms (2000A only), using 14 planetary mean longitudes. Each term: compute argument from planetary multipliers, accumulate sin/cos.\n\nIAU 2000A vs 2000B: same algorithm, different term count (2000B is the truncated version for ~1 mas accuracy).\n\n### Woolard\nOlder model, simpler series.\n\n### Herring 1987 (IAU 1980 + corrections)\nIAU 1980 base with additional correction terms.\n\n## Output type\n`Nutation { dpsi: f64, deps: f64 }` — nutation in longitude and obliquity, in radians.\nThe C struct also has `snut` (sin of nutation in longitude) and a 3×3 matrix — consider whether to compute those here or let callers derive them.\n\n## Delaunay arguments\n5 fundamental arguments (l, l', F, D, Ω) as polynomials in T. These are shared between nutation models and may also be used by other modules — consider placing in a shared `fundamentals` function.\n\n## Testing\nGolden tests: compute nutation at known epochs for each model, compare dpsi/deps to C output. Test at J2000, various historical dates, and extreme dates for long-term models.\n\n## C source reference\n- swephlib.c:2126–2770 (swi_nutation, calc_nutation_iau1980, calc_nutation_iau2000ab, Delaunay arguments)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "[x] nutation router selecting by model"
+    },
+    {
+      "done": false,
+      "text": "[x] IAU 1980 (105-term) implementation"
+    },
+    {
+      "done": false,
+      "text": "[x] IAU 2000A (678+687 term) implementation"
+    },
+    {
+      "done": false,
+      "text": "[x] IAU 2000B (truncated) implementation"
+    },
+    {
+      "done": false,
+      "text": "[x] Woolard and Herring models"
+    },
+    {
+      "done": false,
+      "text": "[x] Delaunay fundamental arguments function"
+    },
+    {
+      "done": false,
+      "text": "[x] golden tests for all models at multiple epochs"
+    },
+    {
+      "done": false,
+      "text": "[x] no mutable state or interpolation cache"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": "## Approach\n\nPort four nutation algorithm families from `swephlib.c` into `src/nutation/mod.rs`, following the precession.rs router pattern. Data tables from task 20 are already in `data.rs`. Separate Delaunay argument functions for IAU 1980 vs IAU 2000 (different polynomial coefficients — per considerations #2). IAU 1980 uses sin/cos recurrence matching C floating-point behavior; IAU 2000 uses direct sin/cos. Output: minimal `Nutation { dpsi, deps }` in radians. No interpolation cache. JPLHOR EOP-file path is a no-op (requires file I/O not yet available); JPLHOR_APPROX constant-offset path is implemented.\n\nAlgorithm details: `docs/c-ref-nutation.md` (read this instead of the C source).\n\n## Files\n\n- **Modify**: `src/types.rs` (~line 621) — add `Nutation` struct after `Epsilon`\n- **Modify**: `src/constants.rs` (~line 77) — add `DPSI_IAU1980_TJD0`, `DEPS_IAU1980_TJD0`\n- **Modify**: `src/nutation/mod.rs` — all algorithm functions + router (bulk of the work)\n- **Modify**: `src/lib.rs` — re-export `Nutation` in `pub use types::{...}` block\n- **Create**: `tests/c-gen/gen_nutation.c` — C golden data generator\n- **Create**: `tests/golden-data/nutation.json` — generated test data\n- **Create**: `tests/golden/nutation.rs` — Rust golden test harness\n- **Modify**: `tests/golden/main.rs` — add `mod nutation;`\n- **Modify**: `docs/codebase-map.md` — update nutation module entry\n\n## Steps\n\n### Step 1: Add Nutation type and constants\n\n**types.rs** — add after `Epsilon` struct (~line 621):\n\n```rust\n#[derive(Debug, Clone, Copy)]\npub struct Nutation {\n    pub dpsi: f64,\n    pub deps: f64,\n}\n```\n\n**constants.rs** — add after `DPSI_DEPS_IAU1980_TJD0_HORIZONS` (~line 77):\n\n```rust\npub const DPSI_IAU1980_TJD0: f64 = 0.064284;\npub const DEPS_IAU1980_TJD0: f64 = 0.006151;\n```\n\n**lib.rs** — add `Nutation` to `pub use types::{...}` block.\n\n### Step 2: IAU 1980 Delaunay arguments + sin/cos precomputation\n\nPrivate helpers in `nutation/mod.rs`. The Delaunay args use Seidelmann 1982 / FK5 coefficients. **Critical**: must match the C evaluation form `c1*T + c0 + (c3*T + c2)*T2` (NOT Horner) for floating-point fidelity.\n\n```rust\nuse crate::constants::*;\nuse crate::flags::CalcFlags;\nuse crate::math::{normalize_degrees, normalize_radians};\nuse crate::types::*;\nuse data::*;\n\nconst MAX_MULT: [usize; 5] = [3, 2, 4, 4, 2]; // MM, MS, FF, DD, OM\n\nfn delaunay_iau1980(t: f64) -> [f64; 5] {\n    let t2 = t * t;\n    // C form: c1*T + c0 + (c3*T + c2)*T2\n    let mm = 1717915922.633 * t + 485866.733 + (0.064 * t + 31.310) * t2;\n    let ms = 129596581.224  * t + 1287099.804 - (0.012 * t + 0.577) * t2;\n    let ff = 1739527263.137 * t + 335778.877 + (0.011 * t - 13.257) * t2;\n    let dd = 1602961601.328 * t + 1072261.307 + (0.019 * t - 6.891) * t2;\n    let om = -6962890.539   * t + 450160.280 + (0.008 * t + 7.455) * t2;\n    [mm, ms, ff, dd, om].map(|a| normalize_degrees(a / 3600.0) * DEGTORAD)\n}\n```\n\nSin/cos recurrence precomputation — matches C's `ss[5][8]` / `cc[5][8]` scheme. Index `[k][i]` stores sin/cos of `(i+1)*args[k]`. Uses angle-doubling for i=1, then angle-addition recurrence for higher multiples.\n\n```rust\nfn precompute_sincos(args: &[f64; 5]) -> ([[f64; 4]; 5], [[f64; 4]; 5]) {\n    let mut ss = [[0.0f64; 4]; 5];\n    let mut cc = [[0.0f64; 4]; 5];\n    for k in 0..5 {\n        let su = args[k].sin();\n        let cu = args[k].cos();\n        ss[k][0] = su;\n        cc[k][0] = cu;\n        let mut sv = 2.0 * su * cu;\n        let mut cv = cu * cu - su * su;\n        ss[k][1] = sv;\n        cc[k][1] = cv;\n        for i in 2..MAX_MULT[k] {\n            let s = su * cv + cu * sv;\n            cv = cu * cv - su * sv;\n            sv = s;\n            ss[k][i] = sv;\n            cc[k][i] = cv;\n        }\n    }\n    (ss, cc)\n}\n```\n\nCombining sin/cos of a linear combination of arguments via successive angle addition (C code at swephlib.c:1701-1728). **Critical**: for Herring rows, `j > 100` sets `j = 0` (it's a pure flag, not a multiplier — C line 1707-1708).\n\n```rust\nfn sincos_of_combination(\n    ss: &[[f64; 4]; 5], cc: &[[f64; 4]; 5], mults: &[i16; 5],\n) -> (f64, f64) {\n    let mut sin_acc = 0.0;\n    let mut cos_acc = 0.0;\n    let mut started = false;\n    for m_idx in 0..5 {\n        let mut j = mults[m_idx] as i32;\n        if j > 100 { j = 0; }\n        if j == 0 { continue; }\n        let abs_j = j.unsigned_abs() as usize;\n        let mut su = ss[m_idx][abs_j - 1];\n        if j < 0 { su = -su; }\n        let cu = cc[m_idx][abs_j - 1];\n        if !started {\n            sin_acc = su; cos_acc = cu; started = true;\n        } else {\n            let sw = su * cos_acc + cu * sin_acc;\n            cos_acc = cu * cos_acc - su * sin_acc;\n            sin_acc = sw;\n        }\n    }\n    (sin_acc, cos_acc)\n}\n```\n\n### Step 3: IAU 1980 nutation algorithm\n\n`calc_nutation_iau1980(jd, model) -> Nutation`. The dominant OM term is hard-coded (NOT in the NT table — first NT row is `[0,0,0,0,2,...]` confirming OM=1 is absent). Herring rows (MM >= 100) skipped unless model is IAUCorr1987.\n\n```rust\nfn calc_nutation_iau1980(jd: f64, model: NutationModel) -> Nutation {\n    let t = (jd - J2000) / 36525.0;\n    let args = delaunay_iau1980(t);\n    let (ss, cc) = precompute_sincos(&args);\n    // Dominant OM term (not in NT table): ss[4][0] = sin(OM), cc[4][0] = cos(OM)\n    let mut dpsi = (-0.01742 * t - 17.1996) * ss[4][0];\n    let mut deps = ( 0.00089 * t +  9.2025) * cc[4][0];\n    for row in NT.iter() {\n        if row[0] >= 100 && model != NutationModel::IAUCorr1987 { continue; }\n        let mults: [i16; 5] = [row[0], row[1], row[2], row[3], row[4]];\n        let (sv, cv) = sincos_of_combination(&ss, &cc, &mults);\n        // Coefficients in 0.0001 arcsec (LS, OC), time-dependent in 0.00001 arcsec (LS2, OC2)\n        let mut f = row[5] as f64 * 0.0001;\n        if row[6] != 0 { f += 0.00001 * t * row[6] as f64; }\n        let mut g = row[7] as f64 * 0.0001;\n        if row[8] != 0 { g += 0.00001 * t * row[8] as f64; }\n        if row[0] >= 100 { f *= 0.1; g *= 0.1; }  // Herring: finer units\n        if row[0] != 102 {\n            dpsi += f * sv; deps += g * cv;         // normal trig\n        } else {\n            dpsi += f * cv; deps += g * sv;         // swap trig (Herring complementary)\n        }\n    }\n    Nutation { dpsi: DEGTORAD * dpsi / 3600.0, deps: DEGTORAD * deps / 3600.0 }\n}\n```\n\n### Step 4: IAU 2000 fundamental arguments\n\nSeparate from IAU 1980 (different polynomial coefficients — Simon et al. 1994 for luni-solar, various sources for planetary). These use Horner form matching the C evaluation.\n\nLuni-solar (5 args, 4th-degree, arcseconds → radians):\n\n```rust\nfn delaunay_iau2000(t: f64) -> [f64; 5] {\n    let m  = 485868.249036 + t*(1717915923.2178 + t*(31.8792 + t*(0.051635 + t*(-0.00024470))));\n    let sm = 1287104.79305 + t*(129596581.0481 + t*(-0.5532 + t*(0.000136 + t*(-0.00001149))));\n    let f  = 335779.526232 + t*(1739527262.8478 + t*(-12.7512 + t*(-0.001037 + t*0.00000417)));\n    let d  = 1072260.70369 + t*(1602961601.2090 + t*(-6.3706 + t*(0.006593 + t*(-0.00003169))));\n    let om = 450160.398036 + t*(-6962890.5431 + t*(7.4722 + t*(0.007702 + t*(-0.00005939))));\n    [m, sm, f, d, om].map(|a| normalize_degrees(a / 3600.0) * DEGTORAD)\n}\n```\n\nPlanetary (14 args, linear in radians, APA is 2nd-degree; only for 2000A):\n\n```rust\nfn planetary_args_iau2000(t: f64) -> [f64; 14] {\n    [\n        normalize_radians(2.35555598  + 8328.6914269554 * t),\n        normalize_radians(6.24006013  +  628.301955 * t),\n        normalize_radians(1.627905234 + 8433.466158131 * t),\n        normalize_radians(5.198466741 + 7771.3771468121 * t),\n        normalize_radians(2.18243920  -   33.757045 * t),\n        normalize_radians(4.402608842 + 2608.7903141574 * t),\n        normalize_radians(3.176146697 + 1021.3285546211 * t),\n        normalize_radians(1.753470314 +  628.3075849991 * t),\n        normalize_radians(6.203480913 +  334.0612426700 * t),\n        normalize_radians(0.599546497 +   52.9690962641 * t),\n        normalize_radians(0.874016757 +   21.3299104960 * t),\n        normalize_radians(5.481293871 +    7.4781598567 * t),\n        normalize_radians(5.321159000 +    3.8127774000 * t),\n        (0.02438175 + 0.00000538691 * t) * t,  // APA: not normalized (matches C)\n    ]\n}\n```\n\n### Step 5: IAU 2000A/B nutation algorithm\n\n`calc_nutation_iau2000ab(jd, model) -> Nutation`. Luni-solar series uses NLS/CLS tables (678 terms for 2000A, 77 for 2000B). Planetary series + P03 correction only for 2000A. **Both loops run in reverse** for numerical stability.\n\n```rust\nfn calc_nutation_iau2000ab(jd: f64, model: NutationModel) -> Nutation {\n    let t = (jd - J2000) / 36525.0;\n    let del = delaunay_iau2000(t);\n    let [m, sm, f, d, om] = del;\n\n    // --- Luni-solar nutation ---\n    let inls = if model == NutationModel::IAU2000B { NLS_2000B } else { NLS_COUNT };\n    let mut dpsi = 0.0_f64;\n    let mut deps = 0.0_f64;\n    for i in (0..inls).rev() {\n        let n = &NLS[i];\n        let c = &CLS[i];\n        let darg = normalize_radians(\n            n[0] as f64 * m + n[1] as f64 * sm + n[2] as f64 * f\n            + n[3] as f64 * d + n[4] as f64 * om);\n        let (sinarg, cosarg) = (darg.sin(), darg.cos());\n        dpsi += (c[0] as f64 + c[1] as f64 * t) * sinarg + c[2] as f64 * cosarg;\n        deps += (c[3] as f64 + c[4] as f64 * t) * cosarg + c[5] as f64 * sinarg;\n    }\n    let mut nutlo_0 = dpsi * O1MAS2DEG;    // 0.1 μas → degrees\n    let mut nutlo_1 = deps * O1MAS2DEG;\n\n    // --- Planetary nutation + P03 correction (2000A only) ---\n    if model == NutationModel::IAU2000A {\n        let pa = planetary_args_iau2000(t);\n        dpsi = 0.0;\n        deps = 0.0;\n        for i in (0..NPL_COUNT).rev() {\n            let n = &NPL[i];\n            let ic = &ICPL[i];\n            let mut darg = 0.0;\n            for j in 0..14 { darg += n[j] as f64 * pa[j]; }\n            let darg = normalize_radians(darg);\n            let (sinarg, cosarg) = (darg.sin(), darg.cos());\n            dpsi += ic[0] as f64 * sinarg + ic[1] as f64 * cosarg;\n            deps += ic[2] as f64 * sinarg + ic[3] as f64 * cosarg;\n        }\n        nutlo_0 += dpsi * O1MAS2DEG;\n        nutlo_1 += deps * O1MAS2DEG;\n\n        // P03 precession correction (Capitaine et al. 2005), in microarcseconds\n        let dpsi_p03 = -8.1 * om.sin() - 0.6 * (2.0*f - 2.0*d + 2.0*om).sin()\n            + t * (47.8 * om.sin() + 3.7 * (2.0*f - 2.0*d + 2.0*om).sin()\n                   + 0.6 * (2.0*f + 2.0*om).sin() - 0.6 * (2.0*om).sin());\n        let deps_p03 = t * (-25.6 * om.cos() - 1.6 * (2.0*f - 2.0*d + 2.0*om).cos());\n        nutlo_0 += dpsi_p03 / (3600.0 * 1_000_000.0);  // μas → degrees\n        nutlo_1 += deps_p03 / (3600.0 * 1_000_000.0);\n    }\n\n    Nutation { dpsi: nutlo_0 * DEGTORAD, deps: nutlo_1 * DEGTORAD }\n}\n```\n\n### Step 6: Woolard nutation algorithm\n\n`calc_nutation_woolard(jd) -> Nutation`. Simple direct expansion — 13 dpsi terms, 9 deps terms. Uses J1900 epoch. **Critical**: the fractional part uses C `(long)a` truncation toward zero — in Rust, `(a as i64) as f64`, NOT `a.floor()`.\n\n```rust\nfn calc_nutation_woolard(jd: f64) -> Nutation {\n    let t = (jd - J1900) / 36525.0;\n    let t2 = t * t;\n    let frac = |x: f64| -> f64 { x - (x as i64 as f64) };\n    let ls = 279.697 + 0.000303 * t2 + 360.0 * frac(100.0021358 * t);\n    let ld = 270.434 - 0.001133 * t2 + 360.0 * frac(1336.855231 * t);\n    let ms = 358.476 - 0.00015  * t2 + 360.0 * frac(99.99736056000026 * t);\n    let md = 296.105 + 0.009192 * t2 + 360.0 * frac(13255523.59 * t);\n    let nm = 259.183 + 0.002078 * t2 - 360.0 * frac(5.372616667 * t);\n    // Convert to radians\n    let tls = 2.0 * ls * DEGTORAD;\n    let nm  = nm * DEGTORAD;\n    let tnm = 2.0 * nm;\n    let ms  = ms * DEGTORAD;\n    let tld = 2.0 * ld * DEGTORAD;\n    let md  = md * DEGTORAD;\n    // 13 dpsi terms, 9 deps terms (arcseconds)\n    let dpsi = (-17.2327 - 0.01737*t)*nm.sin() + (-1.2729 - 0.00013*t)*tls.sin()\n        + 0.2088*tnm.sin() - 0.2037*tld.sin() + (0.1261 - 0.00031*t)*ms.sin()\n        + 0.0675*md.sin() - (0.0497 - 0.00012*t)*(tls+ms).sin()\n        - 0.0342*(tld-nm).sin() - 0.0261*(tld+md).sin() + 0.0214*(tls-ms).sin()\n        - 0.0149*(tls-tld+md).sin() + 0.0124*(tls-nm).sin() + 0.0114*(tld-md).sin();\n    let deps = (9.21 + 0.00091*t)*nm.cos() + (0.5522 - 0.00029*t)*tls.cos()\n        - 0.0904*tnm.cos() + 0.0884*tld.cos() + 0.0216*(tls+ms).cos()\n        + 0.0183*(tld-nm).cos() + 0.0113*(tld+md).cos() - 0.0093*(tls-ms).cos()\n        - 0.0066*(tls-nm).cos();\n    Nutation { dpsi: dpsi / 3600.0 * DEGTORAD, deps: deps / 3600.0 * DEGTORAD }\n}\n```\n\n### Step 7: Router function\n\n`pub fn nutation(jd, flags, models) -> Nutation`. Same JPLHOR detection pattern as `precession.rs:40-43`. Three paths: JPLHOR (IAU 1980 + EOP stub), JPLHOR_APPROX (IAU 1980 + constant offsets), normal dispatch by model. JPLHORA_V2 offset applies to IAU 2000 in normal dispatch path.\n\n```rust\npub fn nutation(jd: f64, flags: CalcFlags, models: &AstroModels) -> Nutation {\n    let is_jplhor = flags.contains(CalcFlags::DPSIDEPS_1980)\n        || (flags.contains(CalcFlags::JPLHOR_APPROX)\n            && models.jplhora_mode == JplHoraMode::V3\n            && jd <= DPSI_DEPS_IAU1980_TJD0_HORIZONS);\n    if is_jplhor {\n        let mut nut = calc_nutation_iau1980(jd, NutationModel::IAU1980);\n        if !flags.contains(CalcFlags::DPSIDEPS_1980) {\n            // JPLHOR_APPROX: constant offsets at Horizons epoch\n            nut.dpsi += DPSI_IAU1980_TJD0 / 3600.0 * DEGTORAD;\n            nut.deps += DEPS_IAU1980_TJD0 / 3600.0 * DEGTORAD;\n        }\n        // DPSIDEPS_1980: EOP Bessel interpolation not yet implemented (needs file I/O)\n        return nut;\n    }\n    let model = models.nutation;\n    let mut nut = match model {\n        NutationModel::IAU1980 | NutationModel::IAUCorr1987 =>\n            calc_nutation_iau1980(jd, model),\n        NutationModel::IAU2000A | NutationModel::IAU2000B =>\n            calc_nutation_iau2000ab(jd, model),\n        NutationModel::Woolard =>\n            calc_nutation_woolard(jd),\n    };\n    // JPLHORA_V2 offset for IAU 2000 models (C: swephlib.c:2106-2109)\n    if matches!(model, NutationModel::IAU2000A | NutationModel::IAU2000B)\n        && flags.contains(CalcFlags::JPLHOR_APPROX)\n        && models.jplhora_mode == JplHoraMode::V2\n    {\n        nut.dpsi += -41.7750 / 3600.0 / 1000.0 * DEGTORAD;\n        nut.deps +=  -6.8192 / 3600.0 / 1000.0 * DEGTORAD;\n    }\n    nut\n}\n```\n\n### Step 8: Golden test infrastructure\n\n**C generator** (`tests/c-gen/gen_nutation.c`): Call `swe_set_astro_models()` to set nutation model, then call `swi_nutation(tjd, 0, nutlo)` for each test epoch. Output JSON matching the golden test pattern. Test all 5 models at ~15–20 epochs spanning historical to far-future. Include JPLHOR_APPROX path tests.\n\nFollow the `gen_precession.c` pattern: link against `../swisseph/libswe.a`, include internal headers, print JSON to stdout.\n\n**Golden test harness** (`tests/golden/nutation.rs`):\n\n```rust\n#[derive(Deserialize)]\nstruct NutationCase {\n    model: String,\n    jd: f64,\n    flags: u32,\n    dpsi: f64,\n    deps: f64,\n}\n#[derive(Deserialize)]\nstruct GoldenData { nutation: Vec<NutationCase> }\n```\n\nMap model strings to `AstroModels` with the correct nutation model set. Use `assert_f64_exact()` for all models. Wire up in `tests/golden/main.rs` with `mod nutation;`.\n\n**Codebase map update**: Update the `nutation/` entry in `docs/codebase-map.md` to reflect the new module contents (router, 3 algorithm families, fundamental argument functions).\n\n## Acceptance Criteria Coverage\n\n- [x] \"nutation router selecting by model\" → Step 7 (router function with match dispatch)\n- [x] \"IAU 1980 (105-term) implementation\" → Steps 2–3 (Delaunay args + table loop + dominant term)\n- [x] \"IAU 2000A (678+687 term) implementation\" → Steps 4–5 (luni-solar + planetary series + P03)\n- [x] \"IAU 2000B (truncated) implementation\" → Step 5 (same function, `inls = NLS_2000B`)\n- [x] \"Woolard and Herring models\" → Steps 3, 6 (Herring via IAUCorr1987 conditional; Woolard standalone)\n- [x] \"Delaunay fundamental arguments function\" → Steps 2, 4 (separate IAU 1980 vs IAU 2000)\n- [x] \"golden tests for all models at multiple epochs\" → Step 8\n- [x] \"no mutable state or interpolation cache\" → All functions are pure `fn(f64, ...) -> Nutation`",
+  "execution_record": "All 8 plan steps completed as designed. Key findings during implementation:\n\n1. C golden data generator required careful initialization order: `swe_set_ephe_path(NULL)` must be called BEFORE `swe_set_astro_models()`, otherwise ephe_path init resets the model settings. Also required `swed.do_interpolate_nut = FALSE` to disable the C quadratic interpolation cache (our Rust is intentionally stateless).\n\n2. JPLHOR path (DPSIDEPS_1980 flag) segfaults in the C library without EOP data files, so those paths couldn't be tested via C golden data. Instead verified with Rust-only unit tests: JPLHOR == IAU1980 output (EOP corrections are a stub), JPLHOR_APPROX offsets are verified as exact constant additions.\n\n3. Static linking against libswe.a required (dynamic linking segfaulted on startup).",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "ed6f29a"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782393705178,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 21
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782415935365,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782416731446,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review: **approve**. No ship-blocking defects found. Router selection, IAU 1980 recurrence and Herring flags, reverse IAU 2000 loops, Woolard truncation, and unit conversions all verified against swephlib.c. 80 golden tests pass bitwise-exact.",
+      "ts": 1782416997071
+    }
+  ],
+  "created_at": 1782393705178,
+  "updated_at": 1782416731446,
+  "completed_at": 1782416731446,
+  "arc_id": "019efa3b-bfcb-70f3-a6ea-f3430a85c05a",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019efef2-28be-7521-958d-eaccfd7b791f",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/21",
+      "target": "swisseph-rs/20",
+      "note": null,
+      "created_at": 1782393743550
+    },
+    {
+      "id": "019efef2-3095-7020-b187-74c1e2fb0f78",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/23",
+      "target": "swisseph-rs/21",
+      "note": null,
+      "created_at": 1782393745557
+    },
+    {
+      "id": "019efef2-3d3a-7473-9da3-a72240999af6",
+      "edge_type": "refines",
+      "source": "swisseph-rs/21",
+      "target": "swisseph-rs/4",
+      "note": null,
+      "created_at": 1782393748794
+    }
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "id": "019f19d7-4dd7-7ce3-954b-fc2f0b4b8889",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/65",
+  "sequence_number": 65,
+  "title": "Houses 7/9: Ephemeris UT wrappers (houses / houses_ex / houses_ex2) + traditional sidereal",
+  "description": "### Summary\nAdd the date-aware `Ephemeris` house methods that compute ARMC + obliquity from `tjd_ut`, supply the Sun's declination for Sunshine, and handle flags: NONUT, SIDEREAL (traditional subtract-ayanamsa mode only — ecl_t0/ssypl deferred to sub-task 9), and RADIANS. These wrap the stateless `houses::houses_armc`.\n\n### Files\n- `src/houses.rs` — add `impl Ephemeris` methods OR a free fn called from context.rs. DECISION: add the methods in `src/context.rs` (where the rest of the `Ephemeris` impl lives) as `pub fn houses`, `pub fn houses_ex`, `pub fn houses_ex2`, delegating to `crate::houses`. Keep the pure math in houses.rs; the wrapper (which needs `&self` config + calc) belongs on `Ephemeris`. Add a `fn sidereal_houses_trad(...)` helper in houses.rs taking the already-computed ayanamsa as an argument (keep it pure; the Ephemeris method computes the ayanamsa and passes it in).\n- `tests/c-gen/gen_houses.c` — add `\"ut_wrapper\"` and `\"sidereal_trad\"` keys.\n- `tests/golden-data/houses.json` — regenerate.\n- `tests/golden/houses.rs` — add `ut_wrapper` and `sidereal_trad` tests.\n\n### Implementation steps\nRead `docs/c-ref-houses.md` §3 (call graph: swe_houses / swe_houses_ex2 setup), §6 `sidereal_houses_trad`, §11 (sundec flow).\n1. **ARMC + obliquity setup** (ref §3): `tjde = tjd_ut + calc_deltat(tjd_ut, &self.config)`; `eps_mean = obliquity::obliquity(tjde, flags, models).eps * RADTODEG`; `nut = nutation::nutation(tjde, flags, models)` → `nutlo[0]=dpsi*RADTODEG`, `nutlo[1]=deps*RADTODEG`; if `flags & NONUT`: zero both. `armc = normalize_degrees(sidereal_time::sidereal_time0(tjd_ut, eps_mean + nutlo[1], nutlo[0], &self.config) * 15.0 + geolon)`. `eps_true = eps_mean + nutlo[1]`. (Reuse the existing `sidereal_time0` — it already takes pre-computed eps/nut; mirror how `sidereal_time()` calls it.)\n2. **Sun declination for Sunshine** (ref §11): if `hsys` is Sunshine/SunshineAlt, `let xp = self.calc_ut(tjd_ut, Body::Sun, CalcFlags::SPEED | CalcFlags::EQUATORIAL)?;` → `sundec = Some(xp.data[1])`. On error, C falls back to Porphyry + returns err — here, propagate the error OR fall back to Porphyry with a documented choice; pick: propagate the `calc_ut` error (cleaner for a Result-based API). For non-Sunshine, `sundec=None`.\n3. **`houses_ex2`**: the primary method. Signature suggestion: `pub fn houses_ex2(&self, tjd_ut: f64, flags: CalcFlags, geolat: f64, geolon: f64, hsys: HouseSystem) -> Result<HouseResult, Error>`. If `flags & SIDEREAL`: dispatch by sidereal-mode bits — for THIS task implement only the traditional path (neither ECL_T0 nor SSY_PLANE bit set); compute houses via `houses_armc(armc, geolat, eps_true, hsys, sundec)` then subtract ayanamsa (step 4). The ECL_T0 / SSY_PLANE branches: `return Err(Error::CError(\"sidereal house mode ECL_T0/SSY_PLANE not yet implemented\".into()))` (sub-task 9 fills these). Else (tropical): just `houses_armc(...)`. Then if `flags & RADIANS`: convert all filled cusps + the 8 ascmc to radians.\n4. **`sidereal_houses_trad`** (ref §6): `ay = crate::ayanamsa::get_ayanamsa_ex(&self.config, tjde, flags, models)?`. Compute houses with `ihs2 = (hsys==WholeSign) ? Equal : hsys`; for each filled cusp `i`: `cusp = normalize_degrees(cusp - ay)`; if `hsys==WholeSign`: `cusp -= cusp.rem_euclid(30.0)` (match C `fmod`); if `hsys==EqualAries`: re-fix all cusps to `(i-1)*30`. For ascmc: subtract `ay` from every entry EXCEPT armc (index 2), via `normalize_degrees`. (`nutl` in the C is dead code — ignore it.)\n5. **`houses`** = `houses_ex2(tjd_ut, CalcFlags::empty(), ...)`. **`houses_ex`** = `houses_ex2` without speed arrays — since `HouseResult` always carries speeds, `houses_ex` can just forward to `houses_ex2`; keep all three for API parity.\n\n### C reference\n`docs/c-ref-houses.md` §3 (setup), §6 (`sidereal_houses_trad`), §11. `src/sidereal_time.rs` (`sidereal_time0`), `src/ayanamsa.rs` (`get_ayanamsa_ex`), `src/context.rs` (`calc_ut`).\n\n### Golden tests\n- C harness: key `\"ut_wrapper\"`: pick ~6 `(tjd_ut, geolat, geolon)` triples (e.g. J2000 + a few dates, London/Sydney/equator) × a representative system subset `['P','K','C','R','W','I']`; call `swe_houses_ex2(tjd_ut, 0, geolat, geolon, hsys, cusp, ascmc, cusp_speed, ascmc_speed, serr)` (for 'I', swe_houses_ex2 computes sundec itself). Emit `{tjd_ut, geolat, geolon, hsys, cusps:[1..12], cusp_speed:[1..12], ascmc:[0..8], ascmc_speed:[0..8]}`. Add a NONUT variant (iflag=SEFLG_NONUT=64) for one triple. Key `\"sidereal_trad\"`: `swe_set_sid_mode(SE_SIDM_LAHIRI,0,0)`; `swe_houses_ex2(.., SEFLG_SIDEREAL, ..)` for systems `['P','W','E']` × 3 triples; emit same shape + `{sid_mode}`. Use the Moshier backend (no ephemeris files): the C side needs none for sidtime; for 'I' the Sun calc uses Moshier by default. Regenerate houses.json.\n- Rust tests `ut_wrapper` (tropical + NONUT) and `sidereal_trad`: build `Ephemeris` with default config (Moshier); assert cusps eps 1e-7, ascmc eps 1e-7, speeds eps 1e-6 (the UT path compounds deltaT/obliquity/nutation/sidtime — looser than the pure-armc tasks). For sidereal, set `config.set_sidereal_mode(1 /*Lahiri*/, 0.0, 0.0)`.\n\n### C reference for FP\nThe UT path chains many already-ported modules; if cusps are off, binary-search: assert the computed `armc` and `eps_true` against C intermediate prints first (see docs/golden-testing.md §Debugging).\n\n### Acceptance criteria\n- `cargo clippy --all-targets` clean.\n- `cargo test --test golden houses::ut_wrapper -- --nocapture` passes.\n- `cargo test --test golden houses::sidereal_trad -- --nocapture` passes.\n- All prior houses tests still pass.\n\n### Escape hatch\nSame as sub-task 1. If the UT mismatch exceeds 1e-7, instrument armc/eps_true vs C before touching house math. Stop after two attempts; escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "cargo clippy --all-targets clean"
+    },
+    {
+      "done": false,
+      "text": "cargo test --test golden houses::ut_wrapper -- --nocapture passes"
+    },
+    {
+      "done": false,
+      "text": "cargo test --test golden houses::sidereal_trad -- --nocapture passes"
+    },
+    {
+      "done": false,
+      "text": "All prior houses tests still pass"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Force tidal_acceleration=TIDAL_DEFAULT for houses_ex2's ARMC/eps deltaT computation, regardless of the configured Ephemeris backend.",
+      "rationale": "C's swe_houses_ex2 resolves deltaT tid_acc via swe_deltat_ex(tjd_ut, iflag, NULL), and iflag never carries an ephemeris-source bit for a normal house call -- this falls through to SE_TIDAL_DEFAULT in C's swi_get_tid_acc regardless of what backend is actually configured. Our stateless calc_deltat normally derives tid_acc from config.ephemeris_source, which silently picked up Moshier's DE404 here and diverged from C by ~3e-6 degrees at pre-1900 epochs.",
+      "rejected_alternatives": "Deriving tid_acc from self.config.ephemeris_source as usual -- rejected because it doesn't match C's actual behavior for this specific entry point (verified against golden data at a 1800-Jan-1 test case, which failed at 1e-7 tolerance until fixed)."
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Implemented as specced. One divergence from the plan: the initial ut_wrapper golden test failed (cusp[1] off by ~3e-6 deg) at the 1800-Jan-1/high-latitude Placidus case. Root cause: C's swe_houses_ex2 computes its internal tjde via swe_deltat_ex(tjd_ut, iflag, NULL) where iflag (the caller's house flags) never carries an ephemeris-source bit, so C's tid_acc resolution silently falls through to SE_TIDAL_DEFAULT (DE431) -- independent of the actually-configured ephemeris backend. Our port's calc_deltat normally derives tid_acc from config.ephemeris_source (Moshier -> DE404 by default), which is correct for calc/calc_ut (whose flags are normalized through plaus_iflag to carry the real backend bit) but wrong for this standalone ARMC/eps deltaT call. Fixed by cloning config and forcing tidal_acceleration=Some(TIDAL_DEFAULT) before computing tjde and before passing into sidereal_time0 (which also indirectly hits calc_deltat via sidtime_long_term's internal recursive call for the pre-1900 test epoch). All 82 tests + clippy clean after the fix. Committed as 6212543.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "6212543"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "houses",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782844968407,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 65
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782909982978,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782910950731,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review (vidhi-review, tasks 65/66/67 together): approve with notes. Verified: cargo clippy --all-targets clean; full golden suite 85/85 incl. all 14 houses tests (ut_wrapper, sidereal_trad, sidereal_geom, house_pos, gauquelin_sector) and long-term sidereal_time (tjd 625k/2.8M, ~4700 BC / ~4900 AD). C-faithful; the tid_acc TIDAL_DEFAULT override in sidtime_long_term (shared fn) is validated against C by the long-term sidereal_time golden. 1 low finding — Sunshine sundec gate `-24..=24` is a Rust-invented validation absent in C (defensible; no physical sundec is rejected).",
+      "ts": 1782914783295
+    }
+  ],
+  "created_at": 1782844968407,
+  "updated_at": 1782910950731,
+  "completed_at": 1782910950731,
+  "arc_id": "019efa3c-2d62-76e3-9d4e-f97ea54b13cf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f19d8-9e0c-7f91-b8fb-1b55727faa36",
+      "edge_type": "refines",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/11",
+      "note": null,
+      "created_at": 1782845054476
+    },
+    {
+      "id": "019f19d8-cf64-7af1-b335-873b555d3686",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/64",
+      "note": null,
+      "created_at": 1782845067108
+    },
+    {
+      "id": "019f19d8-d2f5-7a00-8dbf-e877904b816c",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/62",
+      "note": null,
+      "created_at": 1782845068021
+    },
+    {
+      "id": "019f19d8-e165-7db0-9b76-34af51e578fe",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/67",
+      "target": "swisseph-rs/65",
+      "note": null,
+      "created_at": 1782845071717
+    },
+    {
+      "id": "019f19d9-2bcd-7d50-a1e5-58308bdbf665",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/65",
+      "target": "swisseph-rs/61",
+      "note": null,
+      "created_at": 1782845090765
+    }
+  ]
+}

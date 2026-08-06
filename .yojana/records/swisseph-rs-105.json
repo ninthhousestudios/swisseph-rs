@@ -1,0 +1,96 @@
+{
+  "id": "019f2523-a5e0-7a60-b51c-0cadcbe90ed0",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/105",
+  "sequence_number": 105,
+  "title": "Heliacal 2/8: Schaefer sky brightness model (Bsky + components)",
+  "description": "### Summary\nPort the Schaefer five-source sky-brightness model (swehel.c's Bsky layer): night sky (Bn), moonlight (Bm), twilight (Btwi), daylight (Bday), light pollution (Bcity), and the Bsky combiner. All pure functions of altitudes/azimuths + datm — no Ephemeris calls. Builds directly on the 1/8 extinction layer (Deltam, kt, etc.).\n\nRead docs/codebase-map.md first. Do NOT read ../swisseph C source — the ref doc is the source of truth. FP fidelity: transcribe expressions exactly (evaluation order, pow-vs-multiply); units are nanoLamberts throughout.\n\n### Files\n- `src/heliacal.rs` — append the brightness layer after the extinction/optics functions from 1/8.\n- `tests/c-gen/gen_heliacal_internals.c` — extend with a `\"brightness\"` battery; regenerate `tests/golden-data/heliacal_internals.json`.\n- `tests/golden/heliacal_internals.rs` — extend with brightness assertions.\n\n### Implementation steps\n1. `MoonsBrightness` and `MoonPhase` per docs/c-ref-heliacal-vision.md §6 — exact coefficients and the phase-angle geometry formula.\n2. `Bm` (moonlight scattering) per §6 — same scattering shape as Bday but driven by the Moon's magnitude via MoonsBrightness/MoonPhase; note the Moon-below-horizon guard exactly as §6 states it.\n3. `Btwi` (twilight) per §6: `pow(10, -0.4*(MS - M0 + 32.5 - AltS - (ZendO/(360*k))))` structure with M0 = -11.05, MS = -26.74 (values verbatim from §6), the `100/RS` scaling and the `(1 - 10^(-0.4*kX))` extinction factor. Uses PresEfromPresS/TempEfromTempS/AppAltfromTopoAlt/DistanceAngle/Deltam/kt from 1/8.\n4. `Bday` per §6: F_S scattering function (62000000/RS² + 10^(6.15−RS/40) + 10^5.36·(1.06+cos²RS) shape — exact literals from §6) + extinction mixing.\n5. `Bcity` per §6 (configurable light-pollution floor).\n6. `Bn` (zodiacal + starlight night sky) per §6 — includes the 11.1-year solar-cycle modulation term; transcribe the year-fraction computation exactly.\n7. `Bsky` combiner per §6: daylight/twilight regime selection by Sun altitude with the min(Bday, Btwi) transition zone, moonlight added only when B > 200_000_000 nL threshold logic, zodiacal-light addition condition — follow §6's exact branch structure, not the catalogue paraphrase.\n8. Extend gen_heliacal_internals.c with key `\"brightness\"`: for each case record Bn, Bm, Btwi, Bday, Bcity, Bsky over a rotated grid: AltO ∈ {0,5,20,60} × AziO=180 × AltS ∈ {-30,-12,-5,-1,2,10,30} × AziS ∈ {90,270} × AltM ∈ {-10,0,30} × AziM ∈ {120} × sunra ∈ {50,200} × Lat=30.1 × HeightEye ∈ {0,1500} × datm ∈ {[1013.25,15,40,40],[900,25,70,20]} — ~50 cases (rotate parameters, don't full-cross). JDNDaysUT input for Bn: use {2451545.0, 2455197.5} (solar-cycle modulation coverage).\n9. Regenerate JSON, extend tests/golden/heliacal_internals.rs with a `brightness` test asserting all six outputs per case.\n\n### C reference\ndocs/c-ref-heliacal-vision.md §6 (plus §3/§4 call contracts from 1/8; §11 porting notes).\n\n### Golden tests\n- `cd tests/c-gen && cc -Wall -I../../swisseph -o gen_heliacal_internals gen_heliacal_internals.c ../../swisseph/libswe.a -lm && ./gen_heliacal_internals > ../golden-data/heliacal_internals.json`\n- `cargo test --test golden heliacal_internals -- --nocapture` — assert exact-or-1e-12-eps (azalt.rs pattern). Brightness values span many orders of magnitude; use RELATIVE epsilon for values > 1.0 (assert |a−b|/|b| < 1e-12) and absolute 1e-12 below that.\n\n### Acceptance criteria\n- `cargo test --test golden heliacal_internals -- --nocapture` passes (extinction batteries from 1/8 must still pass after regeneration).\n- `cargo test` full suite green; no new clippy warnings.\n\n### Escape hatch\nIf golden tests fail with relative errors > 1e-8 after two debugging attempts, STOP and report: which cases fail, actual vs expected, what you tried. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "ddbac55"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "heliacal"
+  ],
+  "history": [
+    {
+      "ts": 1783034521056,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 105
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783086100186,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783086458675,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review: approve with notes. Sky brightness model is clean — all 6 component functions (Bn, Bm, Btwi, Bday, Bcity, Bsky) golden-verified at 1e-12 relative tolerance across 28 cases. No findings.",
+      "ts": 1783088068880
+    }
+  ],
+  "created_at": 1783034521056,
+  "updated_at": 1783086458675,
+  "completed_at": 1783086458675,
+  "arc_id": "019efa3c-5420-7750-9de1-93c44d1a9bdf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f2526-c108-73e0-bce3-471da4f963d3",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/105",
+      "target": "swisseph-rs/104",
+      "note": null,
+      "created_at": 1783034724616
+    },
+    {
+      "id": "019f2526-c9cf-7351-b683-15a21a2e29e7",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/107",
+      "target": "swisseph-rs/105",
+      "note": null,
+      "created_at": 1783034726863
+    },
+    {
+      "id": "019f2527-150a-7a43-943d-777ca87afb9c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/105",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034746122
+    }
+  ]
+}

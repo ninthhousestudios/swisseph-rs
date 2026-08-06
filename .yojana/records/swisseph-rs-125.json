@@ -1,0 +1,92 @@
+{
+  "id": "019f291b-60e7-7300-bd65-042f14e50d82",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/125",
+  "sequence_number": 125,
+  "title": "Planet-moon SE1 loading: config numbers + sat/ file loading + header verification",
+  "description": "# Planet-moon SE1 loading: config numbers + sat/ file loading + header verification\n\n## Summary\nAdd `EphemerisConfig::planet_moon_numbers`, load `sat/sepm*.se1` files in `Ephemeris::new`, and add the filename-resolution helper. Mirrors the asteroid loading from swisseph-rs/100 but is FAR smaller: `parse.rs` already handles `FileType::PlanetaryMoon` end-to-end, including the exact rmax COB-or-Mars fine-scale condition (parse.rs:329-335) and the 30-byte name-field skip (parse.rs:308-310). No calc dispatch in this task.\n\n## Files\n- `src/config.rs` — `pub planet_moon_numbers: Vec<i32>` on `EphemerisConfig` (+ `Default`)\n- `src/context.rs` — `planet_moon_files: Vec<SwissEphFile>` field on `Ephemeris` + loading in `new()`\n- `src/sweph_file/mod.rs` — `pub fn open_planet_moon_file(dir: &Path, raw_id: i32) -> Result<SwissEphFile, Error>`; verify `detect_file_type` recognizes `sepm9401.se1` (mod.rs:69 area)\n\n## Implementation steps\n1. **Config field**: `pub planet_moon_numbers: Vec<i32>`, default empty. Doc comment: raw planetary-moon/COB ids per `ephe/sat/plmolist.txt` (9401–9999; COB entries are 9n99). Both `Body::PlanetMoon(id)` calc AND `CalcFlags::CENTER_BODY` on Jupiter..Pluto (which resolves to the 9n99 COB id) require the id listed here — stateless design, no lazy file opening.\n2. **`open_planet_moon_file`**: primary candidate `dir/sat/sepm{raw}.se1`, single retry `dir/sepm{raw}.se1` (strip `sat/`, retry flat). This is c-ref-plmoon.md's single-step retry — NOT the asteroid 4-attempt subdir/short-name cascade; there is no `s`-suffix variant for plmoon files. Retry only on `Error::FileNotFound`, propagate other errors (match `open_asteroid_file`'s post-codex-review error handling from swisseph-rs/100).\n3. **Range validation**: each configured value must be in `9000..=9999`, else `Error::InvalidBody(n)` at construction.\n4. **Loading in `Ephemeris::new`**: dedup config values; for each, `open_planet_moon_file(dir, n)?` — hard fail-fast error on missing file (explicit config request). Load whenever `config.ephe_path` is `Some` for ALL THREE ephemeris sources — the moon/COB offset always comes from the sepm file regardless of epheflag (c-ref-plmoon.md §3.1, same structural fact as asteroids). No `ephe_path` + non-empty `planet_moon_numbers` → `Error::FileFormat(\"ephe_path required for planetary moon files\")`, mirroring the asteroid gate.\n5. **Tests** (integration, skip-if-absent guard on `env!(\"CARGO_MANIFEST_DIR\")/ephe` — the repo `ephe/sat/` has all 32 sepm files):\n   - `detect_file_type(\"sepm9401.se1\") == FileType::PlanetaryMoon` (verify existing behavior; add branch/test if missing).\n   - Open `sat/sepm9599.se1` (Jupiter/COB): `planets()[0].body_id == 9599`, `time_range == (2378491.5, 2524599.5)`, dseg == 4.0, ncoe == 39, rmax == 1e-5 (raw 10 / 1e6 — COB fine-scale branch), asteroid meta is `None`.\n   - Open `sat/sepm9401.se1` (Phobos): body_id 9401, range (2415015.5, 2469082.5), dseg == 1.0, rmax == 0.01 via raw 10000 / 1e6 (Mars-moon fine-scale branch).\n   - Open `sat/sepm9501.se1` (Io): rmax == 0.01 via raw 10 / 1e3 (ordinary branch). The Phobos+Io pair proves the two rmax branches are distinct despite equal numeric results elsewhere.\n   - `Ephemeris::new` with `planet_moon_numbers: vec![9599, 9401]` → Ok; `vec![9098]` (no such file) → `Err(FileNotFound)`; `vec![12345]` → `Err(InvalidBody)`; non-empty numbers without ephe_path → error.\n\n## C reference\n`docs/c-ref-plmoon.md` §1 (constants), §5.1 (hex-verified header fields — the test expectations above come directly from that table), §5.3 (rmax condition), Porting Note 10 + §12 IDENTICAL/DIFFERS table (retry order). Do NOT read the C source.\n\n## Acceptance criteria\n- `cargo test` passes (new + existing)\n- `cargo test --test golden` passes unchanged\n- `cargo clippy --all-targets` introduces no new warnings\n\n## Escape hatch\nIf header-field assertions fail after two debugging attempts, STOP and report: which field, expected vs actual, raw header bytes. Do not guess at format offsets — escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "doc:path",
+      "value": "docs/c-ref-plmoon.md",
+      "label": "C porting reference (planetary moons + CENTER_BODY)"
+    },
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/121",
+      "label": "scope decision"
+    },
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/100",
+      "label": "asteroid loading pattern to mirror"
+    },
+    {
+      "type": "git:commit",
+      "value": "6fa8a9f"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "plmoon"
+  ],
+  "history": [
+    {
+      "ts": 1783101087975,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 125
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783186133911,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783186296577,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. Two medium findings fixed in 4e98244:\\n1. dead_code warning on planet_moon_files → #[expect] with reason\\n2. No body-id verification after opening sepm file → added planet_data(raw_id) check with FileFormat error on mismatch\"",
+      "ts": 1783187429333
+    }
+  ],
+  "created_at": 1783101087975,
+  "updated_at": 1783186296577,
+  "completed_at": 1783186296577,
+  "edges": [
+    {
+      "id": "019f291d-1413-7303-b876-ca75afa141cc",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/126",
+      "target": "swisseph-rs/125",
+      "note": null,
+      "created_at": 1783101199379
+    }
+  ]
+}

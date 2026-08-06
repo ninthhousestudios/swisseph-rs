@@ -1,0 +1,84 @@
+{
+  "id": "019efadd-e6fd-7670-a496-ee87f16365fb",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/16",
+  "sequence_number": 16,
+  "title": "Differential testing harness: golden data from C swetest",
+  "description": "Build a differential testing harness that generates golden data from the C `swetest` binary and asserts Rust output matches within epsilon.\\n\\n## Scope\\n\\nStart with date/time functions (julday, revjul, utc_to_jd, jdet_to_utc), expand to cover each module as it lands.\\n\\n## Approach\\n\\n1. Write a script/build step that calls C `swetest` with thousands of inputs and captures outputs to CSV/JSON\\n2. Rust test reads the golden data file and asserts bitwise or epsilon-exact equality\\n3. Input coverage: extreme leap years, deep historical BCE dates, every leap second transition boundary, negative years, Julian/Gregorian split dates, pre/post-1972 UTC boundary\\n\\n## References\\n\\n- C test suite: `../swisseph/setest/`\\n- C binary: `../swisseph/swetest`\\n- Rust date module: `src/date.rs`\\n- Phase 2 considerations: `docs/phase-2-considerations.md` §5\"",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [
+    {
+      "decision": "JSON fixture format with serde + serde_json dev-deps",
+      "rationale": "Self-describing, extensible to heterogeneous output shapes (calc arrays, house cusps), standard ecosystem. Dev-dep has zero impact on library consumers.",
+      "rejected_alternative": "Generated Rust const arrays (zero deps but ugly diffs, harder to regenerate, generator must output valid Rust syntax)"
+    },
+    {
+      "decision": "Defer utc_to_jd/jdet_to_utc golden testing until delta-T is implemented",
+      "rationale": "These functions call DeltaT 2-3 times at different JD values internally. Without our own delta-T matching C's swe_deltat, we can't get bitwise-exact results. Structure the harness for them now, run assertions later.",
+      "rejected_alternative": "Record-replay DeltaT provider (complex harness work for functions that will be testable end-to-end once delta-T lands)"
+    },
+    {
+      "decision": "Curated edge cases ~200 vectors for julday/revjul",
+      "rationale": "Target all branch conditions: negative years, year 0, Gregorian/Julian split, leap years, month wrapping, extreme dates. Enough to cover every code path without bloating fixtures.",
+      "rejected_alternative": "Systematic sweep of 5000+ cases (brute-force confidence but most cases exercise the same code paths)"
+    }
+  ],
+  "implementation_plan": "## Approach\n\nSmall C program (`tools/golden_gen.c`) links against the C `libswe.a` and generates JSON golden data by calling C date functions with ~200 curated edge-case inputs. Rust integration tests deserialize the JSON and assert bitwise-exact equality against our implementations. Golden data is checked into git so CI doesn't need the C toolchain.\n\nExtensibility: each future module (calc, houses, eclipses) adds a generation function to the C program, a new JSON file, and a new Rust test file. Shared comparison helpers live in `tests/golden/`.\n\n## Files\n\n- **Create**: `tools/golden_gen.c` — C program linking libswe.a, generates JSON golden data\n- **Create**: `tools/Makefile` — builds golden_gen, runs it to produce JSON files\n- **Create**: `tests/golden-data/date.json` — generated golden data for date functions (checked into git)\n- **Create**: `tests/golden.rs` — integration test entry point\n- **Create**: `tests/golden/mod.rs` — shared assertion helpers (f64 exact, f64 epsilon, i32)\n- **Create**: `tests/golden/date.rs` — golden tests for julday, revjul, date_conversion, day_of_week\n- **Modify**: `Cargo.toml` — add serde, serde_json dev-dependencies\n\n## Steps\n\n### Step 1: Add dev-dependencies to Cargo.toml\n\n```toml\n[dev-dependencies]\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n```\n\n### Step 2: Write shared test runner (`tests/golden/mod.rs`)\n\nProvides:\n- `golden_data_path(name) -> PathBuf` — resolves `tests/golden-data/{name}` relative to CARGO_MANIFEST_DIR\n- `assert_f64_exact(label, expected, actual)` — bitwise comparison with hex bit dump on failure\n- `assert_f64_eps(label, expected, actual, eps)` — epsilon comparison with diff reporting\n- `assert_i32(label, expected, actual)` — integer comparison\n\n```rust\npub mod date;\n\nuse std::path::PathBuf;\n\npub fn golden_data_path(name: &str) -> PathBuf {\n    PathBuf::from(env!(\"CARGO_MANIFEST_DIR\"))\n        .join(\"tests\").join(\"golden-data\").join(name)\n}\n\npub fn assert_f64_exact(label: &str, expected: f64, actual: f64) {\n    assert!(\n        expected.to_bits() == actual.to_bits(),\n        \"{label}: expected {expected:.20} (bits {:016x}), got {actual:.20} (bits {:016x})\",\n        expected.to_bits(), actual.to_bits(),\n    );\n}\n\npub fn assert_f64_eps(label: &str, expected: f64, actual: f64, eps: f64) {\n    let diff = (expected - actual).abs();\n    assert!(diff <= eps,\n        \"{label}: expected {expected:.20}, got {actual:.20}, diff {diff:.20e} > eps {eps:.20e}\");\n}\n```\n\n### Step 3: Write date golden tests (`tests/golden/date.rs`)\n\nTyped case structs with serde Deserialize, one `#[test]` per function:\n\n```rust\nuse serde::Deserialize;\nuse swisseph::date::*;\nuse swisseph::CalendarType;\n\n#[derive(Deserialize)]\nstruct JuldayCase { y: i32, m: i32, d: i32, h: f64, g: i32, jd: f64 }\n\n#[derive(Deserialize)]\nstruct RevjulCase { jd: f64, g: i32, y: i32, m: i32, d: i32, h: f64 }\n\n#[derive(Deserialize)]\nstruct DateConvCase { y: i32, m: i32, d: i32, h: f64, g: i32, valid: bool, jd: Option<f64> }\n\n#[derive(Deserialize)]\nstruct DowCase { jd: f64, dow: u8 }\n\n#[derive(Deserialize)]\nstruct DateGolden {\n    julday: Vec<JuldayCase>,\n    revjul: Vec<RevjulCase>,\n    date_conversion: Vec<DateConvCase>,\n    day_of_week: Vec<DowCase>,\n}\n\n#[test]\nfn golden_julday() {\n    let data: DateGolden = load();\n    for (i, c) in data.julday.iter().enumerate() {\n        let cal = CalendarType::try_from(c.g).unwrap();\n        let actual = julday(c.y, c.m, c.d, c.h, cal);\n        super::assert_f64_exact(\n            &format!(\"julday[{i}]({},{},{},{},{:?})\", c.y, c.m, c.d, c.h, cal),\n            c.jd, actual,\n        );\n    }\n}\n\n#[test]\nfn golden_revjul() { /* similar — assert y,m,d exact, hour with assert_f64_exact */ }\n\n#[test]\nfn golden_date_conversion() { /* valid cases: assert Ok + jd exact; invalid: assert Err */ }\n\n#[test]\nfn golden_day_of_week() { /* assert dow == day_of_week(jd) */ }\n```\n\n### Step 4: Integration test entry point (`tests/golden.rs`)\n\n```rust\nmod golden;\n```\n\n### Step 5: Write C golden data generator (`tools/golden_gen.c`)\n\nLinks against libswe.a and generates JSON to stdout. Takes module name as argv[1].\n\nFor \"date\" module, generates ~200 curated cases covering:\n\n**julday** (~100 cases):\n- Negative years: -5000, -1000, -100, -1, 0 (astronomical year numbering)\n- Gregorian switch boundary: Oct 4 1582 (last Julian), Oct 15 1582 (first Gregorian)\n- Year 0 with months 1-12\n- Leap year dates: Feb 29 on years 2000, 1900, 1600, 4, -4\n- Month < 3 path (Jan, Feb) and month >= 3 (Mar-Dec)\n- Both Julian and Gregorian calendar for same dates\n- C setest's own vector: year=19, month=2, day=1964/1965, hour=22.5\n- J2000 (2000/1/1 12:00 Gregorian)\n- Unix epoch (1970/1/1 0:00 Gregorian)\n- Far future: year 5000\n- Century correction cases: years -100, -200, -400, -500 (triggers the `u/100 == floor(u/100)` branch)\n\n**revjul** (~50 cases):\n- JD = 0 through 2500000 at key points\n- JD near Gregorian switch (2299160.5 ± a few)\n- JD = 1830691.5 (the revjul Gregorian correction boundary)\n- Negative JD values\n- JD values from the julday cases (round-trip verification)\n\n**date_conversion** (~30 cases):\n- Valid dates (subset of julday inputs)\n- Invalid: Feb 30, month 13, month 0, day 0, Oct 10 1582 Gregorian (in the gap)\n\n**day_of_week** (~20 cases):\n- Known reference dates (e.g., 2000-01-01 = Saturday)\n- JD values reused from julday cases\n\n### Step 6: Write tools/Makefile\n\n```makefile\nSWISSEPH_DIR = ../../swisseph\nGOLDEN_DIR   = ../tests/golden-data\nCC           = cc\nCFLAGS       = -Wall -I$(SWISSEPH_DIR)\nLDFLAGS      = -L$(SWISSEPH_DIR) -lswe -lm\n\ngolden_gen: golden_gen.c\n\t$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)\n\n$(GOLDEN_DIR)/date.json: golden_gen\n\tmkdir -p $(GOLDEN_DIR)\n\t./golden_gen date > $@\n\ngenerate: $(GOLDEN_DIR)/date.json\n\nclean:\n\trm -f golden_gen\n\n.PHONY: generate clean\n```\n\n### Step 7: Build and run the C generator\n\n```sh\ncd tools && make generate\n```\n\n### Step 8: Run cargo test, verify all golden tests pass\n\n```sh\ncargo test golden -- --nocapture\n```\n\n## Acceptance criteria coverage\n\nTask description acceptance criteria (inferred):\n- [x] \"golden data from C swetest\" → Steps 5-7 (C generator calling libswe functions)\n- [x] \"Rust output matches within epsilon\" → Steps 2-3 (assertion helpers + test functions; julday/revjul use bitwise-exact)\n- [x] \"Start with date/time functions\" → Step 3 (julday, revjul, date_conversion, day_of_week)\n- [x] \"expand to cover each module as it lands\" → Step 2 design (each module adds a JSON file + test file + gen function)\n- [x] \"extreme leap years, deep historical BCE dates, Gregorian split dates\" → Step 5 input coverage\n- [x] \"properly extensible\" → module-per-file pattern in tests/golden/, shared runner, C generator dispatches on argv[1]\n\n## Deferred (by decision)\n\n- utc_to_jd / jdet_to_utc golden tests: JSON structure defined, assertions deferred until delta-T implementation lands\n- leap-second boundary testing: depends on utc_to_jd, deferred with it",
+  "execution_record": "Implemented as planned. One structural adjustment: integration test entry point is `tests/golden/main.rs` (directory form) rather than `tests/golden.rs` + `tests/golden/mod.rs` — Rust 2024 doesn't allow both. All 292 golden cases pass bitwise-exact. The staged docs rename (phase-1-considerations.md → archived/) was already in the index and rode along with the commit.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "647eb63"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "testing"
+  ],
+  "history": [
+    {
+      "ts": 1782325307133,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 16
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782325855863,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782326101529,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex adversarial review (verdict: needs-attention → assessed as clean with caveats):\\n\\n1. [medium → false positive] swetest julday vectors (y=19,m=2,d=1964): these are the literal C setest vectors testing out-of-range day normalization, not a transcription error.\\n2. [medium → low/nit] Module extensibility requires editing main()/Makefile/mod.rs: this is the documented pattern (golden-testing.md §Adding a new module), not a gap.\\n3. [medium → out of scope] Bitwise assertions for libm-dependent math transforms (sin/cos/atan2): applies to swisseph-rs/3's math.rs golden tests, not this task. Valid concern for cross-platform CI but holds on Linux/glibc where both C and Rust share the same libm. Filed mentally for when CI targets expand.",
+      "ts": 1782392246856
+    }
+  ],
+  "created_at": 1782325307133,
+  "updated_at": 1782326101529,
+  "completed_at": 1782326101529,
+  "edges": []
+}

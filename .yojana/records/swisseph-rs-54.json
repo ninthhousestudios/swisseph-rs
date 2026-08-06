@@ -1,0 +1,93 @@
+{
+  "id": "019f18a8-c7fc-7d90-a7a0-d0229576339d",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/54",
+  "sequence_number": 54,
+  "title": "Fixed stars: catalog parser, types & lookup (src/stars.rs)",
+  "description": "## Summary\nImplement the fixed-star **catalog data layer** in `src/stars.rs`: a `Star` struct (mirrors C `struct fixed_star`), a parser for `ephe/sefstars.txt` (skipping blank and comment lines — see note below), name/Bayer/sequential-number lookup, and the built-in fallback stars. This is **pure data + lookup**: NO position math, NO calc/backend dependency. The position pipeline lands in the next sub-task.\n\n## Files\n- `src/stars.rs` — currently a 1-line empty stub; becomes the full catalog module.\n- `src/constants.rs` — add `pub const KM_S_TO_AU_CTY: f64 = 21.095;`.\n- `src/lib.rs` — add `pub use stars::{Star, StarCatalog};` to the re-export block.\n- `.sutra/rules.toml` — uncomment the three `app-uses-calc-not-backends:stars→{moshier,jpl,sweph}` `[[constraint]]` blocks (≈ lines 186–208).\n\n## Implementation steps\nRead `docs/c-ref-fixstar.md` first. Cited sections below are by heading.\n\n1. **`Star` struct** (§\"struct fixed_star\"). Fields (all already in radians/AU/century after parsing):\n   `name: String` (traditional, may be \"\"), `bayer: String`, `skey: String` (search key; comma-prefixed for Bayer entries), `epoch: f64` (0.0 ICRS / 2000.0 FK5 / 1950.0 FK4), `ra: f64` (rad), `de: f64` (rad), `ramot: f64` (rad/century, already `/cos(de)`), `demot: f64` (rad/century), `radvel: f64` (AU/century), `parall: f64` (rad, ≥0; 0=unknown), `mag: f64` (999.99=none). `#[derive(Clone, Debug)]`.\n\n2. **`fn parse_epoch(s: &str) -> f64`** — mimic C `atof`: `\"ICRS\"` → 0.0; otherwise parse a leading float (`\"2000\"`→2000.0, `\"1950\"`→1950.0); non-numeric → 0.0.\n\n3. **`fn cut_string(line: &str) -> Result<Star, Error>`** — port `fixstar_cut_string` (§\"sefstars.txt File Format\" → \"Unit conversions inside fixstar_cut_string\", sweph.c:6211–6306). Split `line` on `,`, trim whitespace around each field. Require ≥14 fields else `Err(Error::FileFormat(\"data of star '…' incomplete\"))`. Field map per the column table (field 0=name, 1=bayer, 2=epoch, 3–5=RA h/m/s, 6–8=Dec d/m/s, 9=RA pm, 10=Dec pm, 11=radvel, 12=parall, 13=mag). Conversions (copy formulas verbatim from the §):\n   - `ra = (ra_s/3600.0 + ra_m/60.0 + ra_h) * 15.0` (degrees)\n   - dec sign from the RAW field-6 string: if it contains `'-'` → `de = -de_s/3600.0 - de_m/60.0 + de_d` (de_d already negative); else `de = de_s/3600.0 + de_m/60.0 + de_d`\n   - `epoch = parse_epoch(field2)`\n   - new-file proper motion: `ra_pm = field9 / 10.0 / 3600.0`, `de_pm = field10 / 10.0 / 3600.0` (deg/century)\n   - `parall = field12`; `if parall < 0 { parall = -parall }`; `parall /= 1000.0` (→ arcsec)\n   - `radvel = field11 * KM_S_TO_AU_CTY` (→ AU/century)\n   - parallax→degrees: `if parall > 1.0 { parall = 1.0/parall/3600.0 } else { parall /= 3600.0 }`\n   - to radians: `ra *= DEGTORAD; de *= DEGTORAD; ra_pm *= DEGTORAD; de_pm *= DEGTORAD; ra_pm /= de.cos(); parall *= DEGTORAD`\n   - `mag = field13.parse()`\n   Set `name = field0`, `bayer = field1`, `skey = String::new()` (the loader assigns skey).\n\n4. **`pub struct StarCatalog`**: `bayer_records: Vec<Star>` (sorted by skey), `named_records: Vec<Star>`, `by_bayer: HashMap<String, usize>` (skey → index into bayer_records), `by_name: HashMap<String, usize>` (skey → index into named_records). `n_real()` = bayer_records.len(); `n_named()` = named_records.len(). Add a `StarCatalog::empty()`.\n   Rationale for HashMaps (vs C's qsort+bsearch): O(1) lookup, same results. Sequential-number lookup still needs the Bayer half sorted by skey (FP note 7), so bayer_records IS sorted.\n\n5. **`fn parse_catalog(contents: &str) -> StarCatalog`** — port the `load_all_fixed_stars` parse loop (§\"Catalog Loading\" → \"Parsing loop\", sweph.c:6348–6393):\n   - For each line: **skip if `line.trim().is_empty() || line.trim_start().starts_with('#')`** — this is the blank-line fix (project note 2): ignore blank AND whitespace-only lines silently, more lenient than C which errors. Document this in a comment.\n   - `let star = cut_string(line)?;`\n   - Named record: if `!star.name.is_empty()` → clone with `skey = star.name.to_lowercase()` with all spaces removed; push to `named_records`; insert into `by_name`.\n   - Bayer record with consecutive-dedup: track `last_bayer`; if `star.bayer == last_bayer` skip the Bayer record; else `skey = format!(\",{}\", star.bayer_no_spaces)`; push to `bayer_records`; `last_bayer = star.bayer`.\n   - After the loop: **sort `bayer_records` by `skey`** (Rust `String` ordering = byte/lexicographic = C `strcmp` for ASCII), THEN build `by_bayer` from the sorted order. Build `by_name` during the loop.\n\n6. **`fn format_search_name(input: &str) -> Result<String, Error>`** — port `fixstar_format_search_name` (§\"Search Logic\" → \"Entry normalization\", sweph.c:6154–6174): take ≤40 chars, remove ALL spaces, lowercase the part BEFORE the first `,` and leave the part after the `,` unchanged (case-sensitive Bayer). Empty → `Err(Error::FileFormat(\"star name empty\"))`.\n\n7. **`impl StarCatalog { pub fn search(&self, input: &str) -> Result<Star, Error> }`** — port `search_star_in_list` (§\"Search Logic\" → \"Three search modes\"):\n   - Normalize via `format_search_name`.\n   - **Mode 1 (sequential)**: first char is an ASCII digit → parse leading integer `n`; if `n < 1 || n > self.n_real()` → `Err`; return `self.bayer_records[n-1].clone()`.\n   - **Wildcard**: ends with `'%'` → strip it, linear-scan `named_records` for a `skey` starting with the prefix; found→return, else `Err`.\n   - **Mode 2 (Bayer)**: if normalized contains `','` → take the substring from the first `,` (`\",bayer\"`); look up in `by_bayer`; found→clone, else `Err(\"star not found\")`.\n   - **Mode 3 (named)**: look up the normalized string in `by_name`; found→clone, else `Err`.\n\n8. **`pub fn builtin_star(input: &str) -> Option<Star>`** — port `get_builtin_star` (§\"Search Logic\" → \"Builtin-star fallback\", sweph.c:6750–6803). Match on the RAW `input` per the table (8 hardcoded records). For each match, run `cut_string` on the hardcoded record string and return `Some(star)`. Copy the record strings VERBATIM from the §-table (Spica, Revati `,zePsc`, Pushya `,deCnc`, Mula `,laSco`, **SgrA\\* with epoch `\"2000\"`** per FP note 8, GP1958 `1950`, GPol `ICRS`). The `,deCnc` and `,GPol` checks appear twice (Sheoran/Pushya, GalEquTrue/GalEquMula) — both return the same record.\n\n9. **`pub fn load_catalog(ephe_path: Option<&Path>) -> StarCatalog`** — if `ephe_path` is `Some(dir)`, read `dir.join(\"sefstars.txt\")` and `parse_catalog`. On ANY failure (no path, missing file, parse error) return `StarCatalog::empty()` — built-in stars still resolve via `builtin_star`. (A single-dir lookup is sufficient; the project opens ephemeris files this way.)\n\n10. Uncomment the three `stars→…` `forbidden_dep` blocks in `.sutra/rules.toml`. Verify `stars.rs` imports no backend module.\n\n## C reference\n`docs/c-ref-fixstar.md` §§ \"sefstars.txt File Format\", \"struct fixed_star\", \"Catalog Loading\", \"Search Logic\", \"Builtin-star fallback\"; FP notes 5, 6, 7, 8.\n\n## Golden tests\nThis sub-task is parser/lookup only. The C internals (`fixstar_cut_string`, `swed.fixed_stars`) are file-static / not linkable, so use **Rust unit tests** (`#[cfg(test)]` in `src/stars.rs`), NOT a `gen_*.c` harness. C-differential validation of the parsed numeric fields happens transitively in the next sub-task (positions through `swe_fixstar2`). Assert:\n- `cut_string` conversions for ≥3 hand-checked lines (Sirius `alfCMa,…`, Aldebaran `alfTau,…`, SgrA\\*) — compare `ra/de/ramot/demot/parall/radvel/mag` against values computed by hand from the documented formulas (expected to ~1e-12).\n- Load the real `../swisseph/ephe/sefstars.txt`: assert `n_real() > 1000` and `n_named() > 1000`.\n- Search by name `\"Sirius\"`, by Bayer `\",alfCMa\"`, by sequential number (`\"1\"` returns a Bayer record); a blank line and a `#` line injected into a test string are skipped; `builtin_star(\"Spica\")`, `builtin_star(\",SgrA*\")`, `builtin_star(\",GP1958\")`, `builtin_star(\",GPol\")` return `Some` with epoch 0.0 / 2000.0 / 1950.0 / 0.0 respectively.\n\n## Acceptance criteria\n- `cargo test stars` passes.\n- `cargo build` and `cargo clippy --all-targets` are clean.\n- `.sutra/rules.toml` stars constraints uncommented; `sutra_status` shows no new constraint violations.\n\n## Escape hatch\nIf parsed numeric values diverge from hand-computed expectations by > 1e-8 after two debugging attempts, STOP and report which fields/lines fail with actual vs expected and what you tried. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "4798d3b"
+    }
+  ],
+  "files": [
+    "src/stars.rs",
+    "src/constants.rs",
+    "src/lib.rs",
+    ".sutra/rules.toml"
+  ],
+  "tags": [
+    "fixstar",
+    "wave-4"
+  ],
+  "history": [
+    {
+      "ts": 1782825142268,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 54
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782826587924,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782826591234,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "vidhi-review (wave 54–58): APPROVE WITH NOTES. Catalog parser/lookup is clean — unit conversions hand-checked in unit tests to 1e-12, three search modes + wildcard + sequential + builtin fallback all correct, blank/comment-line leniency documented. Two LOW notes touch this file: (1) `parse_epoch` comment claims \"Mimic C atof\" but uses strict full-string `.parse::<f64>()` (diverges only on malformed epoch strings, none in sefstars.txt); (2) DRY — see the consolidated review on swisseph-rs/55. No correctness issues.",
+      "ts": 1782843166004
+    }
+  ],
+  "created_at": 1782825142268,
+  "updated_at": 1782826591234,
+  "completed_at": 1782826591234,
+  "arc_id": "019efa3c-1423-7163-82fa-986d55233c70",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f18aa-ccc8-7500-b552-a39e60a2d24a",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/55",
+      "target": "swisseph-rs/54",
+      "note": null,
+      "created_at": 1782825274568
+    },
+    {
+      "id": "019f18aa-d980-7831-954a-fb183577f6ba",
+      "edge_type": "refines",
+      "source": "swisseph-rs/54",
+      "target": "swisseph-rs/10",
+      "note": null,
+      "created_at": 1782825277824
+    }
+  ]
+}

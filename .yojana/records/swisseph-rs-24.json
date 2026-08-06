@@ -1,0 +1,107 @@
+{
+  "id": "019f0125-7375-70b2-a421-146f732ebc01",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/24",
+  "sequence_number": 24,
+  "title": "Moshier planet coefficient tables (PlantTbl + scripted transcription)",
+  "description": "Port the Moshier planetary coefficient data from swemptab.h (~10,640 lines) to Rust const arrays. This is pure data — no algorithms.\n\n## What to build\n\n### 1. PlantTbl struct (src/moshier/mod.rs or types)\n\nThe C `struct plantbl` (sweph.h:698–706):\n```c\nstruct plantbl {\n  char max_harmonic[9];    // max harmonic multiplier per fundamental argument\n  char max_power_of_t;     // highest power of T in polynomial amplitudes\n  signed char *arg_tbl;    // argument table encoding which fundamentals enter each term\n  double *lon_tbl;         // longitude coefficients\n  double *lat_tbl;         // latitude coefficients\n  double *rad_tbl;         // radius coefficients\n  double distance;         // mean distance (AU)\n};\n```\n\nRust equivalent: a struct with `&'static` references to const arrays. No heap allocation.\n\n### 2. Transcription script\n\nWrite a Python script (`tools/gen_moshier_tables.py`) that:\n- Parses swemptab.h (at `../../swisseph/swemptab.h` relative to tools/)\n- Extracts all 9 planet table sets: mer404, ven404, ear404, mar404, jup404, sat404, ura404, nep404, plu404\n- For each planet: lon_tbl (doubles), lat_tbl (doubles), rad_tbl (doubles), arg_tbl (signed bytes), max_harmonic[9], max_power_of_t, distance\n- Generates `src/moshier/tables.rs` with Rust `const` arrays and `PlantTbl` instances\n\nThe arg_tbl encoding is non-trivial — see c-ref-moshier.md for details on sentinel values and skip markers. The script must preserve the exact byte sequence.\n\n### 3. Verification\n\nAfter running the script:\n- All 9 PlantTbl instances compile\n- Element counts match C: for each planet, verify len(lon_tbl), len(lat_tbl), len(rad_tbl), len(arg_tbl) against the C arrays\n- Add a `#[test]` in a test module that asserts these counts\n\n### Table sizes (approximate element counts from C)\n\n| Planet  | lon_tbl | lat_tbl | rad_tbl | arg_tbl |\n|---------|---------|---------|---------|---------|\n| Mercury | ~285    | ~285    | ~285    | ~130    |\n| Venus   | ~226    | ~226    | ~226    | ~108    |\n| Earth   | ~290    | ~290    | ~290    | ~135    |\n| Mars    | ~440    | ~440    | ~440    | ~201    |\n| Jupiter | ~344    | ~344    | ~344    | ~142    |\n| Saturn  | ~487    | ~487    | ~487    | ~215    |\n| Uranus  | ~382    | ~382    | ~382    | ~177    |\n| Neptune | ~120    | ~120    | ~120    | ~59     |\n| Pluto   | ~389    | ~389    | ~389    | ~173    |\n\nThe generated tables.rs will be ~10k+ lines. That's fine — it's pure data.\n\n## Module structure\n\n```\nsrc/moshier/\n  mod.rs      — PlantTbl struct definition, pub use of table instances\n  tables.rs   — generated const arrays (do not hand-edit)\n```\n\n## C source reference\n- swemptab.h:1–10640 — all coefficient arrays\n- sweph.h:698–706 — struct plantbl definition\n- See docs/c-ref-moshier.md for detailed format documentation\n\n## Dependencies\n- None within this arc (only needs types from Phase 0)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "PlantTbl struct defined with static references to const arrays"
+    },
+    {
+      "done": false,
+      "text": "Python script parses swemptab.h and generates tables.rs"
+    },
+    {
+      "done": false,
+      "text": "All 9 planet table instances compile"
+    },
+    {
+      "done": false,
+      "text": "Unit test verifies element counts match C for every planet"
+    },
+    {
+      "done": false,
+      "text": "Generated file has a header comment noting it's auto-generated"
+    }
+  ],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward execution. PlantTbl struct with &'static slice references, Python regex-based parser for swemptab.h, generated 4018-line tables.rs. Test walks arg_tbl to verify coefficient consumption matches array lengths for all 9 planets. Script placed in scripts/ (matching gen_nutation_data.py convention) rather than tools/ as originally specified in the task.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "2261ac6"
+    }
+  ],
+  "files": [
+    "src/moshier/mod.rs",
+    "src/moshier/tables.rs",
+    "tools/gen_moshier_tables.py"
+  ],
+  "tags": [
+    "wave-2",
+    "moshier"
+  ],
+  "history": [
+    {
+      "ts": 1782430659445,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 24
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782475906558,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782475910673,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782430659445,
+  "updated_at": 1782475910673,
+  "completed_at": 1782475910673,
+  "arc_id": "019efa3b-d087-7b51-96b9-40a83ea99afa",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f0127-4ea8-7451-b37a-2f7c7548e306",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/25",
+      "target": "swisseph-rs/24",
+      "note": "Planet series evaluation needs PlantTbl struct + coefficient tables",
+      "created_at": 1782430781096
+    },
+    {
+      "id": "019f0127-6ebd-70e2-a834-c875ad83556a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/24",
+      "target": "swisseph-rs/5",
+      "note": null,
+      "created_at": 1782430789309
+    }
+  ]
+}

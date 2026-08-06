@@ -1,0 +1,60 @@
+{
+  "id": "019f85d1-72f3-7321-8e2a-e5ef590e6891",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/159",
+  "sequence_number": 159,
+  "title": "nodaps: wire asteroid_files into nodaps_osc_body_j2000's SwephProvider",
+  "description": "nodaps_osc_body_j2000's Swiss branch constructs SwephProvider with asteroid_files: &[] (context.rs ~line 1399). Body::Asteroid passes nod_aps's rejection guard (raw > AST_OFFSET), so nod_aps(eph, t, Body::asteroid(433), flags, OSCU) reaches nodaps_osc_body_j2000 which calls provider.positions(Body::Asteroid(433), ...) — this hits the new Body::Asteroid branch in SwephProvider::positions and returns EphemerisNotAvailable because the file list is empty. Pre-existing (before swisseph-rs/158 it hit a different error from the planet_files lookup miss), but now that the routing is explicit, the fix is to pass &self.asteroid_files. Same applies to planet_moon_files if planet moons ever pass the nod_aps guard (currently rejected by the NPLANETS..AST_OFFSET range check, so not reachable). Found by Codex adversarial review of swisseph-rs/158.",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": "Both nodaps SwephProvider construction sites (nodaps_observer and nodaps_osc_body_j2000) hardcoded asteroid_files: &[] and planet_moon_files: &[], so any Body::Asteroid(n) reaching the Swiss backend's provider.positions() hit the empty file list and returned EphemerisNotAvailable.",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "a4cf744"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1784656524019,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 159
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1784656741593,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1784656747615,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1784656524019,
+  "updated_at": 1784656747615,
+  "completed_at": 1784656747615,
+  "edges": []
+}

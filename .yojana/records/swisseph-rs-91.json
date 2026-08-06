@@ -1,0 +1,93 @@
+{
+  "id": "019f229d-57c3-7c12-8c63-3c361b32dcfe",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/91",
+  "sequence_number": 91,
+  "title": "Break calc↔context module cycle: extract EphemerisConfig/TopoPosition into leaf config.rs",
+  "description": "### Origin\nSurfaced during vidhi-review of swisseph-rs/76+77. sutra flagged a **blocking** `no-module-cycles` violation: `src/calc.rs → src/context.rs` (provenance checkpoint swisseph-rs/8).\n\n### Root cause\n`EphemerisConfig` + `TopoPosition` are read-only config *data* but live in `context.rs` alongside the `Ephemeris` engine. calc.rs's ONLY dependency on context.rs is `use crate::context::EphemerisConfig`, while context.rs calls calc.rs heavily → cycle. Same config-import edge exists from 7 other computational modules (ayanamsa, deltat, sidereal_time, topocentric, riseset, eclipse).\n\n### Fix\nExtract `EphemerisConfig` + `TopoPosition` into a new **leaf** module `src/config.rs` (deps: `std::path`, `crate::flags`, `crate::types` only).\n\nWrinkle: `EphemerisConfig::set_sidereal_mode` reads the `AYANAMSA` table from `ayanamsa.rs`, and `ayanamsa.rs` imports `EphemerisConfig` — dragging the table into config.rs would just relocate the cycle. Instead, **move the `set_sidereal_mode` inherent-impl block from context.rs into ayanamsa.rs** (Rust permits inherent impls in any module of the same crate). Result: config.rs is a pure leaf, the AYANAMSA table stays home, and set_sidereal_mode sits next to the table it resolves.\n\nPublic API preserved via `pub use config::{EphemerisConfig, TopoPosition}` in lib.rs; `config.set_sidereal_mode(...)` still works.\n\n### Files touched\n- NEW `src/config.rs` (TopoPosition, EphemerisConfig struct + Default)\n- `src/context.rs` (remove defs + set_sidereal_mode; import from config; drop now-unused imports)\n- `src/ayanamsa.rs` (import EphemerisConfig from config; host set_sidereal_mode impl)\n- `src/lib.rs` (add `pub mod config`; re-export split)\n- Path swaps: calc.rs, sidereal_time.rs, topocentric.rs, deltat/mod.rs, riseset.rs, eclipse.rs\n\n### Out of scope\nThe `Ephemeris`-passed-by-`&self` into riseset/eclipse creates context↔riseset / context↔eclipse cycles that sutra does NOT flag — that's the intentional stateless-engine design (per CLAUDE.md architecture), not touched here.\n\n### Acceptance criteria\n- `cargo build` clean (no warnings, esp. unused imports)\n- `cargo clippy --all-targets` clean\n- `cargo test` all pass\n- `sutra_deps cycles=true` no longer reports `{calc, context}` blocking violation\n\n### Convention violations (NOT actionable)\nsutra also flagged 4 `complexity:med → kind:function` \"violations\" on `Ephemeris::{new, calc_with_config, rise_trans, calc_inner}`. These are FCA-miner noise: the rule learned \"medium-complexity symbols are free functions\" (92% of 61) and flags impl methods that are kind:method. Not fixable without turning methods into free functions. Left as-is.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [
+    {
+      "done": false,
+      "text": "cargo build clean (no unused-import warnings)"
+    },
+    {
+      "done": false,
+      "text": "cargo clippy --all-targets clean"
+    },
+    {
+      "done": false,
+      "text": "cargo test all pass"
+    },
+    {
+      "done": false,
+      "text": "sutra no longer reports {calc,context} no-cycles blocking violation"
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Move set_sidereal_mode inherent-impl block into ayanamsa.rs rather than dragging the AYANAMSA table into config.rs.",
+      "rationale": "config.rs must be a pure leaf to break the cycle; set_sidereal_mode's dependency on the AYANAMSA table would pull ayanamsa into config.rs or relocate the cycle. Rust allows inherent impls in any same-crate module, so hosting set_sidereal_mode next to the AYANAMSA table it resolves keeps config.rs leaf-clean AND is more cohesive than its prior home in context.rs.",
+      "rejected_alternatives": [
+        "Move AyaInit + AYANAMSA table into config.rs alongside EphemerisConfig (relocates domain data out of ayanamsa.rs and inverts ownership; ayanamsa computation would reach into config for its own table).",
+        "Move EphemerisConfig into types.rs instead of a new module (dumps a large config struct into the shared-types leaf; still needs the set_sidereal_mode relocation)."
+      ]
+    }
+  ],
+  "implementation_plan": null,
+  "execution_record": "Executed as planned via a sonnet subagent (precise brief), independently verified by me. New src/config.rs leaf module holds EphemerisConfig + TopoPosition + Default; set_sidereal_mode inherent-impl relocated into ayanamsa.rs beside the AYANAMSA table (uses local AYANAMSA, not crate::ayanamsa::). Public API preserved via `pub use config::{EphemerisConfig, TopoPosition}` in lib.rs.\n\nVerified: cargo build clean, cargo clippy --all-targets clean, 196 tests pass (83+12+101+0). calc.rs has zero crate::context refs. sutra_deps cycles=true → 0 cycles / 0 SCCs across the whole crate (was {calc,context}).\n\nDeviations from plan (all reasonable): (1) context.rs KEPT SiderealBits + EphemerisSource imports — they're used by unrelated sidereal-transform code beyond the moved block, only genuinely-unused imports dropped. (2) 4 tests/golden/*.rs files (ayanamsa, ayanamsa_calc, deltat, sidereal_time) referenced the external path swisseph::context::EphemerisConfig — updated to swisseph::config, not in the original brief but required to compile --all-targets. (3) An edit-tool guard forced one read-only sutra_impact call on EphemerisConfig to unblock editing the load-bearing context.rs.\n\nKNOWN ARTIFACT: sutra_constraints action=violations still lists the no-module-cycles constraint (id 22f0f35d) as a degenerate empty-path row (detail:'import cycle: ', from_path:'', to_path:'') after reparse, while sutra_deps correctly reports zero cycles. The constraints-violations endpoint appears to leave a stale constraint shell once the backing edge is gone. Not a live violation — sutra_deps is ground truth. Possible sutra reporting bug worth a look (Josh maintains sutra).\" Files: NEW src/config.rs; src/context.rs, src/ayanamsa.rs, src/lib.rs; path swaps in calc.rs, sidereal_time.rs, topocentric.rs, deltat/mod.rs, riseset.rs, eclipse.rs, tests/golden/{ayanamsa,ayanamsa_calc,deltat,sidereal_time}.rs.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "4402e63",
+      "label": "review that surfaced this (swisseph-rs/77)"
+    },
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/77",
+      "label": "review origin"
+    },
+    {
+      "type": "git:commit",
+      "value": "551c212"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782992164803,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 91
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782992404145,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "agent",
+      "text": "Review: approve with notes. Pure code-motion refactor verified semantically identical (set_sidereal_mode logic line-for-line unchanged, EphemerisConfig/Default field-for-field unchanged). All 4 acceptance criteria independently re-verified: build 0 warnings, clippy --all-targets 0 warnings, 196/196 tests pass, sutra_deps reports 0 cycles crate-wide (blocking {calc,context} violation resolved). No sibling project references the removed swisseph::context::{EphemerisConfig,TopoPosition} module paths. Notes (low): (1) module-path imports of config types via `context::` are now breaking — crate-root re-exports preserved, all internal users updated, no external consumers found; (2) consider a doc breadcrumb on EphemerisConfig noting set_sidereal_mode's impl lives in ayanamsa.rs next to the AYANAMSA table.",
+      "ts": 1782992693215
+    }
+  ],
+  "created_at": 1782992164803,
+  "updated_at": 1782992404145,
+  "completed_at": 1782992404145,
+  "edges": []
+}

@@ -1,0 +1,96 @@
+{
+  "id": "019f377a-65b1-7862-ac0b-2e970afd5b96",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/144",
+  "sequence_number": 144,
+  "title": "Design: port swisseph's swetest to swisseph-rs",
+  "description": "in theory it would be nice if swetest in swisseph-rs took the same flags, so that people familiar with the original swetest could simply apply what they know. that would help swisseph-rs gain acceptance i believe if it were easy for someone to simply compare the two using the same command with the same flags. take a look and determine how possible this is.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": null,
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": "## Approach\n\nPort C's `swetest.c` (4099 lines) as a native Rust binary in a `swetest/` workspace member, calling the `swisseph` Rust API directly (not through FFI). Accept the **exact same CLI flags** as C so users familiar with the original can compare output by running both with the same args. All computation APIs are already implemented in swisseph-rs — this is purely a CLI wiring + output formatting exercise.\n\nThe binary is primarily for human eyes (adoption/comparison tool), so exact-match C output formatting is a stretch goal, not a blocker. Get the flags and computation right first; if diff-compatibility matters, it's a polish pass.\n\n### Structure: `swetest/` workspace member\n- Separate binary crate (like `swisseph-ffi/`)\n- `clap` for arg parsing, `swisseph` as a path dependency\n- No new library code needed — everything goes through the existing public API\n\n### Scope of C's swetest\n- **~80 CLI flags** across 8 categories (time input, body selection, observer, frame, output format, houses, sidereal, special events)\n- **5 major code paths**: main planet loop, `print_line` (50+ format chars), `do_special_event` (eclipses/rise/heliacal), `orbital_elements`, ayanamsa-only\n- **All computation covered** by existing Rust API — the work is CLI parsing and output formatting\n\n### Decomposition: 5 session-sized tasks (145–149)\n\n| Task | Scope | Depends on |\n|------|-------|------------|\n| 145 | Binary scaffold + complete CLI arg parser | — |\n| 146 | Main loop + body dispatch + header | 145 |\n| 147 | Format-sequence output engine (`-f`) | 146 |\n| 148 | Special events (eclipses, rise/set, heliacal, orbel) | 146 |\n| 149 | Remaining modes (diff/midpoint, houses, ayanamsa, polish) | 147, 148 |\n\n### Design decisions\n\n1. **Workspace member, not `src/bin/`**: keeps `clap` out of the library crate, mirrors `swisseph-ffi/` pattern.\n2. **Direct Rust API, not FFI**: no overhead, type-safe, exercises the same code paths as library users.\n3. **Flag names match C exactly**: `-b`, `-p`, `-f`, `-ut`, `-sid`, etc. Not Rust-idiomatic long names — the whole point is familiarity for existing swetest users.\n4. **Format fidelity is best-effort on first pass**: reasonable human-readable output, not guaranteed byte-identical to C. A polish pass can tighten this later if needed.",
+  "execution_record": "Analyzed swetest.c (4099 lines, ~80 flags, 5 major code paths). Confirmed all computation APIs are already implemented in swisseph-rs — this is purely CLI wiring + output formatting. Decomposed into 5 session-sized tasks (145-149) with dependency edges: 145 (scaffold) → 146 (main loop) → 147 (format engine) + 148 (special events) → 149 (remaining modes + polish). Tasks 147 and 148 are independent of each other and can be worked in parallel.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783342196145,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 144
+      },
+      "actor": "josh"
+    },
+    {
+      "ts": 1783343713204,
+      "kind": "status_changed",
+      "payload": {
+        "from": "needs-triage",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783343872913,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783342196145,
+  "updated_at": 1783343872913,
+  "completed_at": 1783343872913,
+  "edges": [
+    {
+      "id": "019f3793-bca7-71f2-be06-69f8a8d3674a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/145",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343856807
+    },
+    {
+      "id": "019f3793-be3f-75e0-a157-9835ad94894b",
+      "edge_type": "refines",
+      "source": "swisseph-rs/146",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343857215
+    },
+    {
+      "id": "019f3793-c1da-7233-ba97-a404cae09a91",
+      "edge_type": "refines",
+      "source": "swisseph-rs/147",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343858138
+    },
+    {
+      "id": "019f3793-c6bb-7741-b322-d0515663da43",
+      "edge_type": "refines",
+      "source": "swisseph-rs/148",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343859387
+    },
+    {
+      "id": "019f3793-c972-7560-91b2-6c1b7e6b36d1",
+      "edge_type": "refines",
+      "source": "swisseph-rs/149",
+      "target": "swisseph-rs/144",
+      "note": null,
+      "created_at": 1783343860082
+    }
+  ]
+}

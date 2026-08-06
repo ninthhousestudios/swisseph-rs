@@ -1,0 +1,65 @@
+{
+  "id": "019f0921-12bd-7112-8fed-b30330fb72a0",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/36",
+  "sequence_number": 36,
+  "title": "calc_ut Delta T should use effective ephemeris, not configured source",
+  "description": "calc_ut() computes Delta T via calc_deltat(jd_ut, &self.config), which uses the configured EphemerisSource for tidal acceleration selection. But calc() forces Moshier via plaus_iflag regardless of configured source. If a caller sets EphemerisSource::Jpl, calc_ut uses JPL tidal acceleration for the UT→TT conversion while the position is computed with Moshier — a silent inconsistency.\\n\\nCurrently bounded: only Moshier is supported and config defaults to Moshier. But this will bite when file backends are added.\\n\\nFix options:\\n1. calc_ut passes the effective (post-plaus_iflag) ephemeris to calc_deltat\\n2. calc_deltat accepts effective flags instead of full config\\n3. Reject non-Moshier configs at Ephemeris::new() until file backends exist\\n\\nAlso: add calc_ut golden test cases against swe_calc_ut.\"",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": "plaus_iflag silently forces MOSEPH regardless of configured EphemerisSource, but calc_ut computes Delta T using the configured source's tidal acceleration. The mismatch means a non-Moshier config would use one model for UT→TT and another for position computation.",
+  "context_refs": [
+    {
+      "type": "yojana:task",
+      "value": "swisseph-rs/33",
+      "label": "origin (codex review finding)"
+    },
+    {
+      "type": "git:commit",
+      "value": "51efb31"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782564590269,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 36
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782564756276,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782564760442,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782564590269,
+  "updated_at": 1782564760442,
+  "completed_at": 1782564760442,
+  "edges": []
+}

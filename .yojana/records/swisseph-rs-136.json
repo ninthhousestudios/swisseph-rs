@@ -1,0 +1,85 @@
+{
+  "id": "019f2f7f-1db3-7c91-8ab2-a9070f350f76",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/136",
+  "sequence_number": 136,
+  "title": "FFI 6/8: phenomena, nodes/apsides, orbital elements, crossings",
+  "description": "### Summary\nFFI wrappers for planetary phenomena, nodes/apsides, orbital elements, and the crossing-finder family. Read docs/ffi-design.md and the established swisseph-ffi patterns first.\n\n### Files\n- `swisseph-ffi/src/pheno.rs` (new module), header regen, `swisseph-ffi/tests/pheno.rs`\n\n### Functions to add\n1. `swisseph_pheno(h, tjd_et, ipl, iflag, attr: *mut f64 /*[20]*/, flags_used out)` + `swisseph_pheno_ut` (context.rs:774/785). Phenomena fields → attr[0..5] (phase angle, phase, elongation, apparent diameter, apparent magnitude, horizontal parallax), rest zeroed.\n2. `swisseph_nod_aps(h, tjd_et, ipl, iflag, method: i32 /* NodApsMethod bits */, xnasc[6], xndsc[6], xperi[6], xaphe[6] all out)` + `swisseph_nod_aps_ut` (context.rs:928/946). NodesApsides' four [f64;6] arrays map 1:1.\n3. `swisseph_get_orbital_elements(h, tjd_et, ipl, iflag, dret: *mut f64 /*[50]*/)` (context.rs:963) — use `OrbitalElements::as_array` (src/orbit.rs:118) for the C slot layout; zero the tail.\n4. `swisseph_orbit_max_min_true_distance(h, tjd_et, ipl, iflag, dmax out, dmin out, dtrue out)` (context.rs:975).\n5. Crossings (context.rs:990–1048): `swisseph_solcross(h, x2cross, tjd_et, iflag, jx out) -> i32` + `_ut`; `swisseph_mooncross` + `_ut`; `swisseph_mooncross_node(h, tjd_et, iflag, xlon out, xlat out, jx out)` + `_ut`; `swisseph_helio_cross(h, ipl, x2cross, tjd_et, iflag, dir: i32, jx out)` + `_ut`. NOTE: C returns the crossing JD as the double return value with jx < tjd meaning error — do NOT copy that; use our uniform i32-code + `jx` out-param convention (this is a deliberate, documented divergence from the C signature; the header comment must say so since the Dart side needs to adapt).\n\n### Tests\nParity vs lib (Moshier): pheno for Venus/Moon at 2 epochs; nod_aps MEAN + OSCU for Moon and Mars, all four points bitwise; orbital elements for Jupiter vs `as_array`; solcross/mooncross forward from a known epoch, jx bitwise; mooncross_node; helio_cross both directions; error paths (Sun crossing itself via helio_cross(Sun)? — whatever the lib rejects, assert the mapped code).\n\n### Acceptance criteria\n- `cargo test -p swisseph-ffi` and root `cargo test` pass; header freshness green\n- Header documents dret[50] slot meanings for orbital elements (copy from OrbitalElements docs) and the crossings return-convention divergence from C\n\n### Escape hatch\nIf `as_array` doesn't cover all 50 C slots, zero the uncovered ones and document; if any wrapper needs lib-crate changes beyond visibility, STOP and report instead of patching the lib here.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Straightforward implementation — all 16 FFI functions followed the established eclipse.rs/lib.rs patterns. 20 parity tests (FFI vs lib) + 3 error-path tests, all bitwise-exact (1e-15 eps). No lib-crate changes needed. Header regenerated via cbindgen, freshness test green.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "c22c0fa"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "ffi"
+  ],
+  "history": [
+    {
+      "ts": 1783208287667,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 136
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783265572902,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783265832144,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: approve with notes. Two findings, both fixed in 5c11ca1:\\n1. [high] pheno FFI lacked per-call geopos/sid_mode for TOPOCTR — added geopos/sid_mode params, widened Ephemeris::pheno_with_config to pub, added topo Moon test.\\n2. [medium] helio_cross(Sun/Moon) error mapping untested — added helio_cross_sun_rejected and _moon_rejected tests asserting exact -2 code.",
+      "ts": 1783266399381
+    }
+  ],
+  "created_at": 1783208287667,
+  "updated_at": 1783265832144,
+  "completed_at": 1783265832144,
+  "edges": [
+    {
+      "id": "019f2f7f-cb28-79e1-a5b2-40ffd9589702",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/136",
+      "target": "swisseph-rs/131",
+      "note": null,
+      "created_at": 1783208332072
+    },
+    {
+      "id": "019f2f7f-f657-70e3-91a7-5aae93c86e10",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/138",
+      "target": "swisseph-rs/136",
+      "note": null,
+      "created_at": 1783208343127
+    }
+  ]
+}

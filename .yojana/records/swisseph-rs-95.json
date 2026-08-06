@@ -1,0 +1,101 @@
+{
+  "id": "019f234e-9899-7933-a0d8-0472a90cdf69",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/95",
+  "sequence_number": 95,
+  "title": "Plan: Asteroid ephemeris support",
+  "description": "Study + decompose asteroid ephemeris support into implement sub-tasks (mirror how swisseph-rs/13 decomposed PNOC into 82–90). Produce any needed C ref docs via dedicated sonnet agents per the c_source_budget protocol before planning; the planner does not read C source directly.\n\n## Why this exists\nAsteroids were a definite oversight in the original phase plan (task 13) — no task ever added asteroid *position* computation. Surfaced during review of swisseph-rs/83 (phenomena): pheno's Bowell §5k magnitude branch and MAG_ELEM rows 15–20 are dead because no backend can compute Ceres..Vesta, so the pheno golden battery had to drop Ceres (shipped 120 cases, not the spec'd 132).\n\n## Current state — half-built (verify all before planning)\n- **Type layer PRESENT**: `Body::Ceres/Pallas/Juno/Vesta` (raw ids 17–20), `Body::Asteroid(AsteroidId)` with AST_OFFSET encode/decode (src/types.rs:100-107, 156).\n- **.se1 file-format layer PRESENT**: `seas*` → `FileType::MainAsteroid`, individual asteroid files → `FileType::Asteroid` with the 4th MPC-elements text line parsed (src/sweph_file/mod.rs:64, parse.rs:105-108, 158-176). The format layer can READ an asteroid file.\n- **Calc dispatch ABSENT**: `calc_body_moshier/sweph/jpl` (src/context.rs:766/795/846) match only Sun/Moon/Mercury..Pluto; everything else → `Err(EphemerisNotAvailable)`. No asteroid branch, and `Ephemeris::new` (context.rs:22) only loads `planet_files` + `moon_files` — asteroid files are never opened.\n- **Metadata plumbing ABSENT**: the C `swed.ast_H/ast_G/ast_diam` globals (from SE1 asteroid-file loads) are stubbed in TWO places today — `phenomena.rs` §5k (returns EphemerisNotAvailable for numbered asteroids) and `eclipse::body_radius_au`. Both should consume the same threaded config once it exists.\n\n## Scope to decompose (indicative — refine during study)\n1. Config/loading: open seas + individual-asteroid `.se1` files in `Ephemeris::new`; thread ast_H/ast_G/ast_diam metadata into config (stateless — no globals).\n2. Backend dispatch: asteroid branches in calc_body_sweph (main path — asteroids are SE1-only; Moshier/JPL have no asteroid ephemeris, so decide the fallback/error behavior and match C). Main asteroids (Ceres..Vesta, ids 17–20) vs numbered asteroids (AST_OFFSET+n).\n3. File selection: find_file / segment path for asteroid ipli ranges (SE_PLMOON_OFFSET..SE_AST_OFFSET boundary handling already partly in parse.rs:176).\n4. Consume the new metadata in phenomena §5k (Bowell H-G) and eclipse::body_radius_au — remove both stubs.\n5. Golden coverage: asteroid positions (Ceres..Vesta + a numbered asteroid) across epochs/flags; and the deferred **Ceres pheno coverage** re-enabling the §5k branch (the swisseph-rs/83 follow-up folds in here).\n\n## Sequencing\nImplement wave runs AFTER the PNOC implement tasks (84–90) land, and before Heliacal (~14). Wire implement sub-tasks' deps against 84–90 at decomposition time if a real code-path dependency exists. This arc blocks swisseph-rs/15 (Public API / docs / feature flags) — asteroids must exist before the public surface is finalized.\n\n## C source reference\n- swecl.c asteroid magnitude (Bowell) already mapped in docs/c-ref-phenomena.md §5k\n- SE1 asteroid file handling: sweph.c sweph()/sweph_asteroid paths, catalogue-internal (asteroid file loading, ast_H/ast_G/ast_diam population)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": null,
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning",
+    "asteroids"
+  ],
+  "history": [
+    {
+      "ts": 1783003781273,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 95
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783034231988,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783034243245,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783003781273,
+  "updated_at": 1783034243245,
+  "completed_at": 1783034243245,
+  "arc_id": "019f234e-3702-7000-8c49-3da4757e0d6d",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f234e-a763-7f51-a44d-b265d51fecae",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/15",
+      "target": "swisseph-rs/95",
+      "note": "Public API / docs / feature flags must not finalize before asteroid support exists (asteroid arc ~16 blocks the wrap-up).",
+      "created_at": 1783003785059
+    },
+    {
+      "id": "019f251e-698b-7b63-94af-6e3266decfeb",
+      "edge_type": "refines",
+      "source": "swisseph-rs/100",
+      "target": "swisseph-rs/95",
+      "note": null,
+      "created_at": 1783034177931
+    },
+    {
+      "id": "019f251e-6d76-7dd0-b5a3-d355f84bfcb7",
+      "edge_type": "refines",
+      "source": "swisseph-rs/101",
+      "target": "swisseph-rs/95",
+      "note": null,
+      "created_at": 1783034178934
+    },
+    {
+      "id": "019f251e-72ba-72b3-91a5-e5e2dabce40c",
+      "edge_type": "refines",
+      "source": "swisseph-rs/102",
+      "target": "swisseph-rs/95",
+      "note": null,
+      "created_at": 1783034180282
+    },
+    {
+      "id": "019f251e-737b-7522-8b0d-903ce1d2fd00",
+      "edge_type": "refines",
+      "source": "swisseph-rs/103",
+      "target": "swisseph-rs/95",
+      "note": null,
+      "created_at": 1783034180475
+    }
+  ]
+}

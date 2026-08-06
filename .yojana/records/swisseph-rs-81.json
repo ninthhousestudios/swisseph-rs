@@ -1,0 +1,85 @@
+{
+  "id": "019f1e88-d7a2-7ec1-a51d-5e24c6728cc0",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/81",
+  "sequence_number": 81,
+  "title": "JPL backend + TOPOCTR diverges from C away from J2000 (Moon up to 0.024°, other bodies smaller)",
+  "description": "### Summary\nWhile extending topocentric golden coverage to the SWIEPH/JPL backends (swisseph-rs/80), discovered that the **JPL backend's topocentric (`SEFLG_TOPOCTR`) output diverges from the real C reference specifically away from J2000** — confirmed at jd=2378496.5 (1800-01-01) and does NOT reproduce at J2000 (2451545.0). SWIEPH and Moshier are clean at the same epoch/observer/flags using the identical shared `apparent_planet`/`apparent_sun`/`apparent_moon` code path (SWIEPH shares that exact code with JPL — only the `PositionProvider` impl differs).\n\n### Magnitude (jd=2378496.5, lon=8.55 lat=47.37 alt=500, JPL backend)\n- Moon position: up to 6.6e-6° (~0.024″) off; Moon speed: up to 9.3e-5°/day off.\n- Sun/Mercury/Mars/Venus: smaller but nonzero, ~1e-8 to 3e-7° position, ~1e-7 to 3e-7°/day speed.\n- Reproduces identically with **TRUEPOS** (no light-time, no aberration, no deflection at all — pure `xx = planet_bary/moon_geo - (earth_bary + topocentric offset)`), so it is NOT a light-time or SPEED3 artifact.\n\n### What was ruled out (with evidence)\n1. **DE441 record-boundary coincidence** (original theory) — disproven. Probed raw `jpl_pleph` Earth/Moon Chebyshev output at 1e-6-day resolution around jd=2378496.5: perfectly smooth, no discontinuity. Raw ephemeris data is fine.\n2. **`get_observer`/`topo_offset` bug** — disproven. Added temporary debug instrumentation comparing the `offset` 6-vector computed for the SWIEPH-config Ephemeris vs the JPL-config Ephemeris at the identical jd/observer: **bit-identical** in both runs. This function is pure geometry (deltaT, sidereal time, precession) with no ephemeris queries, and it's proven backend-agnostic and correct (SWIEPH matches C using it).\n3. **Plain geocentric JPL Moon position/speed at this exact jd** — bit-exact match against C (existing `calc_jpl.rs` test already covers this epoch and passes; independently re-verified).\n4. **Test-script path bugs** — several early diagnostic runs gave misleading \"JPL\" comparisons that were actually silently using MOSEPH due to a wrong relative `ephe_path` in throwaway C test scripts (rc decodes to `SEFLG_MOSEPH` when the request was JPLEPH — `swe_calc`'s returned iflag reflects what was *actually* used). Re-ran with correct paths (`../../../swisseph/ephe` from `tests/c-gen/`, matching the real `gen_calc_topo.c` generator) and confirmed rc/flags do show JPLEPH(1) correctly in the real golden data (`tests/golden-data/calc_topo.json`) — the discrepancy above is real, not a data-generation artifact.\n5. A 2024-01-01 (jd=2460310.5) spot-check, once corrected for the path bug in (4), matches Rust almost exactly — consistent with \"clean at/near J2000, diverges further away.\"\n\n### Leading (unconfirmed) hypothesis\nGiven `offset` is proven identical and correct across backends, and `moon_geo`/`earth_bary` differ between SWIEPH and JPL only by normal small cross-model amounts (~1e-7, expected — different ephemeris models), the bug must be in something that treats the JPL provider's inputs differently from SWIEPH's *downstream* of the raw fetch — despite both going through the same shared `apparent_moon`/`apparent_planet` code with identical `flags`/`config.astro_models`. This wasn't pinned down. One C behavior worth checking that was NOT yet verified: `swi_get_observer`'s C implementation calls `swe_deltat_ex(tjd, iflag, serr)` — passing the *real* `iflag` including ephemeris bits — which C uses to select ephemeris-specific tidal acceleration for ΔT. This selection could differ from what `crate::deltat::calc_deltat` does internally when driven from the JPL vs SWIEPH `EphemerisConfig`. (Note: this specific angle looked disproven by the identical-offset finding above, since if tid_acc selection differed by config it should have shown up as differing offsets — but it wasn't fully chased down, e.g. whether both configs happened to already resolve to the same tid_acc by coincidence in this test setup.) Whoever picks this up should start from app_pos_etc_moon/app_pos_etc_plan's JPLEPH-specific branches in sweph.c (only app_pos_etc_plan's JPLEPH branch was read in this session — sweph.c ~2465-2720; app_pos_etc_moon's JPLEPH-specific code was NOT read, starts sweph.c:4087) and diff line-by-line against `apparent_moon`/`apparent_planet` in src/calc.rs.\n\n### Reproduction\n```\ncargo test --test golden calc_topo -- --nocapture\n```\n(once landed with jpl sub-matrix at full tolerance) or manually:\n```rust\nlet eph = Ephemeris::new(EphemerisConfig {\n    ephemeris_source: EphemerisSource::Jpl,\n    ephe_path: Some(\"ephe\".into()), jpl_filename: Some(\"de441.eph\".into()),\n    topographic: Some(TopoPosition { longitude: 8.55, latitude: 47.37, altitude: 500.0 }),\n    ..Default::default()\n}).unwrap();\neph.calc(2378496.5, Body::Moon, CalcFlags::TOPOCTR | CalcFlags::EQUATORIAL | CalcFlags::TRUEPOS)\n```\nC reference (correct path, `../../../swisseph/ephe` from `tests/c-gen/`): `350.274518609979737 -8.544601602028941 0.002643195658360`.\n\n### Acceptance criteria\n- Root cause identified and documented (root_cause field on close, mechanism not just \"fixed the number\").\n- Fix applied so JPL+TOPOCTR matches C to the same tolerance as SWIEPH/Moshier (1e-9 position / 1e-7 speed) at non-J2000 epochs.\n- `tests/golden/calc_topo.rs`'s widened JPL-away-from-J2000 tolerance (added in swisseph-rs/80 as a documented stopgap) removed once fixed.\n- Existing golden suites (calc_jpl, calc_topo, calc, calc_sweph) still pass.\n\n### Priority note\nThis blocks trusting JPL-backend topocentric output (and therefore rise/set + eclipse `_where`/`_how`/`_loc` functions when run against JPL for historical dates) at anything other than J2000-adjacent epochs. Should be prioritized before RSE 3 (rise/set, swisseph-rs/70) or RSE 5 (eclipse, swisseph-rs/72) are considered validated for the JPL backend.",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Fix: added denum_to_tid_acc (mirrors swi_get_tid_acc's denum→constant switch, swephlib.c:3223-3236) in src/deltat/mod.rs; at Ephemeris::new, resolve the effective denum from the open file (JPL header, or moon_files[0] header for SWIEPH) and bake denum_to_tid_acc(denum) into config.tidal_acceleration when the caller left it unset — matching C's per-swe_calc swi_set_tid_acc, and respecting the is_tid_acc_manual short-circuit. resolve_tidal_acceleration's Jpl|Swiss→TIDAL_DEFAULT arm kept as a fallback for configs built without Ephemeris::new (e.g. standalone deltat golden tests that call calc_deltat directly). Removed the swisseph-rs/80 widened-tolerance stopgap (is_jpl_away_from_j2000) in tests/golden/calc_topo.rs; JPL now passes at full 1e-9/1e-7. Verified: full suite 80 unit + 86 golden all pass (calc, calc_jpl, calc_sweph, calc_topo, deltat). No divergence chase needed — root cause was reasoned from the C swi_get_tid_acc source + the se1/jpl golden header denum values (431 vs 441), confirming the magnitude estimate before coding.",
+  "reproduction": null,
+  "root_cause": "C's swi_get_tid_acc selects the ΔT tidal-acceleration constant from the open ephemeris file's DE number (JPL: jpldenum; SWIEPH: SEI_FILE_MOON/semo denum; MOSEPH: hardcoded DE404). The Rust port's resolve_tidal_acceleration hardcoded TIDAL_DEFAULT (DE431, -25.80) for both JPL and SWIEPH. For JPL de441 the correct value is SE_TIDAL_DE441 (-25.936). The wrong tid_acc produced a wrong ΔT, which fed the topocentric observer offset via sidereal time (get_observer converts TT→UT). The ΔT tidal-correction term scales with (year-1955)^2, so the error is ~0 at J2000 and grows away from it (≈0.3s ΔT at 1800 → Moon topo off ~0.024″). SWIEPH was clean only because its semo denum is 431 = DEFAULT. The leading-hypothesis in the task description (ΔT tid_acc selection) was correct; the identical-offset finding was a false exoneration — the Rust offset was bit-identical across backends precisely because it used the same (wrong-for-JPL) tid_acc for both, while C uses different tid_acc per backend.",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "1efe88e"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1782923712418,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 81
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782930670580,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782931131233,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782923712418,
+  "updated_at": 1782931131233,
+  "completed_at": 1782931131233,
+  "edges": [
+    {
+      "id": "019f1e88-fb1c-7c13-9ddf-b496f52ba7c6",
+      "edge_type": "relates_to",
+      "source": "swisseph-rs/81",
+      "target": "swisseph-rs/80",
+      "note": "Discovered while extending calc_topo golden coverage to JPL backend",
+      "created_at": 1782923721500
+    },
+    {
+      "id": "019f1e89-0240-7263-a47f-7fecea492990",
+      "edge_type": "relates_to",
+      "source": "swisseph-rs/70",
+      "target": "swisseph-rs/81",
+      "note": "Rise/set uses swe_calc with SEFLG_TOPOCTR; JPL-backend results at historical epochs are unverified until 81 is fixed",
+      "created_at": 1782923723328
+    },
+    {
+      "id": "019f1e89-055b-7613-a35f-e23d0b9bb3c6",
+      "edge_type": "relates_to",
+      "source": "swisseph-rs/72",
+      "target": "swisseph-rs/81",
+      "note": "Eclipse _where/_how/_loc functions use SEFLG_TOPOCTR; JPL-backend results at historical epochs are unverified until 81 is fixed",
+      "created_at": 1782923724123
+    }
+  ]
+}

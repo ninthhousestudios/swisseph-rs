@@ -1,0 +1,92 @@
+{
+  "id": "019efa41-c9df-79d2-a8ed-8d167d87952c",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/5",
+  "sequence_number": 5,
+  "title": "Plan: Moshier ephemeris backend",
+  "description": "Port swemplan.c (~967 lines), swemmoon.c (~1930 lines), and swemptab.h (~10640 lines of coefficient data). No file I/O — pure computation. First backend that produces actual planet positions.\n\n## Planetary series (swemplan.c)\n\n### Core algorithm: swi_moshplan2() (catalogue-internal §4.3)\n1. **Fundamental arguments** — 9 planetary mean longitudes (Simon 1994): freq[i]×T + phase[i] in arcseconds, T in 10,000 Julian years\n2. **Sin/cos lookup** — for each argument, build sin(k×L)/cos(k×L) for k=0..max via recurrence: sin((k+1)L) = sin(L)cos(kL) + cos(L)sin(kL)\n3. **Harmonic series** — arg_tbl encodes which arguments enter each term. Combine via product-of-sums trig identity. Polynomial-in-T amplitude: C(T) = c₀ + c₁T + c₂T² + ...\n4. **Convert** — longitude = STR×sl, latitude = STR×sb, distance = STR×plan->distance×sr + plan->distance\n\nEach planet has ~1000–2000 terms. The `plantbl` struct holds pointers to coefficient tables.\n\n### Data structures\n- `struct plantbl` — per-planet: max harmonic per argument, number of terms per polynomial degree, pointer to arg_tbl, pointer to coefficient arrays\n- swemptab.h contains all coefficient arrays as static data — massive but mechanical to port as `const` arrays\n\n## Lunar ephemeris (swemmoon.c)\n\n### Core algorithm: ELP2000-85 adjusted to DE404 (catalogue-internal §4.4)\n1. **Four fundamental arguments** computed in `mean_elements()`: l (Moon anomaly), l' (Sun anomaly), D (elongation), F (node distance), Lp (mean longitude). High-precision polynomials in T + 24 fitting coefficients (z[] array) for DE404 agreement.\n2. **Harmonic term tables**: LR (118 terms, lon+radius), MB (77, latitude), LRT (38, T-correction lon/rad), BT (16, T-correction lat), LRT2 (25, T²-correction), BT2 (12, T²-correction)\n3. **Split across moon1()–moon4()** accumulating into static TLS variables `l`, `B`, `moonpol[3]`\n4. **Speed** via central differences at ±0.00005 days\n\n### Global state to eliminate\nThe `moon1()`–`moon4()` split with shared static accumulators is the main cleanup target. Options:\n- **Combine into one function** with local accumulators — simplest, may be large\n- **Pass a `MoshierMoonState` struct** through all four — preserves the split for readability\n- Recommend: `MoshierMoonState { l: f64, b: f64, moonpol: [f64; 3] }` passed as `&mut`\n\n## Rust module structure\n```\nmoshier/\n  mod.rs       — public interface: compute_planet(), compute_moon()\n  planets.rs   — swi_moshplan2, fundamental arguments, series evaluation\n  moon.rs      — moon1-4 combined or with MoshierMoonState, mean_elements\n  tables.rs    — all coefficient data from swemptab.h (const arrays)\n```\n\n## Testing\n- setest/suite_01_calc.c with SEFLG_MOSEPH flag\n- Golden data: compute all major bodies (Sun through Pluto + Moon) at J2000, J2000±100yr, J2000±1000yr using Moshier, compare to C swetest output\n- Moshier range: ~1800–2100 AD for best accuracy, but valid ±3000yr\n- Speed values: compare against C (computed by central differences for Moon, analytically for planets)\n\n## C source reference\n- swemplan.c:1-967 — swi_moshplan2, swi_moshplan, fundamental arguments\n- swemmoon.c:1-1930 — swi_moshmoon2, moon1-moon4, mean_elements, chewm, sscc\n- swemptab.h:1-10640 — all coefficient tables (mer404, ven404, ear404, mar404, jup404, sat404, ura404, nep404, plu404)\n\n## Dependencies\n- Phase 0 (types, constants)\n- Phase 2 (angle normalization, polynomial evaluation)",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Decomposed into 4 sub-tasks (swisseph-rs/24–27) on arc ~5, implement phase.\n\n## Changes from original description\n\n**Architecture corrections applied:**\n- Eliminated MoshierMoonState on Ephemeris — it's a local accumulator within pure function calls, not stored state.\n- Eliminated `do_save` parameter — caching is the dispatcher's concern (swisseph-rs/6), not the backend's.\n- Eliminated all `swed` global state access — obliquity of J2000 passed as `&Epsilon` parameter.\n- All functions are pure: `(jd, table/body, eps) → [f64; N]`. No &mut self, no side effects.\n- No `plan_data` struct — that's a caching concern for the dispatcher layer.\n\n**Structural changes:**\n- Combined moon sub-tasks (originally considered tables+mean_elements separate from series eval) into one task (swisseph-rs/26) since moon tables are small (~2000 shorts embedded in swemmoon.c) and tightly coupled with mean_elements.\n- Kept planet tables as a separate task (swisseph-rs/24) since they require a scripted transcription of ~10,640 lines from swemptab.h.\n- Wrapper/integration task (swisseph-rs/27) covers speed computation, ecliptic→equatorial conversion, and public API — functions that were mixed with caching in the C code.\n\n**Excluded from this arc:**\n- `swi_osc_el_plan()` — fictitious body orbital elements, happens to be in swemplan.c but is not part of the Moshier ephemeris computation.\n- Caching — belongs to dispatcher arc (swisseph-rs/6).\n\n**C ref doc:**\n- docs/c-ref-moshier.md produced during this planning session (agent read all 3 C source files).\n\n## Dependency graph\n```\n24 (planet tables) → 25 (planet series) ↘\n                                          27 (backend wrappers)\n26 (lunar ephemeris, independent)       ↗\n```\nTasks 24 and 26 can execute in parallel. Task 27 requires both 25 and 26.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [],
+  "files": [],
+  "tags": [
+    "planning"
+  ],
+  "history": [
+    {
+      "ts": 1782315076063,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 5
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782430816774,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1782430824224,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1782315076063,
+  "updated_at": 1782430824224,
+  "completed_at": 1782430824224,
+  "arc_id": "019efa3b-d087-7b51-96b9-40a83ea99afa",
+  "arc_phase": "study",
+  "edges": [
+    {
+      "id": "019f0127-6ebd-70e2-a834-c875ad83556a",
+      "edge_type": "refines",
+      "source": "swisseph-rs/24",
+      "target": "swisseph-rs/5",
+      "note": null,
+      "created_at": 1782430789309
+    },
+    {
+      "id": "019f0127-72bd-71a1-a598-10d8e3172820",
+      "edge_type": "refines",
+      "source": "swisseph-rs/25",
+      "target": "swisseph-rs/5",
+      "note": null,
+      "created_at": 1782430790333
+    },
+    {
+      "id": "019f0127-7643-7331-b344-1a68efabfc20",
+      "edge_type": "refines",
+      "source": "swisseph-rs/26",
+      "target": "swisseph-rs/5",
+      "note": null,
+      "created_at": 1782430791235
+    },
+    {
+      "id": "019f0127-77d9-7343-bd92-9dd6f8e93411",
+      "edge_type": "refines",
+      "source": "swisseph-rs/27",
+      "target": "swisseph-rs/5",
+      "note": null,
+      "created_at": 1782430791641
+    }
+  ]
+}

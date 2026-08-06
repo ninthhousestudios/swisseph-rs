@@ -1,0 +1,60 @@
+{
+  "id": "019f24a7-b360-74d1-9bdb-7395321208a8",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/99",
+  "sequence_number": 99,
+  "title": "pctr deflection tolerance: verify/tighten 5e-8 and correct incorrect root-cause comment",
+  "description": "From swisseph-rs/90 review. tests/golden/pctr.rs:51-56 and task 90 decision #2 justify the 5e-8 position tolerance as \"pctr deflection uses earth_helio while C uses earth_bary (pedp->x)\". This root-cause is incorrect: c-ref-pctr §5 shows C's swi_deflect_light also forms e=earth-sun, q=xx+earth-sun (heliocentric), identical to the Rust earth_helio construction, and earth/sun barycentric at epoch t are body-independent so Rust's ipl-re-eval eb/sb equal C's center-re-eval cache. Codex's \"wrong frame\" claim is refuted; the §5 code matches the ref doc.\n\nTwo problems remain: (1) the 1.4e-8 residual's true cause is asserted, not demonstrated — and the task's own escape hatch (>1e-8 → escalate to Opus) was bypassed by relaxing to 5e-8; (2) the \"same architectural cause as CLAUDE.md §1 speed tolerance\" claim is dubious since §5 says the cache is at epoch t which Rust reproduces.\n\nFix: with the expanded SWIEPH matrix (sister task), inspect actual per-case position errors. Tighten toward 1e-9 where cases pass; if a genuine ~1.4e-8 residual survives on specific pairs, root-cause it (dump C vs Rust deflection intermediates per the project's own debugging lesson) and document the REAL mechanism in the comment. Impact ~0.05 mas — negligible; this is correctness-of-explanation + test-strength hygiene.",
+  "category": "bug",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "Isolated the cause with a throwaway example probe comparing full/NOABERR/NOGDEFL/TRUEPOS for Saturn-from-Jupiter at jd=2460600 against C golden: full/NOABERR/NOGDEFL all show lat Δ=1.444e-8 (lon Δ~4e-10); TRUEPOS drops to 1.9e-10. Corrected the tolerance comment to state the real mechanism and tightened POS_EPS/SPEED_EPS from 5e-8 to 3e-8 (worst observed pos 1.44e-8, speed 1.21e-8). The residual is ≈0.05 mas — astronomically negligible; left as a documented tolerance rather than chased to the exact line (would require dumping C's §3d intermediate at the retarded epoch). Not reopened as a bug given the magnitude.",
+  "reproduction": null,
+  "root_cause": "The 5e-8 tolerance's documented justification (\"pctr deflection uses earth_helio while C uses earth_bary\") was empirically false. Probing Saturn↔Jupiter (the worst pair) across correction gates showed the ~1.44e-8 residual is a LATITUDE offset that persists unchanged under NOGDEFL and NOABERR but vanishes under TRUEPOS — so it originates in the §3d retarded-time (t=tjd−dt) re-evaluation of the ipl body, a stateless-vs-stateful precision difference, NOT deflection. The §5 deflection geometry actually matches C's swi_deflect_light exactly (e=earth−sun, q=xx+earth−sun; earth/sun bary at epoch t are body-independent).",
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "51cb916"
+    }
+  ],
+  "files": [],
+  "tags": [],
+  "history": [
+    {
+      "ts": 1783026398048,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 99
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783027052028,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [],
+  "created_at": 1783026398048,
+  "updated_at": 1783027052028,
+  "completed_at": 1783027052028,
+  "edges": [
+    {
+      "id": "019f24b1-b56b-7c71-98c7-ca6e471436ad",
+      "edge_type": "motivated_by",
+      "source": "swisseph-rs/99",
+      "target": "swisseph-rs/90",
+      "note": null,
+      "created_at": 1783027053931
+    }
+  ]
+}

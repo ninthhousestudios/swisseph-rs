@@ -1,0 +1,96 @@
+{
+  "id": "019f2523-275b-7971-8fee-9543d43078b6",
+  "project_id": "019efa35-91e5-7bc1-bf6c-34f60bb02805",
+  "project_slug": "swisseph-rs",
+  "human_id": "swisseph-rs/104",
+  "sequence_number": 104,
+  "title": "Heliacal 1/8: sutra constraints + module scaffolding + atmospheric extinction & optics layer",
+  "description": "### Summary\nActivate the deferred sutra heliacal constraints and lay down src/heliacal.rs's foundation: constants, event-type enum, object-name resolution, default-parameter handling, and the pure atmospheric-extinction + optics functions (swehel.c's meteorology/extinction/vision layer). Everything in this task is pure math — no Ephemeris calls.\n\nRead docs/codebase-map.md before exploring. Do NOT read ../swisseph C source during implementation — the ref doc is the source of truth (exception: the gen harness `#include`s swehel.c, see below). Architecture: stateless, pure functions, no static caches (C's statics are pure memoization — drop them, recompute). FP fidelity: transcribe every expression exactly as the ref doc spells it (evaluation order, parenthesization, pow-vs-multiply).\n\n### Files\n- `.sutra/rules.toml` — uncomment the 3 commented `app-uses-calc-not-backends:heliacal→{moshier,jpl,sweph}` constraints (~lines 314–337). While uncommenting, FIX the stale target globs: `to = \"src/jpl.rs\"` → `\"src/jpl/**\"` and `to = \"src/sweph_file.rs\"` → `\"src/sweph_file/**\"` (match the active houses/eclipse constraint form). Add an `# ACTIVATED 2026-07-02 — heliacal (swisseph-rs/14 arc)` comment line like the sibling blocks.\n- `src/heliacal.rs` — new module content (currently an empty file; `pub mod heliacal;` already exists in lib.rs).\n- `tests/c-gen/gen_heliacal_internals.c` — new C harness.\n- `tests/golden-data/heliacal_internals.json` — generated.\n- `tests/golden/heliacal_internals.rs` — new test file; add `mod heliacal_internals;` to `tests/golden/main.rs`.\n\n### Implementation steps\n1. rules.toml edit as above.\n2. Constants block at the top of src/heliacal.rs per docs/c-ref-heliacal-vision.md §1 — port only the LIVE constants (§1/§11 mark the dead ones: all 8 time constants, GravitySource/REarthSource/DONE/Rb etc. — skip those). Keep C names/values verbatim in comments.\n3. `HeliacalEventType` enum with `TryFrom<i32>` — variants/values per vision §1 (MorningFirst=1, EveningLast=2, EveningFirst=3, MorningLast=4, plus acronychal values if §1 lists them). `flags.rs` already has `HeliacalFlags` — verify it against §1's SE_HELFLAG_* table; add any missing bits there, do not duplicate.\n4. Object resolution per vision §2: `pub(crate) fn object_to_body(name: &str) -> Option<Body>` (case-insensitive planet-name match; None = treat as fixed-star name) + the `tolower_string_star` behavior (lowercase but preserve Bayer designation part).\n5. `default_heliacal_parameters` per vision §1 — signature `fn default_heliacal_parameters(datm: &mut [f64; 4], dgeo: &[f64; 3], dobs: &mut [f64; 6], helflag: HeliacalFlags)`. Port SHIPPED behavior: SIMULATE_VICTORVB is unconditionally defined in the C build, so the RH clamp inside this function is DEAD — see vision §11.\n6. Meteorological/coordinate helpers per vision §3: Kelvin, TopoAltfromAppAlt, AppAltfromTopoAlt, HourAngle, DistanceAngle, TempEfromTempS, PresEfromPresS, Sgn (LITERAL port: Sgn(0.0) == 1), and C's hand-rolled `Tanh` — port its exp-based formula literally, do NOT substitute `f64::tanh`. Use `f64::min/max` for mymin/mymax.\n7. Extinction layer per vision §4: Xext, Xlay, Airmass, kR, kW, kOZ, ka, kt, Deltam. The `ka` RH clamp IS live (SIMULATE_VICTORVB `#ifdef` — vision §11). Skip Deltam's `staticAirmass==0` dead branch per §4/§11.\n8. Optics layer per vision §5: CVA, PupilDia, OpticFactor (note its ObjectName parameter — \"moon\" special-casing; pass a `is_moon: bool` or the name, your call, but keep the math identical).\n9. C harness `tests/c-gen/gen_heliacal_internals.c`: reaches swehel.c's static functions by `#include \"swehel.c\"` (compile from tests/c-gen/: `cc -Wall -I../../swisseph -o gen_heliacal_internals gen_heliacal_internals.c ../../swisseph/libswe.a -lm` — same flags as gen_sweph_eval.c). Linker note: libswe.a's swehel.o is only pulled in if an undefined swehel symbol remains; this TU defines them all, so no duplicate-symbol clash is expected — if one appears anyway, link the individual non-swehel .o files instead of the archive. Print JSON with `%.17g`. Batteries (JSON keys):\n   - `\"extinction\"`: Deltam + kt + kR + kOZ + kW + ka over a rotated (not full-cross) grid: AltO ∈ {-1,0,5,20,45,90} × AltS ∈ {-30,-10,0,10} × sunra ∈ {50,200} × Lat ∈ {30.1,47.4} × HeightEye ∈ {0,1500} × datm ∈ {[1013.25,15,40,40],[900,25,70,20]} — ~60 cases, each recording all six function outputs for the same inputs.\n   - `\"airmass\"`: Airmass + Xext + Xlay over AppAltO ∈ {0,1,5,10,30,60,90} × Press ∈ {1013.25, 900}.\n   - `\"app_alt\"`: AppAltfromTopoAlt + TopoAltfromAppAlt over alt ∈ {-2,0,1,5,20,60} × TempE ∈ {0,15,30} × PresE ∈ {1013.25,900} (also exercises the low-altitude branch).\n   - `\"optic\"`: CVA + PupilDia + OpticFactor over B ∈ {1e-5,1.0,100.0,1645.0,1e5} × dobs ∈ {default [36,1,0,0,0,0], age-60, binocular flag set, [36,1,1,10,50,0.8] with OPTICAL_PARAMS helflag}.\n10. `tests/golden/heliacal_internals.rs`: typed Deserialize structs + `load()` helper per docs/golden-testing.md; assert with `assert_f64_exact` where it holds, else `assert_f64_eps` at 1e-12 (libm pow/exp differences can break bitwise across compilers — follow tests/golden/azalt.rs's exact-or-eps fallback pattern).\n11. Append a heliacal entry to docs/codebase-map.md (module layout section).\n\n### Design decisions (made — do not revisit)\n- Input conventions: `dgeo: [f64; 3]`, `datm: [f64; 4]`, `dobs: [f64; 6]` — keep C array layouts (same convention as geopos in riseset/eclipse; golden parity trivial). Document slot meanings in doc comments from vision §1.\n- All heliacal code lives in src/heliacal.rs as free functions; ephemeris access (later tasks) goes through `&Ephemeris` — never a backend (the constraints you just activated enforce this).\n\n### C reference\ndocs/c-ref-heliacal-vision.md §1–§5, §11 (porting notes). Sibling docs c-ref-heliacal-pheno.md / c-ref-heliacal-search.md are for later sub-tasks.\n\n### Golden tests\n- C harness: gen_heliacal_internals.c as step 9; run `./gen_heliacal_internals > ../golden-data/heliacal_internals.json` from tests/c-gen/.\n- Rust: `cargo test --test golden heliacal_internals -- --nocapture`.\n\n### Acceptance criteria\n- The 3 heliacal constraints are active (uncommented, corrected globs) in .sutra/rules.toml.\n- `cargo test --test golden heliacal_internals -- --nocapture` passes.\n- `cargo test` (full suite) still green; `cargo clippy --all-targets` introduces no new warnings.\n\n### Escape hatch\nIf golden tests fail with errors > 1e-8 after two debugging attempts, STOP and report: which cases fail, actual vs expected values, what you tried. Do not spend more than two attempts on numerical mismatches. Escalate to Opus.",
+  "category": "enhancement",
+  "status": "done",
+  "slice_type": "AFK",
+  "acceptance_criteria": [],
+  "decisions": [],
+  "implementation_plan": null,
+  "execution_record": "All 11 implementation steps completed. Step 1 (rules.toml constraint activation) was already done before this session — the heliacal constraints were uncommented with corrected directory globs and an ACTIVATED comment. Steps 2-8 (constants, HeliacalEventType enum, object_to_body, default_heliacal_parameters, meteorological helpers, extinction layer, optics layer) implemented in src/heliacal.rs as pure functions with no Ephemeris dependency. Step 9 (C harness) uses #include swehel.c to access static functions — compiled from tests/c-gen/ with the relative path ../../../swisseph/swehel.c. Step 10 (Rust golden tests) — 4 test functions covering 118 cases total, all passing at 1e-12 tolerance (exact-or-eps fallback pattern from azalt.rs). Step 11 (codebase-map) updated with both the module entry and the golden test entry. No escape hatch needed — all golden tests passed on first attempt.",
+  "reproduction": null,
+  "root_cause": null,
+  "context_refs": [
+    {
+      "type": "git:commit",
+      "value": "96af08f"
+    }
+  ],
+  "files": [],
+  "tags": [
+    "wave-4",
+    "heliacal"
+  ],
+  "history": [
+    {
+      "ts": 1783034488667,
+      "kind": "task_created",
+      "payload": {
+        "project": "swisseph-rs",
+        "sequence_number": 104
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783084913448,
+      "kind": "status_changed",
+      "payload": {
+        "from": "ready-for-agent",
+        "to": "in-progress"
+      },
+      "actor": "agent"
+    },
+    {
+      "ts": 1783085604032,
+      "kind": "status_changed",
+      "payload": {
+        "from": "in-progress",
+        "to": "done"
+      },
+      "actor": "agent"
+    }
+  ],
+  "messages": [
+    {
+      "author": "codex",
+      "text": "Codex review: needs-attention → fixed. Two findings: (1) [high] object_to_body used str::parse which rejects C-valid leading-numeric names like \"433 Eros\" — fixed to parse leading digits matching C atoi semantics, added tests. (2) [medium] staged constants (BNIGHT, NL2ERG, etc.) produced dead_code warnings — suppressed with #[allow(dead_code)] and phase comment. Both fixed in d2a3964.",
+      "ts": 1783086013355
+    }
+  ],
+  "created_at": 1783034488667,
+  "updated_at": 1783085604032,
+  "completed_at": 1783085604032,
+  "arc_id": "019efa3c-5420-7750-9de1-93c44d1a9bdf",
+  "arc_phase": "implement",
+  "edges": [
+    {
+      "id": "019f2526-c108-73e0-bce3-471da4f963d3",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/105",
+      "target": "swisseph-rs/104",
+      "note": null,
+      "created_at": 1783034724616
+    },
+    {
+      "id": "019f2526-c63e-7321-b341-512b406f7239",
+      "edge_type": "depends_on",
+      "source": "swisseph-rs/106",
+      "target": "swisseph-rs/104",
+      "note": null,
+      "created_at": 1783034725950
+    },
+    {
+      "id": "019f2527-1185-7ea2-a4f0-56b9478ce194",
+      "edge_type": "refines",
+      "source": "swisseph-rs/104",
+      "target": "swisseph-rs/14",
+      "note": null,
+      "created_at": 1783034745221
+    }
+  ]
+}
