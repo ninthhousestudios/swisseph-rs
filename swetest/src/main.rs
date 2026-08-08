@@ -1,4 +1,5 @@
 mod args;
+mod astpos;
 mod compute;
 mod format;
 mod special;
@@ -37,6 +38,7 @@ Command-line flags:
     -xv[n]        planetary moon number n
     -xz[n]        fictitious body number n
     -x[name]      fixed star name (same as -xf)
+    -astpos[DDD[,orb]]  list named asteroids within orb (default 0.5°) of longitude DDD
 
   Planet letters:
     0=Sun  1=Moon  2=Mercury  3=Venus  4=Mars  5=Jupiter
@@ -160,7 +162,9 @@ fn main() {
 
     match Ephemeris::new(config) {
         Ok(eph) => {
-            if parsed.special_event.is_some() || parsed.orbital_elements {
+            if parsed.astpos.is_some() {
+                astpos::run(&parsed, &eph);
+            } else if parsed.special_event.is_some() || parsed.orbital_elements {
                 special::run(&parsed, &eph);
             } else {
                 compute::run(&parsed, &eph);

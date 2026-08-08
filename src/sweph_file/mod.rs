@@ -141,6 +141,17 @@ fn asteroid_file_candidates(dir: &Path, mpc: i32) -> [std::path::PathBuf; 4] {
     ]
 }
 
+/// True if any candidate `.se1` file for numbered asteroid `mpc` exists under `dir`.
+///
+/// Lets a bulk caller (e.g. swetest's `-astpos`, which iterates every named
+/// asteroid) pre-filter to only the numbers it can actually load, so eagerly
+/// constructing the `Ephemeris` doesn't fail on the first absent file.
+pub fn asteroid_file_exists(dir: &Path, mpc: i32) -> bool {
+    asteroid_file_candidates(dir, mpc)
+        .iter()
+        .any(|p| p.exists())
+}
+
 /// Open the `.se1` file for numbered asteroid `mpc`, trying the standard and
 /// short-name candidate paths under `dir` in order.
 pub fn open_asteroid_file(dir: &Path, mpc: i32) -> Result<SwissEphFile, Error> {

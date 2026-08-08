@@ -102,6 +102,11 @@ pub struct SweTestArgs {
     pub planet_moon: Option<String>,
     pub fictitious: Option<String>,
 
+    /// `-astposDDD[,orb]`: list named asteroids within `astpos_orb` degrees of
+    /// ecliptic longitude `DDD`. `None` unless the option is given.
+    pub astpos: Option<f64>,
+    pub astpos_orb: f64,
+
     // Stepping
     pub step_count: i32,
     pub has_n: bool,
@@ -219,6 +224,8 @@ impl Default for SweTestArgs {
             star_name: None,
             planet_moon: None,
             fictitious: None,
+            astpos: None,
+            astpos_orb: 0.5,
 
             step_count: 1,
             has_n: false,
@@ -671,6 +678,21 @@ pub fn parse_args(args: &[String]) -> Result<SweTestArgs, String> {
         } else if let Some(rest) = arg.strip_prefix("-opt") {
             let rest = rest.strip_prefix('[').unwrap_or(rest);
             parse_comma_f64s(rest, &mut a.observer_params);
+        } else if let Some(rest) = arg.strip_prefix("-astpos") {
+            // -astposDDD[,orb]: DDD is an ecliptic longitude in [0,360), orb a
+            // match radius in [0,1] degrees (default 0.5). Mirrors swetest.c's
+            // sscanf(sp, "%lf,%lf", ...) + range gates exactly.
+            let mut parts = rest.splitn(2, ',');
+            if let Some(x1) = parts.next().and_then(|s| s.parse::<f64>().ok())
+                && (0.0..360.0).contains(&x1)
+            {
+                a.astpos = Some(x1);
+            }
+            if let Some(x2) = parts.next().and_then(|s| s.parse::<f64>().ok())
+                && (0.0..=1.0).contains(&x2)
+            {
+                a.astpos_orb = x2;
+            }
         } else if arg == "-orbel" {
             a.orbital_elements = true;
         } else if arg == "-bwd" {
@@ -922,6 +944,28 @@ impl SweTestArgs {
             config.ephe_path = Some(PathBuf::from("."));
         }
 
+        // Numbered asteroids are loaded eagerly (stateless design), so their
+        // catalog numbers must be declared before construction. `-xs` names one;
+        // `-astpos` needs every named asteroid whose .se1 file is actually
+        // present (an absent file would abort construction, so filter first).
+        if let Some(ref dir) = config.ephe_path {
+            let mut nums: Vec<i32> = Vec::new();
+            if let Some(n) = self.asteroid_number.as_ref().and_then(|s| s.parse().ok()) {
+                nums.push(n);
+            }
+            if self.astpos.is_some()
+                && let Some(dir_str) = dir.to_str()
+                && let Ok(named) = crate::astpos::get_named_ast_list(dir_str)
+            {
+                nums.extend(
+                    named
+                        .into_iter()
+                        .filter(|&n| swisseph::sweph_file::asteroid_file_exists(dir, n)),
+                );
+            }
+            config.asteroid_numbers = nums;
+        }
+
         if self.ephemeris == EphemerisChoice::Jpl {
             config.jpl_filename = Some(self.jpl_file.clone());
         }
@@ -964,5 +1008,39 @@ impl SweTestArgs {
 
     pub fn body_specs(&self) -> Vec<BodySpec> {
         self.planet_selection.chars().map(letter_to_body).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args;
+
+    fn argv(rest: &[&str]) -> Vec<String> {
+        std::iter::once("swetest")
+            .chain(rest.iter().copied())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn astpos_parses_longitude_and_orb() {
+        let a = parse_args(&argv(&["-astpos346.194,0.1"])).unwrap();
+        assert_eq!(a.astpos, Some(346.194));
+        assert!((a.astpos_orb - 0.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn astpos_orb_defaults_to_half_degree() {
+        let a = parse_args(&argv(&["-astpos181"])).unwrap();
+        assert_eq!(a.astpos, Some(181.0));
+        assert_eq!(a.astpos_orb, 0.5);
+    }
+
+    #[test]
+    fn astpos_rejects_out_of_range_values() {
+        // longitude >= 360 is ignored (astpos stays None); orb > 1 falls back to default.
+        let a = parse_args(&argv(&["-astpos400,5"])).unwrap();
+        assert_eq!(a.astpos, None);
+        assert_eq!(a.astpos_orb, 0.5);
     }
 }
